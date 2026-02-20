@@ -43,6 +43,17 @@ pub fn enforce_policy(
     }
 
     for node in &plan.executable_nodes {
+        if node.kernel == CudaKernel::Reduction
+            && (node.nodes.len() != 1 || !policy.fixed_reduction_topology)
+        {
+            return Err(CudaDeterminismError {
+                message: format!(
+                    "strict mode requires fixed reduction topology for gradient accumulation (group size must be 1, got {})",
+                    node.nodes.len()
+                ),
+            });
+        }
+
         if node.kernel == CudaKernel::Softmax
             && (node.nodes.len() != 1 || !policy.fixed_reduction_topology)
         {
@@ -80,7 +91,21 @@ pub fn enforce_policy(
         }
     }
 
+    if !workspace_layout_is_dense(plan) {
+        return Err(CudaDeterminismError {
+            message: "strict mode requires deterministic dense workspace buffer indexing"
+                .to_string(),
+        });
+    }
+
     Ok(())
+}
+
+fn workspace_layout_is_dense(plan: &LoweredCudaPlan) -> bool {
+    plan.workspace_buffers
+        .iter()
+        .enumerate()
+        .all(|(expected, buffer)| buffer.id == expected)
 }
 
 fn kernel_uses_atomics(_kernel: CudaKernel) -> bool {
@@ -110,6 +135,7 @@ mod tests {
                 nodes: vec![NodeId(1), NodeId(2)],
             }],
             memory_bindings: Vec::new(),
+            workspace_buffers: Vec::new(),
         };
 
         let err = enforce_policy(&plan, policy_for(DeterminismLevel::Strict))
@@ -139,6 +165,7 @@ mod tests {
                 },
             ],
             memory_bindings: Vec::new(),
+            workspace_buffers: Vec::new(),
         };
 
         enforce_policy(&plan, policy_for(DeterminismLevel::Strict))

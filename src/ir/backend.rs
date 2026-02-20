@@ -99,6 +99,7 @@ impl Backend for CudaBackend {
         plan.allocation.peak_bytes.hash(&mut hasher);
         lowered.executable_nodes.hash(&mut hasher);
         lowered.memory_bindings.hash(&mut hasher);
+        lowered.workspace_buffers.hash(&mut hasher);
 
         Ok(CompiledProgram {
             schedule_len: plan.schedule.ordered_nodes.len(),
