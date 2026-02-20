@@ -1,6 +1,7 @@
 use crate::ir::{
     Backend, CompilerFlags, DeterminismLevel, ExecutionContext, ExecutionPlan, Graph, NodeId,
-    RuntimeValue, ValueId, execute_value_with_schedule_context, execute_with_schedule_context,
+    RuntimeValue, ValueId, compile_or_get_cached, execute_value_with_schedule_context,
+    execute_with_schedule_context,
 };
 
 #[derive(Debug, Clone)]
@@ -56,8 +57,7 @@ fn compile_plan_for_backend(
         });
     }
 
-    backend
-        .compile(plan)
+    compile_or_get_cached(plan, backend, flags.determinism)
         .map(|_| ())
         .map_err(|err| RuntimeGatewayError {
             message: format!("Backend compile failed: {}", err.message),
