@@ -1,6 +1,10 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 
-use crate::ir::{OptimizerConfig, Tensor, TrainConfig, TrainSample, train_graph};
+use crate::ir::{
+    ExecutionContext, Graph, NodeId, OptimizerConfig, RuntimeValue, Tensor, TrainConfig,
+    TrainSample, ValueId, build_execution_plan, execute_value_with_schedule_context, train_graph,
+};
 
 use crate::model::{
     BatchIterator, CompiledModel, Dataset, Example, load_checkpoint, save_checkpoint,
@@ -32,6 +36,97 @@ pub struct TrainApiResult {
 #[derive(Debug, Clone)]
 pub struct TrainApiError {
     pub message: String,
+}
+
+pub fn infer(
+    model: &CompiledModel,
+    parameters: &HashMap<String, Tensor>,
+    inputs: &HashMap<String, Tensor>,
+) -> Result<Tensor, TrainApiError> {
+    let plan =
+        build_execution_plan(&model.graph, &HashSet::new()).map_err(|err| TrainApiError {
+            message: format!("Infer plan build failed: {}", err.message),
+        })?;
+
+    let mut context = ExecutionContext::default();
+    for (name, tensor) in inputs {
+        context.inputs.insert(
+            name.clone(),
+            RuntimeValue::Tensor {
+                shape: tensor.shape.clone(),
+                data: tensor.data.clone(),
+            },
+        );
+    }
+    for (name, tensor) in parameters {
+        context.parameters.insert(
+            name.clone(),
+            RuntimeValue::Tensor {
+                shape: tensor.shape.clone(),
+                data: tensor.data.clone(),
+            },
+        );
+    }
+
+    let ordered_nodes =
+        dependency_ordered_nodes(&model.graph, model.output, &plan.schedule.ordered_nodes)?;
+
+    let runtime =
+        execute_value_with_schedule_context(&model.graph, model.output, &ordered_nodes, &context)
+            .map_err(|err| TrainApiError {
+            message: format!("Infer execution failed: {}", err.message),
+        })?;
+
+    match runtime {
+        RuntimeValue::Tensor { shape, data } => {
+            Tensor::new(shape, data).map_err(|err| TrainApiError {
+                message: format!("Infer output is invalid tensor: {}", err.message),
+            })
+        }
+        RuntimeValue::Float(_) | RuntimeValue::Int(_) => Err(TrainApiError {
+            message: "Infer output must be a tensor".to_string(),
+        }),
+    }
+}
+
+fn dependency_ordered_nodes(
+    graph: &Graph,
+    target: ValueId,
+    ordered_nodes: &[NodeId],
+) -> Result<Vec<NodeId>, TrainApiError> {
+    if target.0 >= graph.nodes.len() {
+        return Err(TrainApiError {
+            message: format!("Infer target value out of range: {}", target.0),
+        });
+    }
+
+    let mut required_values = HashSet::<ValueId>::new();
+    let mut stack = vec![target];
+
+    while let Some(value) = stack.pop() {
+        if !required_values.insert(value) {
+            continue;
+        }
+
+        let node = graph.nodes.get(value.0).ok_or_else(|| TrainApiError {
+            message: format!("Infer dependency value out of range: {}", value.0),
+        })?;
+        for input in node.op.input_values() {
+            stack.push(input);
+        }
+    }
+
+    let mut filtered = Vec::new();
+    for node_id in ordered_nodes {
+        let node = graph.nodes.get(node_id.0).ok_or_else(|| TrainApiError {
+            message: format!("Infer schedule node out of range: {}", node_id.0),
+        })?;
+        if required_values.contains(&node.output) {
+            filtered.push(*node_id);
+        }
+    }
+
+    Ok(filtered)
 }
 
 pub fn train<D: Dataset>(
@@ -101,7 +196,8 @@ mod tests {
 
     use crate::ir::{OptimizerConfig, Tensor};
     use crate::model::{
-        CompiledModel, Dataset, Example, ReproducibilityMode, TensorShape, TrainApiConfig, train,
+        CompiledModel, Dataset, Example, ReproducibilityMode, TensorShape, TrainApiConfig,
+        build_tiny_transformer_fixture_for_tests, infer, train,
     };
 
     struct TinyDataset {
@@ -144,6 +240,42 @@ mod tests {
         let a = train(&model, &dataset, &config).expect("train should pass");
         let b = train(&model, &dataset, &config).expect("train should pass");
         assert!((a.final_loss - b.final_loss).abs() < 1e-9);
+    }
+
+    #[test]
+    fn infer_returns_output_tensor_with_expected_shape() {
+        let (model, _dataset, _cfg, infer_input) = build_tiny_transformer_fixture_for_tests();
+        let out = infer(&model, &model.parameters, &infer_input).expect("infer should pass");
+        assert_eq!(out.shape, model.output_shape.0);
+    }
+
+    #[test]
+    fn infer_is_repeatable_for_same_inputs_and_parameters() {
+        let (model, _dataset, _cfg, infer_input) = build_tiny_transformer_fixture_for_tests();
+
+        let first =
+            infer(&model, &model.parameters, &infer_input).expect("first infer should pass");
+        let second =
+            infer(&model, &model.parameters, &infer_input).expect("second infer should pass");
+
+        assert_eq!(
+            first, second,
+            "infer must be deterministic for fixed inputs"
+        );
+    }
+
+    #[test]
+    fn infer_does_not_mutate_trained_parameters_or_loss_result() {
+        let (model, dataset, cfg, infer_input) = build_tiny_transformer_fixture_for_tests();
+        let trained = train(&model, &dataset, &cfg).expect("train should pass");
+
+        let params_before = trained.final_parameters.clone();
+        let loss_before = trained.final_loss;
+
+        let _ = infer(&model, &trained.final_parameters, &infer_input).expect("infer should pass");
+
+        assert_eq!(trained.final_parameters, params_before);
+        assert_eq!(trained.final_loss, loss_before);
     }
 
     fn fixture() -> (CompiledModel, TinyDataset) {
