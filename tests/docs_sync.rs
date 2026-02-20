@@ -29,6 +29,10 @@ fn readme_mentions_quality_fortress_wave1() {
         text.contains("scripts/ci/cuda_infer_verify.sh"),
         "README must include CUDA inference verify script"
     );
+    assert!(
+        text.contains("scripts/ci/cuda_train_verify.sh"),
+        "README must include CUDA training verify script"
+    );
 }
 
 #[test]
