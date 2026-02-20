@@ -9,6 +9,7 @@ Project status:
 - stable core contract for `v0.1.0-core`
 - governance hardening in progress under **Quality Fortress**
 - Wave 1 focuses on enforceable quality policy, not feature expansion
+- CUDA inference MVP is in progress under milestone `v0.3`
 
 This repository focuses on compiler discipline first:
 
@@ -249,6 +250,23 @@ This tiny-transformer CPU milestone verify script enforces:
 - acceptance parity gate
 - deterministic replay gate
 - memory planner guard
+
+### CUDA inference MVP checks
+
+```bash
+bash scripts/ci/cuda_infer_verify.sh
+```
+
+This CUDA inference MVP verify script enforces:
+
+- backend scaffold and dispatch gates
+- strict determinism gate
+- CPU/CUDA parity gate
+- CUDA memory regression guard
+
+CUDA strict determinism governance policy:
+
+- `docs/governance/cuda-determinism-policy.md`
 
 Release/nightly workflows are defined in:
 
