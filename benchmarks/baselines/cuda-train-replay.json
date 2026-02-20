@@ -1,0 +1,12 @@
+{
+  "backend_signature": "Cpu-Cuda-runtime-gateway-v1",
+  "determinism_level": "strict",
+  "optimizer": "sgd",
+  "dataset_fingerprint": "tiny-transformer-fixture-v1",
+  "final_loss_bits": 1022508329,
+  "final_parameters": {
+    "tiny.b_o": [0.36992884],
+    "tiny.b_q": [0.0, 0.04931441, 0.0, 0.0],
+    "tiny.w_o": [0.5227212, 0.1983412, 0.0, 0.0]
+  }
+}

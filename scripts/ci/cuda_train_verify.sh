@@ -10,6 +10,9 @@ cargo test --test cuda_train_e2e -- --nocapture
 echo "[cuda-train-verify] strict replay gate"
 cargo test --test cuda_train_replay -- --nocapture
 
+echo "[cuda-train-verify] training determinism artifact gate"
+cargo test --test cuda_train_artifacts -- --nocapture
+
 echo "[cuda-train-verify] optimizer parity gate"
 cargo test --test cuda_optimizer_parity -- --nocapture
 
