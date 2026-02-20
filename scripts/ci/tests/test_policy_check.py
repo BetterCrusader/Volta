@@ -28,6 +28,18 @@ class PolicyCheckTests(unittest.TestCase):
         )
         self.assertTrue(result.ok)
 
+    def test_accepts_changed_rfc_document_for_policy_change(self):
+        result = validate(
+            changed_paths=[
+                "docs/governance/contracts-tier-a.md",
+                "docs/governance/rfcs/RFC-2026-001-wave1-foundation.md",
+            ],
+            pr_body="",
+            branch_name="task/quality-wave1",
+            labels=[],
+        )
+        self.assertTrue(result.ok)
+
     def test_requires_rfc_reference_for_tier_a_source_changes(self):
         result = validate(
             changed_paths=["./src/ir/verifier.rs"],

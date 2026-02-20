@@ -18,6 +18,8 @@ RFC_REQUIRED_PATH_PREFIXES = (
     "docs/governance/operational-policy.md",
 )
 
+RFC_DOCUMENT_PREFIX = "docs/governance/rfcs/rfc-"
+
 HARDENING_LABEL = "hardening-approved"
 
 
@@ -43,6 +45,10 @@ def _has_rfc_reference(pr_body: str) -> bool:
     return "RFC-" in body or "Closes RFC:" in body
 
 
+def _has_rfc_document(changed_paths: Sequence[str]) -> bool:
+    return any(path.lower().startswith(RFC_DOCUMENT_PREFIX) for path in changed_paths)
+
+
 def _requires_rfc_for_paths(paths: Sequence[str]) -> bool:
     return any(
         any(path.startswith(prefix) for prefix in RFC_REQUIRED_PATH_PREFIXES)
@@ -59,7 +65,9 @@ def validate(
     normalized_paths = _normalize(changed_paths)
     issues: List[str] = []
 
-    if _requires_rfc_for_paths(normalized_paths) and not _has_rfc_reference(pr_body):
+    if _requires_rfc_for_paths(normalized_paths) and not (
+        _has_rfc_reference(pr_body) or _has_rfc_document(normalized_paths)
+    ):
         issues.append("RFC reference required for governance/Tier A policy changes")
 
     normalized_labels = {label.strip() for label in (labels or [])}
