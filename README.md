@@ -6,9 +6,9 @@ Volta is an experimental compiler-first ML system focused on determinism and IR 
 
 Project status:
 
-- research project
-- not production ready
-- stable core contract for v0.1.0-core
+- stable core contract for `v0.1.0-core`
+- governance hardening in progress under **Quality Fortress**
+- Wave 1 focuses on enforceable quality policy, not feature expansion
 
 This repository focuses on compiler discipline first:
 
@@ -219,6 +219,16 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 cargo test --release
 ```
+
+### Quality Fortress Wave 1 checks
+
+```bash
+bash scripts/ci/wave1_local_verify.sh
+python -m unittest scripts.ci.tests.test_detect_tiers -v
+python -m unittest scripts.ci.tests.test_policy_check -v
+```
+
+Governance docs live under `docs/governance/` and are test-verified.
 
 Run demo binary:
 
