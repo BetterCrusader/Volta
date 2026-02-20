@@ -2,6 +2,7 @@ pub mod algebraic_simplification;
 pub mod allocation;
 pub mod autograd;
 pub mod backend;
+pub mod backend_capabilities;
 pub mod block;
 pub mod compiler_flags;
 pub mod constant_folding;
@@ -39,6 +40,7 @@ pub use allocation::{
 };
 pub use autograd::{AutogradError, GradientGraph, build_reverse_graph};
 pub use backend::{Backend, BackendError, CompiledProgram, CpuBackend, CudaBackend, LlvmBackend};
+pub use backend_capabilities::{BackendCapabilities, BackendKind, DeterminismLevel};
 pub use block::{BasicBlock, BasicBlockId};
 pub use compiler_flags::CompilerFlags;
 pub use constant_folding::ConstantFoldingPass;
