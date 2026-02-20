@@ -2,7 +2,8 @@ use std::collections::HashSet;
 
 use crate::ir::{
     AllocationPlan, Graph, KernelGroup, Schedule, StorageClass, ValueId, build_schedule,
-    group_kernels, plan_allocation, verify_allocation, verify_graph, verify_schedule,
+    group_kernels, optimize_schedule, plan_allocation, verify_allocation, verify_graph,
+    verify_schedule,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -41,9 +42,17 @@ pub fn build_execution_plan(
         message: err.message,
     })?;
 
-    let schedule = build_schedule(graph).map_err(|err| ExecutionPlanError {
+    let base_schedule = build_schedule(graph).map_err(|err| ExecutionPlanError {
         message: err.message,
     })?;
+    verify_schedule(graph, &base_schedule).map_err(|err| ExecutionPlanError {
+        message: err.message,
+    })?;
+
+    let optimized = optimize_schedule(graph, &base_schedule).map_err(|err| ExecutionPlanError {
+        message: err.message,
+    })?;
+    let schedule = optimized.schedule;
     verify_schedule(graph, &schedule).map_err(|err| ExecutionPlanError {
         message: err.message,
     })?;

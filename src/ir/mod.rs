@@ -30,6 +30,7 @@ pub mod plan_cache;
 pub mod printer;
 pub mod regression_harness;
 pub mod runtime;
+pub mod schedule_optimization;
 pub mod scheduler;
 pub mod shape_inference;
 pub mod static_memory_budget;
@@ -77,6 +78,9 @@ pub use pass_utils::run_with_verifier_guard;
 pub use plan_cache::{clear_plan_cache, compile_or_get_cached};
 pub use printer::print_graph;
 pub use runtime::{RuntimeGatewayError, execute_terminal_with_backend, execute_value_with_backend};
+pub use schedule_optimization::{
+    ScheduleOptimizationError, ScheduleOptimizationResult, optimize_schedule,
+};
 pub use scheduler::{Schedule, ScheduleError, build_schedule, schedule_hash, verify_schedule};
 pub use shape_inference::{ShapeError, ShapeFact, infer_shapes};
 pub use static_memory_budget::{

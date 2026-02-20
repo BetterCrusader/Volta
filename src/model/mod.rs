@@ -1,6 +1,7 @@
 mod builder;
 mod checkpoint;
 mod dataset;
+mod export;
 mod gradient_checkpointing;
 mod layers;
 mod losses;
@@ -14,6 +15,7 @@ mod train_api;
 pub use builder::{CompiledModel, ModelBuildError, ModelBuilder};
 pub use checkpoint::{load_checkpoint, save_checkpoint};
 pub use dataset::{BatchIterator, Dataset, Example};
+pub use export::{ModelExportError, export_compiled_model_manifest};
 pub use gradient_checkpointing::{
     GradientCheckpointPlan, GradientCheckpointingConfig, GradientCheckpointingError,
     RecomputeSegment, plan_gradient_checkpointing,
