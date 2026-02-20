@@ -49,7 +49,9 @@ pub use cse::CsePass;
 pub use dce::DcePass;
 pub use dead_tensor_elimination::DeadTensorEliminationPass;
 pub use elementwise_fusion::ElementwiseFusionPass;
-pub use execution_plan::{ExecutionPlan, ExecutionPlanError, build_execution_plan};
+pub use execution_plan::{
+    ExecutionPlan, ExecutionPlanError, PlacementClass, PlacementHint, build_execution_plan,
+};
 pub use fingerprint::graph_fingerprint;
 pub use gradient_fusion::GradientFusionPass;
 pub use graph::{Graph, GraphError, ShapeSignature};
