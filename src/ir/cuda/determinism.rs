@@ -109,6 +109,7 @@ mod tests {
                 kernel: CudaKernel::Softmax,
                 nodes: vec![NodeId(1), NodeId(2)],
             }],
+            memory_bindings: Vec::new(),
         };
 
         let err = enforce_policy(&plan, policy_for(DeterminismLevel::Strict))
@@ -137,6 +138,7 @@ mod tests {
                     nodes: vec![NodeId(4)],
                 },
             ],
+            memory_bindings: Vec::new(),
         };
 
         enforce_policy(&plan, policy_for(DeterminismLevel::Strict))
