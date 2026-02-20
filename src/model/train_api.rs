@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use crate::ir::{
-    ExecutionContext, Graph, NodeId, OptimizerConfig, RuntimeValue, Tensor, TrainConfig,
-    TrainSample, ValueId, build_execution_plan, execute_value_with_schedule_context, train_graph,
+    Backend, CpuBackend, ExecutionContext, Graph, NodeId, OptimizerConfig, RuntimeValue, Tensor,
+    TrainConfig, TrainSample, ValueId, build_execution_plan, execute_value_with_backend,
+    train_graph_with_backend,
 };
 
 use crate::model::{
@@ -43,6 +44,16 @@ pub fn infer(
     parameters: &HashMap<String, Tensor>,
     inputs: &HashMap<String, Tensor>,
 ) -> Result<Tensor, TrainApiError> {
+    let backend = CpuBackend;
+    infer_with_backend(model, parameters, inputs, &backend)
+}
+
+pub fn infer_with_backend(
+    model: &CompiledModel,
+    parameters: &HashMap<String, Tensor>,
+    inputs: &HashMap<String, Tensor>,
+    backend: &dyn Backend,
+) -> Result<Tensor, TrainApiError> {
     let plan =
         build_execution_plan(&model.graph, &HashSet::new()).map_err(|err| TrainApiError {
             message: format!("Infer plan build failed: {}", err.message),
@@ -71,11 +82,17 @@ pub fn infer(
     let ordered_nodes =
         dependency_ordered_nodes(&model.graph, model.output, &plan.schedule.ordered_nodes)?;
 
-    let runtime =
-        execute_value_with_schedule_context(&model.graph, model.output, &ordered_nodes, &context)
-            .map_err(|err| TrainApiError {
-            message: format!("Infer execution failed: {}", err.message),
-        })?;
+    let runtime = execute_value_with_backend(
+        &model.graph,
+        &plan,
+        model.output,
+        &ordered_nodes,
+        backend,
+        &context,
+    )
+    .map_err(|err| TrainApiError {
+        message: format!("Infer execution failed: {}", err.message),
+    })?;
 
     match runtime {
         RuntimeValue::Tensor { shape, data } => {
@@ -134,6 +151,16 @@ pub fn train<D: Dataset>(
     dataset: &D,
     config: &TrainApiConfig,
 ) -> Result<TrainApiResult, TrainApiError> {
+    let backend = CpuBackend;
+    train_with_backend(model, dataset, config, &backend)
+}
+
+pub fn train_with_backend<D: Dataset>(
+    model: &CompiledModel,
+    dataset: &D,
+    config: &TrainApiConfig,
+    backend: &dyn Backend,
+) -> Result<TrainApiResult, TrainApiError> {
     let mut parameters = model.parameters.clone();
     if let Some(path) = &config.checkpoint_path {
         let loaded = load_checkpoint(path)?;
@@ -166,7 +193,7 @@ pub fn train<D: Dataset>(
         });
     };
 
-    let result = train_graph(
+    let result = train_graph_with_backend(
         &model.graph,
         loss,
         parameters,
@@ -175,6 +202,7 @@ pub fn train<D: Dataset>(
             epochs: config.epochs,
             optimizer: config.optimizer.clone(),
         },
+        backend,
     )
     .map_err(|err| TrainApiError {
         message: format!("Train pipeline failed: {}", err.message),

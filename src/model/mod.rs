@@ -21,5 +21,6 @@ pub use tiny_transformer::{
     TinyTransformerFixtureDataset, build_tiny_transformer_fixture_for_tests,
 };
 pub use train_api::{
-    ReproducibilityMode, TrainApiConfig, TrainApiError, TrainApiResult, infer, train,
+    ReproducibilityMode, TrainApiConfig, TrainApiError, TrainApiResult, infer, infer_with_backend,
+    train, train_with_backend,
 };

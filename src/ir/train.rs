@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
 use crate::ir::autograd::build_reverse_graph;
-use crate::ir::interpreter::{
-    ExecutionContext, RuntimeValue, execute_value_with_schedule_context,
-    execute_with_schedule_context,
-};
+use crate::ir::interpreter::{ExecutionContext, RuntimeValue};
 use crate::ir::optimizer::{OptimizerConfig, OptimizerState, apply_gradients};
 use crate::ir::tensor::Tensor;
-use crate::ir::{Graph, Op, ValueId, build_execution_plan, verify_graph};
+use crate::ir::{
+    Backend, CpuBackend, Graph, Op, ValueId, build_execution_plan, execute_terminal_with_backend,
+    execute_value_with_backend, verify_graph,
+};
 
 #[derive(Debug, Clone)]
 pub struct TrainSample {
@@ -37,6 +37,25 @@ pub fn train_graph(
     initial_parameters: HashMap<String, Tensor>,
     dataset: &[TrainSample],
     config: &TrainConfig,
+) -> Result<TrainResult, TrainError> {
+    let backend = CpuBackend;
+    train_graph_with_backend(
+        forward_graph,
+        loss_value,
+        initial_parameters,
+        dataset,
+        config,
+        &backend,
+    )
+}
+
+pub fn train_graph_with_backend(
+    forward_graph: &Graph,
+    loss_value: ValueId,
+    initial_parameters: HashMap<String, Tensor>,
+    dataset: &[TrainSample],
+    config: &TrainConfig,
+    backend: &dyn Backend,
 ) -> Result<TrainResult, TrainError> {
     verify_graph(forward_graph).map_err(|err| TrainError {
         message: format!("Forward graph failed verification: {}", err.message),
@@ -87,9 +106,11 @@ pub fn train_graph(
     for _ in 0..config.epochs {
         for sample in dataset {
             let mut context = build_context(sample, &parameter_tensors);
-            let loss_value_runtime = execute_with_schedule_context(
+            let loss_value_runtime = execute_terminal_with_backend(
                 forward_graph,
+                &forward_plan,
                 &forward_plan.schedule.ordered_nodes,
+                backend,
                 &context,
             )
             .map_err(|e| TrainError {
@@ -108,10 +129,12 @@ pub fn train_graph(
                 let Some(grad_value_id) = gradient_graph.gradients.get(value_id).copied() else {
                     continue;
                 };
-                let grad_runtime = execute_value_with_schedule_context(
+                let grad_runtime = execute_value_with_backend(
                     &gradient_graph.backward,
+                    &backward_plan,
                     grad_value_id,
                     &backward_plan.schedule.ordered_nodes,
+                    backend,
                     &context,
                 )
                 .map_err(|e| TrainError {
@@ -137,9 +160,11 @@ pub fn train_graph(
 
     let final_loss = if let Some(sample) = dataset.last() {
         let context = build_context(sample, &parameter_tensors);
-        let loss_runtime = execute_with_schedule_context(
+        let loss_runtime = execute_terminal_with_backend(
             forward_graph,
+            &forward_plan,
             &forward_plan.schedule.ordered_nodes,
+            backend,
             &context,
         )
         .map_err(|e| TrainError {

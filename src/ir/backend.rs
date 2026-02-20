@@ -92,7 +92,7 @@ impl Backend for CudaBackend {
 mod tests {
     use std::collections::HashSet;
 
-    use crate::ir::{build_execution_plan, Backend, CpuBackend, Graph, Op};
+    use crate::ir::{Backend, CpuBackend, Graph, Op, build_execution_plan};
 
     #[test]
     fn cpu_backend_compiles_execution_plan() {
