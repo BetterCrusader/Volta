@@ -1,4 +1,4 @@
-use crate::ir::cuda::kernels::{BackendExecutableNode, dispatch_group};
+use crate::ir::cuda::kernels::{BackendExecutableNode, CudaKernel, dispatch_group};
 use crate::ir::{ExecutionPlan, PlacementClass, ValueId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,10 +29,18 @@ pub struct CudaLoweringError {
 
 pub fn lower_plan(plan: &ExecutionPlan) -> Result<LoweredCudaPlan, CudaLoweringError> {
     let mut lowered = Vec::with_capacity(plan.kernel_groups.len());
+    let gradient_plan = plan
+        .placement_hints
+        .iter()
+        .any(|hint| hint.class == PlacementClass::Gradient);
 
     for group in &plan.kernel_groups {
-        let executable = dispatch_group(group.kind.clone(), &group.nodes)
+        let mut executable = dispatch_group(group.kind.clone(), &group.nodes)
             .map_err(|message| CudaLoweringError { message })?;
+
+        if gradient_plan && executable.kernel == CudaKernel::Add {
+            executable.kernel = CudaKernel::Reduction;
+        }
         lowered.push(executable);
     }
 

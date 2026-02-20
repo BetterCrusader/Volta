@@ -5,6 +5,7 @@ pub enum KernelKind {
     Add,
     Relu,
     Softmax,
+    Backward,
     Elementwise,
     MatMul,
     Conv2D,
@@ -57,12 +58,12 @@ fn classify_op(op: &Op) -> KernelKind {
         Op::Add(_, _) => KernelKind::Add,
         Op::Relu(_) => KernelKind::Relu,
         Op::Softmax(_) => KernelKind::Softmax,
+        Op::ReluBackward(_, _) => KernelKind::Backward,
         Op::Sub(_, _)
         | Op::Mul(_, _)
         | Op::Div(_, _)
         | Op::Neg(_)
-        | Op::ElementwiseChain { .. }
-        | Op::ReluBackward(_, _) => KernelKind::Elementwise,
+        | Op::ElementwiseChain { .. } => KernelKind::Elementwise,
         Op::MatMul(_, _) => KernelKind::MatMul,
         Op::Conv2D(_, _) => KernelKind::Conv2D,
         Op::ConstInt(_)
