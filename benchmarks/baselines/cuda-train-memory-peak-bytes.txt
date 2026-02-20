@@ -1,0 +1,10 @@
+backend_signature=Cpu-Cuda-runtime-gateway-v1
+determinism_level=strict
+device_capability_fingerprint=cuda-scaffold-sm00
+forward_placement_fingerprint=6218934331081424271
+backward_placement_fingerprint=14103896918604860347
+peak_device_bytes=160
+peak_host_transfer_bytes=160
+peak_temp_bytes=32
+workspace_total_bytes=144
+tolerance_ratio=0.10
