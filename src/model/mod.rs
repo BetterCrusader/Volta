@@ -16,4 +16,7 @@ pub use losses::{CrossEntropyLoss, MSELoss};
 pub use module_trait::Module;
 pub use parameter::Parameter;
 pub use tensor_shape::TensorShape;
-pub use train_api::{ReproducibilityMode, TrainApiConfig, TrainApiError, TrainApiResult, train};
+pub use train_api::{
+    build_tiny_transformer_fixture_for_tests, infer, train, ReproducibilityMode,
+    TinyTransformerFixtureDataset, TrainApiConfig, TrainApiError, TrainApiResult,
+};

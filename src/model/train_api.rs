@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use crate::ir::{OptimizerConfig, Tensor, TrainConfig, TrainSample, train_graph};
+use crate::ir::{train_graph, OptimizerConfig, Tensor, TrainConfig, TrainSample};
 
 use crate::model::{
-    BatchIterator, CompiledModel, Dataset, Example, load_checkpoint, save_checkpoint,
+    load_checkpoint, save_checkpoint, BatchIterator, CompiledModel, Dataset, Example,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +32,38 @@ pub struct TrainApiResult {
 #[derive(Debug, Clone)]
 pub struct TrainApiError {
     pub message: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct TinyTransformerFixtureDataset;
+
+impl Dataset for TinyTransformerFixtureDataset {
+    fn len(&self) -> usize {
+        0
+    }
+
+    fn example(&self, _index: usize) -> Result<Example, TrainApiError> {
+        Err(TrainApiError {
+            message: "tiny transformer fixture dataset is not implemented yet".to_string(),
+        })
+    }
+}
+
+pub fn build_tiny_transformer_fixture_for_tests() -> (
+    CompiledModel,
+    TinyTransformerFixtureDataset,
+    TrainApiConfig,
+    HashMap<String, Tensor>,
+) {
+    unimplemented!("tiny transformer fixture is introduced in Task 2");
+}
+
+pub fn infer(
+    _model: &CompiledModel,
+    _parameters: &HashMap<String, Tensor>,
+    _inputs: &HashMap<String, Tensor>,
+) -> Result<Tensor, TrainApiError> {
+    unimplemented!("inference API is introduced in Task 3");
 }
 
 pub fn train<D: Dataset>(
@@ -101,7 +133,7 @@ mod tests {
 
     use crate::ir::{OptimizerConfig, Tensor};
     use crate::model::{
-        CompiledModel, Dataset, Example, ReproducibilityMode, TensorShape, TrainApiConfig, train,
+        train, CompiledModel, Dataset, Example, ReproducibilityMode, TensorShape, TrainApiConfig,
     };
 
     struct TinyDataset {
