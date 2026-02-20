@@ -238,6 +238,12 @@ bash scripts/ci/release_perf_double_pass.sh
 bash scripts/ci/nightly_perf_matrix.sh
 ```
 
+### Tiny-transformer CPU milestone checks
+
+```bash
+bash scripts/ci/tiny_transformer_cpu_verify.sh
+```
+
 Release/nightly workflows are defined in:
 
 - `.github/workflows/release-gates.yml`
