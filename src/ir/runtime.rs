@@ -1,6 +1,6 @@
 use crate::ir::{
-    Backend, ExecutionContext, ExecutionPlan, Graph, NodeId, RuntimeValue, ValueId,
-    execute_value_with_schedule_context, execute_with_schedule_context,
+    Backend, CompilerFlags, DeterminismLevel, ExecutionContext, ExecutionPlan, Graph, NodeId,
+    RuntimeValue, ValueId, execute_value_with_schedule_context, execute_with_schedule_context,
 };
 
 #[derive(Debug, Clone)]
@@ -45,6 +45,17 @@ fn compile_plan_for_backend(
     plan: &ExecutionPlan,
     backend: &dyn Backend,
 ) -> Result<(), RuntimeGatewayError> {
+    let flags = CompilerFlags::from_env();
+    let caps = backend.capabilities();
+    if flags.determinism == DeterminismLevel::Strict && !caps.supports_strict_determinism {
+        return Err(RuntimeGatewayError {
+            message: format!(
+                "Backend {:?} does not support strict determinism",
+                caps.backend
+            ),
+        });
+    }
+
     backend
         .compile(plan)
         .map(|_| ())

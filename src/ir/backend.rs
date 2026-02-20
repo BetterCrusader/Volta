@@ -1,6 +1,6 @@
 use crate::ir::ExecutionPlan;
-use crate::ir::cuda::lower_plan;
-use crate::ir::{BackendCapabilities, BackendKind, DeterminismLevel};
+use crate::ir::cuda::{enforce_policy, lower_plan, policy_for};
+use crate::ir::{BackendCapabilities, BackendKind, CompilerFlags, DeterminismLevel};
 
 #[derive(Debug, Clone)]
 pub struct CompiledProgram {
@@ -77,13 +77,19 @@ impl Backend for CudaBackend {
             backend: BackendKind::Cuda,
             supports_inference: true,
             supports_training: false,
-            supports_strict_determinism: false,
+            supports_strict_determinism: true,
             default_determinism: DeterminismLevel::Balanced,
         }
     }
 
     fn compile(&self, plan: &ExecutionPlan) -> Result<CompiledProgram, BackendError> {
         let lowered = lower_plan(plan).map_err(|err| BackendError {
+            message: err.message,
+        })?;
+
+        let flags = CompilerFlags::from_env();
+        let policy = policy_for(flags.determinism);
+        enforce_policy(&lowered, policy).map_err(|err| BackendError {
             message: err.message,
         })?;
 
