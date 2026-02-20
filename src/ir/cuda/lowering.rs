@@ -1,8 +1,9 @@
-use crate::ir::{ExecutionPlan, KernelKind};
+use crate::ir::ExecutionPlan;
+use crate::ir::cuda::kernels::{BackendExecutableNode, dispatch_group};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoweredCudaPlan {
-    pub kernel_kinds: Vec<KernelKind>,
+    pub executable_nodes: Vec<BackendExecutableNode>,
 }
 
 #[derive(Debug, Clone)]
@@ -14,20 +15,12 @@ pub fn lower_plan(plan: &ExecutionPlan) -> Result<LoweredCudaPlan, CudaLoweringE
     let mut lowered = Vec::with_capacity(plan.kernel_groups.len());
 
     for group in &plan.kernel_groups {
-        match group.kind {
-            KernelKind::Data => lowered.push(group.kind.clone()),
-            KernelKind::Elementwise
-            | KernelKind::MatMul
-            | KernelKind::Conv2D
-            | KernelKind::Control => {
-                return Err(CudaLoweringError {
-                    message: format!("unsupported CUDA kernel class: {:?}", group.kind),
-                });
-            }
-        }
+        let executable = dispatch_group(group.kind.clone(), &group.nodes)
+            .map_err(|message| CudaLoweringError { message })?;
+        lowered.push(executable);
     }
 
     Ok(LoweredCudaPlan {
-        kernel_kinds: lowered,
+        executable_nodes: lowered,
     })
 }

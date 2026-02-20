@@ -91,7 +91,7 @@ impl Backend for CudaBackend {
         use std::hash::{Hash, Hasher};
         plan.schedule.ordered_nodes.hash(&mut hasher);
         plan.allocation.peak_bytes.hash(&mut hasher);
-        lowered.kernel_kinds.hash(&mut hasher);
+        lowered.executable_nodes.hash(&mut hasher);
 
         Ok(CompiledProgram {
             schedule_len: plan.schedule.ordered_nodes.len(),

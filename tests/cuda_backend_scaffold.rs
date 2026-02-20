@@ -32,11 +32,11 @@ fn cuda_backend_reports_unsupported_kernel_class_errors() {
     let (_, b) = graph
         .add_op(block, Op::ConstInt(2))
         .expect("add second const should succeed");
-    let (_, sum) = graph
-        .add_op(block, Op::Add(a, b))
-        .expect("add sum should succeed");
+    let (_, product) = graph
+        .add_op(block, Op::Mul(a, b))
+        .expect("add mul should succeed");
     graph
-        .add_op(block, Op::Output(sum))
+        .add_op(block, Op::Output(product))
         .expect("add output should succeed");
 
     let plan = build_execution_plan(&graph, &HashSet::new()).expect("plan should build");
