@@ -1,6 +1,6 @@
 use crate::ir::{Graph, NodeId, Op, Schedule, verify_schedule};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum KernelKind {
     Elementwise,
     MatMul,

@@ -7,6 +7,7 @@ pub mod block;
 pub mod compiler_flags;
 pub mod constant_folding;
 pub mod cse;
+pub mod cuda;
 pub mod dce;
 pub mod dead_tensor_elimination;
 pub mod elementwise_fusion;
