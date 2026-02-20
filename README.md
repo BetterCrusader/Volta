@@ -244,6 +244,12 @@ bash scripts/ci/nightly_perf_matrix.sh
 bash scripts/ci/tiny_transformer_cpu_verify.sh
 ```
 
+This tiny-transformer CPU milestone verify script enforces:
+
+- acceptance parity gate
+- deterministic replay gate
+- memory planner guard
+
 Release/nightly workflows are defined in:
 
 - `.github/workflows/release-gates.yml`

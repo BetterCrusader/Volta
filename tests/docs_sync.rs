@@ -13,6 +13,14 @@ fn readme_mentions_quality_fortress_wave1() {
         text.contains("Quality Fortress Wave 2/3 checks"),
         "README must include Wave 2/3 verification section"
     );
+    assert!(
+        text.contains("tiny-transformer CPU milestone"),
+        "README must mention tiny-transformer CPU milestone"
+    );
+    assert!(
+        text.contains("deterministic replay gate"),
+        "README must describe deterministic replay gate"
+    );
 }
 
 #[test]
