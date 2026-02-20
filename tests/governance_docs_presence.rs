@@ -7,6 +7,8 @@ fn governance_docs_exist() {
         "docs/governance/owner-model.md",
         "docs/governance/rfc-template.md",
         "docs/governance/incident-playbook.md",
+        "docs/governance/perf-governance.md",
+        "docs/governance/ci-topology.md",
     ];
 
     for path in required {

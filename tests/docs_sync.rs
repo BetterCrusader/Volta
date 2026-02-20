@@ -9,6 +9,10 @@ fn readme_mentions_quality_fortress_wave1() {
         text.contains("Quality Fortress"),
         "README must mention Quality Fortress governance"
     );
+    assert!(
+        text.contains("Quality Fortress Wave 2/3 checks"),
+        "README must include Wave 2/3 verification section"
+    );
 }
 
 #[test]
@@ -18,4 +22,11 @@ fn design_doc_mentions_wave1_foundation() {
         text.contains("Wave 1"),
         "design doc must mention Wave 1 governance foundation"
     );
+}
+
+#[test]
+fn wave23_plan_mentions_release_and_nightly() {
+    let text = read_text("docs/plans/2026-02-20-volta-quality-fortress-wave23-implementation.md");
+    assert!(text.contains("Wave 2"), "wave23 plan must mention Wave 2");
+    assert!(text.contains("Wave 3"), "wave23 plan must mention Wave 3");
 }

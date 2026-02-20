@@ -1,0 +1,94 @@
+name: Release Gates
+
+on:
+  workflow_dispatch:
+    inputs:
+      threshold_percent:
+        description: "Performance regression threshold (%)"
+        required: false
+        default: "5"
+      bootstrap_baseline:
+        description: "Create baseline if missing before release checks"
+        type: boolean
+        required: false
+        default: false
+  push:
+    tags:
+      - "release-*"
+
+jobs:
+  release-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Wave 1 quality gates
+        run: bash scripts/ci/wave1_local_verify.sh
+
+      - name: Fuzz smoke
+        run: bash scripts/ci/fuzz_smoke.sh
+
+      - name: Short soak
+        run: bash scripts/ci/soak_short.sh 3
+
+  release-perf:
+    runs-on: ubuntu-latest
+    needs: release-quality
+    env:
+      THRESHOLD_PERCENT: ${{ github.event.inputs.threshold_percent || '5' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Bootstrap baseline (optional)
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.bootstrap_baseline == 'true' }}
+        run: python scripts/perf/perf_gate.py --allow-missing-baseline --threshold-percent "$THRESHOLD_PERCENT"
+
+      - name: Double-pass perf gate
+        run: bash scripts/ci/release_perf_double_pass.sh
+
+      - name: Upload release perf reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-perf-reports
+          path: benchmarks/reports/
+
+  rollback-verify:
+    runs-on: ubuntu-latest
+    needs: release-perf
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Rollback script verify mode
+        run: bash scripts/release/rollback.sh --verify-only

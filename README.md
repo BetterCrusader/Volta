@@ -230,6 +230,19 @@ python -m unittest scripts.ci.tests.test_policy_check -v
 
 Governance docs live under `docs/governance/` and are test-verified.
 
+### Quality Fortress Wave 2/3 checks
+
+```bash
+bash scripts/ci/wave23_local_verify.sh
+bash scripts/ci/release_perf_double_pass.sh
+bash scripts/ci/nightly_perf_matrix.sh
+```
+
+Release/nightly workflows are defined in:
+
+- `.github/workflows/release-gates.yml`
+- `.github/workflows/nightly-quality.yml`
+
 Run demo binary:
 
 ```bash

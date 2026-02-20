@@ -13,9 +13,9 @@ function Invoke-Step {
     Remove-Item $log -ErrorAction SilentlyContinue
 }
 
-Invoke-Step @("cargo", "run", "--", "--help")
-Invoke-Step @("cargo", "run", "--", "examples/mnist.vt")
-Invoke-Step @("cargo", "run", "--", "--bench-infer", "--runs", "1", "--warmup", "0", "--tokens", "4")
-Invoke-Step @("cargo", "run", "--", "--tune-matmul", "--dim", "64", "--runs", "1")
+Invoke-Step @("cargo", "run", "--bin", "volta", "--", "--help")
+Invoke-Step @("cargo", "run", "--bin", "volta", "--", "examples/mnist.vt")
+Invoke-Step @("cargo", "run", "--bin", "volta", "--", "--bench-infer", "--runs", "1", "--warmup", "0", "--tokens", "4")
+Invoke-Step @("cargo", "run", "--bin", "volta", "--", "--tune-matmul", "--dim", "64", "--runs", "1")
 
 Write-Host "[cli-smoke] all checks passed"

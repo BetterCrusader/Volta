@@ -61,3 +61,28 @@ fn rfc_and_incident_docs_cover_failure_analysis() {
         "incident playbook must include severity"
     );
 }
+
+#[test]
+fn perf_governance_doc_covers_double_pass_release() {
+    let text = read_doc("docs/governance/perf-governance.md");
+    for required in [
+        "## Baseline Identity",
+        "## Release Policy",
+        "double-pass",
+        "5%",
+    ] {
+        assert!(text.contains(required), "missing section: {required}");
+    }
+}
+
+#[test]
+fn ci_topology_doc_covers_pr_release_nightly() {
+    let text = read_doc("docs/governance/ci-topology.md");
+    for required in [
+        "## PR Pipelines",
+        "## Release Pipelines",
+        "## Nightly Pipelines",
+    ] {
+        assert!(text.contains(required), "missing section: {required}");
+    }
+}
