@@ -1,0 +1,21 @@
+{
+  "created_by": "example",
+  "probe": {
+    "dim": 96,
+    "metrics": {
+      "matmul_ms": {
+        "lower_is_better": true,
+        "median": 10.0,
+        "stdev": 0.2
+      },
+      "relu_ms": {
+        "lower_is_better": true,
+        "median": 1.0,
+        "stdev": 0.05
+      }
+    },
+    "samples": 9,
+    "version": 1
+  },
+  "signature": "example-linux-x86-64-generic"
+}
