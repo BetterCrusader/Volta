@@ -34,30 +34,6 @@ pub struct TrainApiError {
     pub message: String,
 }
 
-#[derive(Debug, Clone)]
-pub struct TinyTransformerFixtureDataset;
-
-impl Dataset for TinyTransformerFixtureDataset {
-    fn len(&self) -> usize {
-        0
-    }
-
-    fn example(&self, _index: usize) -> Result<Example, TrainApiError> {
-        Err(TrainApiError {
-            message: "tiny transformer fixture dataset is not implemented yet".to_string(),
-        })
-    }
-}
-
-pub fn build_tiny_transformer_fixture_for_tests() -> (
-    CompiledModel,
-    TinyTransformerFixtureDataset,
-    TrainApiConfig,
-    HashMap<String, Tensor>,
-) {
-    unimplemented!("tiny transformer fixture is introduced in Task 2");
-}
-
 pub fn infer(
     _model: &CompiledModel,
     _parameters: &HashMap<String, Tensor>,
