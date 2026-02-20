@@ -16,7 +16,10 @@ pub fn save_checkpoint(
     let mut entries = parameters.iter().collect::<Vec<_>>();
     entries.sort_by(|(a, _), (b, _)| a.cmp(b));
 
-    let mut lines = vec![CHECKPOINT_HEADER_V1.to_string(), "#writer:train_api".to_string()];
+    let mut lines = vec![
+        CHECKPOINT_HEADER_V1.to_string(),
+        "#writer:train_api".to_string(),
+    ];
     for (name, tensor) in entries {
         let shape = tensor
             .shape

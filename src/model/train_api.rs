@@ -2,12 +2,12 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use crate::ir::{
-    build_execution_plan, execute_value_with_schedule_context, train_graph, ExecutionContext,
-    Graph, NodeId, OptimizerConfig, RuntimeValue, Tensor, TrainConfig, TrainSample, ValueId,
+    ExecutionContext, Graph, NodeId, OptimizerConfig, RuntimeValue, Tensor, TrainConfig,
+    TrainSample, ValueId, build_execution_plan, execute_value_with_schedule_context, train_graph,
 };
 
 use crate::model::{
-    load_checkpoint, save_checkpoint, BatchIterator, CompiledModel, Dataset, Example,
+    BatchIterator, CompiledModel, Dataset, Example, load_checkpoint, save_checkpoint,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -196,8 +196,8 @@ mod tests {
 
     use crate::ir::{OptimizerConfig, Tensor};
     use crate::model::{
-        build_tiny_transformer_fixture_for_tests, infer, train, CompiledModel, Dataset, Example,
-        ReproducibilityMode, TensorShape, TrainApiConfig,
+        CompiledModel, Dataset, Example, ReproducibilityMode, TensorShape, TrainApiConfig,
+        build_tiny_transformer_fixture_for_tests, infer, train,
     };
 
     struct TinyDataset {

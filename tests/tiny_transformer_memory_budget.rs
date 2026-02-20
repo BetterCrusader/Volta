@@ -27,8 +27,8 @@ fn tiny_transformer_peak_memory_stays_within_budget() {
                 panic!("{message}");
             });
 
-    let allowed_bytes = baseline_bytes.saturating_add((baseline_bytes + 9) / 10);
-    let allowed_values = baseline_values.saturating_add((baseline_values + 9) / 10);
+    let allowed_bytes = baseline_bytes.saturating_add(baseline_bytes.div_ceil(10));
+    let allowed_values = baseline_values.saturating_add(baseline_values.div_ceil(10));
 
     assert!(
         current_values <= allowed_values,

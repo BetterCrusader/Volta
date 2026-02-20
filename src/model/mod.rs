@@ -18,8 +18,8 @@ pub use module_trait::Module;
 pub use parameter::Parameter;
 pub use tensor_shape::TensorShape;
 pub use tiny_transformer::{
-    build_tiny_transformer_fixture_for_tests, TinyTransformerFixtureDataset,
+    TinyTransformerFixtureDataset, build_tiny_transformer_fixture_for_tests,
 };
 pub use train_api::{
-    infer, train, ReproducibilityMode, TrainApiConfig, TrainApiError, TrainApiResult,
+    ReproducibilityMode, TrainApiConfig, TrainApiError, TrainApiResult, infer, train,
 };
