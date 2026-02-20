@@ -77,9 +77,11 @@ pub fn build_tiny_transformer_fixture_for_tests() -> (
     HashMap<String, Tensor>,
 ) {
     let mut builder = ModelBuilder::new();
-    let x = builder.input("x").expect("fixture input x must build");
+    let x = builder
+        .input_with_shape("x", vec![1, 4])
+        .expect("fixture input x must build");
     let target = builder
-        .input("target")
+        .input_with_shape("target", vec![1, 1])
         .expect("fixture input target must build");
 
     let w_q = builder

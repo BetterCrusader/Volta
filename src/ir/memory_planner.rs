@@ -2,6 +2,9 @@ use std::collections::HashMap;
 
 use crate::ir::{Graph, ShapeFact, ValueId, infer_shapes};
 
+const F32_BYTES: usize = std::mem::size_of::<f32>();
+const MIN_BUFFER_ALIGNMENT_BYTES: usize = 16;
+
 #[derive(Debug, Clone)]
 pub struct MemoryPlanError {
     pub message: String,
@@ -93,6 +96,10 @@ pub fn plan_memory(graph: &Graph) -> Result<MemoryPlan, MemoryPlanError> {
 fn estimate_bytes(shape: Option<&ShapeFact>) -> usize {
     match shape {
         Some(ShapeFact::Tensor(dims)) => {
+            if dims.contains(&0) {
+                return 0;
+            }
+
             let mut count = 1usize;
             for dim in dims {
                 let Some(next) = count.checked_mul(*dim) else {
@@ -100,10 +107,24 @@ fn estimate_bytes(shape: Option<&ShapeFact>) -> usize {
                 };
                 count = next;
             }
-            count.saturating_mul(4)
+
+            let Some(raw_bytes) = count.checked_mul(F32_BYTES) else {
+                return 0;
+            };
+            align_bytes(raw_bytes)
         }
         _ => 0,
     }
+}
+
+fn align_bytes(raw_bytes: usize) -> usize {
+    if raw_bytes == 0 {
+        return 0;
+    }
+
+    raw_bytes
+        .div_ceil(MIN_BUFFER_ALIGNMENT_BYTES)
+        .saturating_mul(MIN_BUFFER_ALIGNMENT_BYTES)
 }
 
 fn compute_peak_usage(values: &[ValueLiveness], node_count: usize) -> (usize, usize) {

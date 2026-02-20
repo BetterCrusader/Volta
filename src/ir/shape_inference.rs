@@ -18,20 +18,32 @@ pub fn infer_shapes(graph: &Graph) -> Result<HashMap<ValueId, ShapeFact>, ShapeE
     let mut shapes = HashMap::new();
 
     for node in &graph.nodes {
-        let inferred = infer_shape_for_op(&node.op, &shapes).map_err(|message| ShapeError {
-            message: format!("{} (at node {})", message, node.id.0),
-        })?;
+        let inferred =
+            infer_shape_for_op(graph, &node.op, &shapes).map_err(|message| ShapeError {
+                message: format!("{} (at node {})", message, node.id.0),
+            })?;
         shapes.insert(node.output, inferred);
     }
 
     Ok(shapes)
 }
 
-fn infer_shape_for_op(op: &Op, shapes: &HashMap<ValueId, ShapeFact>) -> Result<ShapeFact, String> {
+fn infer_shape_for_op(
+    graph: &Graph,
+    op: &Op,
+    shapes: &HashMap<ValueId, ShapeFact>,
+) -> Result<ShapeFact, String> {
     match op {
         Op::ConstInt(_) | Op::ConstFloat(_) => Ok(ShapeFact::NonTensor),
         Op::ConstTensor { shape, .. } => Ok(ShapeFact::Tensor(shape.clone())),
-        Op::Parameter(_) | Op::Input(_) => Ok(ShapeFact::Unknown),
+        Op::Parameter(name) => Ok(graph
+            .parameter_shape(name)
+            .map(|shape| ShapeFact::Tensor(shape.to_vec()))
+            .unwrap_or(ShapeFact::Unknown)),
+        Op::Input(name) => Ok(graph
+            .input_shape(name)
+            .map(|shape| ShapeFact::Tensor(shape.to_vec()))
+            .unwrap_or(ShapeFact::Unknown)),
         Op::Output(value) => Ok(shape_of(*value, shapes)),
         Op::Add(left, right)
         | Op::Sub(left, right)
@@ -223,7 +235,7 @@ fn shape_of(value: ValueId, shapes: &HashMap<ValueId, ShapeFact>) -> ShapeFact {
 
 #[cfg(test)]
 mod tests {
-    use crate::ir::{Graph, Op, ShapeFact, infer_shapes};
+    use crate::ir::{Graph, Op, ShapeFact, graph_fingerprint, infer_shapes};
 
     #[test]
     fn infers_shapes_for_matmul() {
@@ -283,5 +295,50 @@ mod tests {
 
         let err = infer_shapes(&graph).expect_err("must fail shape inference");
         assert!(err.message.contains("Shape mismatch in MatMul"));
+    }
+
+    #[test]
+    fn infers_shapes_from_bound_inputs_and_parameters() {
+        let mut graph = Graph::new();
+        let block = graph.create_block();
+        let (_, x) = graph
+            .add_op(block, Op::Input("x".to_string()))
+            .expect("add op should succeed");
+        let (_, w) = graph
+            .add_op(block, Op::Parameter("w".to_string()))
+            .expect("add op should succeed");
+        let (_, y) = graph
+            .add_op(block, Op::MatMul(x, w))
+            .expect("add op should succeed");
+
+        graph.bind_input_shape("x", vec![1, 4]);
+        graph.bind_parameter_shape("w", vec![4, 2]);
+
+        let shapes = infer_shapes(&graph).expect("shape inference should pass");
+        assert_eq!(shapes.get(&x), Some(&ShapeFact::Tensor(vec![1, 4])));
+        assert_eq!(shapes.get(&w), Some(&ShapeFact::Tensor(vec![4, 2])));
+        assert_eq!(shapes.get(&y), Some(&ShapeFact::Tensor(vec![1, 2])));
+    }
+
+    #[test]
+    fn infer_shapes_does_not_mutate_graph() {
+        let mut graph = Graph::new();
+        let block = graph.create_block();
+        let (_, x) = graph
+            .add_op(block, Op::Input("x".to_string()))
+            .expect("add op should succeed");
+        let (_, y) = graph
+            .add_op(block, Op::Relu(x))
+            .expect("add op should succeed");
+        graph
+            .add_op(block, Op::Output(y))
+            .expect("add op should succeed");
+        graph.bind_input_shape("x", vec![1, 2]);
+
+        let before = graph_fingerprint(&graph);
+        let _ = infer_shapes(&graph).expect("shape inference should pass");
+        let after = graph_fingerprint(&graph);
+
+        assert_eq!(before, after, "shape inference must not mutate IR graph");
     }
 }

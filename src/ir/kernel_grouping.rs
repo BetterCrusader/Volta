@@ -1,7 +1,10 @@
 use crate::ir::{Graph, NodeId, Op, Schedule, verify_schedule};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum KernelKind {
+    Add,
+    Relu,
+    Softmax,
     Elementwise,
     MatMul,
     Conv2D,
@@ -51,15 +54,15 @@ pub fn group_kernels(
 
 fn classify_op(op: &Op) -> KernelKind {
     match op {
-        Op::Add(_, _)
-        | Op::Sub(_, _)
+        Op::Add(_, _) => KernelKind::Add,
+        Op::Relu(_) => KernelKind::Relu,
+        Op::Softmax(_) => KernelKind::Softmax,
+        Op::Sub(_, _)
         | Op::Mul(_, _)
         | Op::Div(_, _)
         | Op::Neg(_)
         | Op::ElementwiseChain { .. }
-        | Op::Relu(_)
-        | Op::ReluBackward(_, _)
-        | Op::Softmax(_) => KernelKind::Elementwise,
+        | Op::ReluBackward(_, _) => KernelKind::Elementwise,
         Op::MatMul(_, _) => KernelKind::MatMul,
         Op::Conv2D(_, _) => KernelKind::Conv2D,
         Op::ConstInt(_)

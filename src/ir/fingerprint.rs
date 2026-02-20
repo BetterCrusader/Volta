@@ -7,6 +7,8 @@ pub fn graph_fingerprint(graph: &Graph) -> u64 {
     let mut hasher = DefaultHasher::new();
     graph.nodes.len().hash(&mut hasher);
     graph.blocks.len().hash(&mut hasher);
+    graph.shape_signature.inputs.hash(&mut hasher);
+    graph.shape_signature.parameters.hash(&mut hasher);
 
     for node in &graph.nodes {
         node.id.0.hash(&mut hasher);

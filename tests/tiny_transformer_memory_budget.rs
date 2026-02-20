@@ -5,6 +5,18 @@ const BYTES_BASELINE_PATH: &str = "benchmarks/baselines/tiny-transformer-memory-
 const VALUES_BASELINE_PATH: &str = "benchmarks/baselines/tiny-transformer-memory-peak-values.txt";
 
 #[test]
+fn tiny_transformer_peak_memory_bytes_are_non_zero_with_shape_bindings() {
+    let (model, _dataset, _cfg, _infer_input) =
+        volta::model::build_tiny_transformer_fixture_for_tests();
+    let plan = volta::ir::plan_memory(&model.graph).expect("memory plan should build");
+
+    assert!(
+        plan.peak_live_bytes > 0,
+        "peak_live_bytes must be non-zero once input/parameter shapes are bound"
+    );
+}
+
+#[test]
 fn tiny_transformer_peak_memory_stays_within_budget() {
     let (model, _dataset, _cfg, _infer_input) =
         volta::model::build_tiny_transformer_fixture_for_tests();

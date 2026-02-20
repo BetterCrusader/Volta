@@ -9,3 +9,4 @@ __pycache__/
 benchmarks/reports/
 benchmarks/baselines/*.json
 !benchmarks/baselines/example-linux-x86_64-generic.json
+!benchmarks/baselines/cuda-infer-parity.json

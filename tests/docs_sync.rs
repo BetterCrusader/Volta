@@ -21,6 +21,14 @@ fn readme_mentions_quality_fortress_wave1() {
         text.contains("deterministic replay gate"),
         "README must describe deterministic replay gate"
     );
+    assert!(
+        text.contains("CUDA inference MVP"),
+        "README must mention CUDA inference MVP"
+    );
+    assert!(
+        text.contains("scripts/ci/cuda_infer_verify.sh"),
+        "README must include CUDA inference verify script"
+    );
 }
 
 #[test]
@@ -37,4 +45,25 @@ fn wave23_plan_mentions_release_and_nightly() {
     let text = read_text("docs/plans/2026-02-20-volta-quality-fortress-wave23-implementation.md");
     assert!(text.contains("Wave 2"), "wave23 plan must mention Wave 2");
     assert!(text.contains("Wave 3"), "wave23 plan must mention Wave 3");
+}
+
+#[test]
+fn cuda_determinism_policy_is_documented() {
+    let text = read_text("docs/governance/cuda-determinism-policy.md");
+    assert!(
+        text.contains("strict"),
+        "cuda determinism policy must document strict mode"
+    );
+    assert!(
+        text.contains("no atomics"),
+        "cuda determinism policy must ban atomics in strict mode"
+    );
+    assert!(
+        text.contains("TF32"),
+        "cuda determinism policy must describe TF32 policy"
+    );
+    assert!(
+        text.contains("fast-math"),
+        "cuda determinism policy must describe fast-math policy"
+    );
 }

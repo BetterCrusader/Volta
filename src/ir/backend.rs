@@ -1,4 +1,6 @@
 use crate::ir::ExecutionPlan;
+use crate::ir::cuda::{enforce_policy, lower_plan, policy_for};
+use crate::ir::{BackendCapabilities, BackendKind, CompilerFlags, DeterminismLevel};
 
 #[derive(Debug, Clone)]
 pub struct CompiledProgram {
@@ -13,6 +15,7 @@ pub struct BackendError {
 }
 
 pub trait Backend {
+    fn capabilities(&self) -> BackendCapabilities;
     fn compile(&self, plan: &ExecutionPlan) -> Result<CompiledProgram, BackendError>;
 }
 
@@ -20,6 +23,16 @@ pub trait Backend {
 pub struct CpuBackend;
 
 impl Backend for CpuBackend {
+    fn capabilities(&self) -> BackendCapabilities {
+        BackendCapabilities {
+            backend: BackendKind::Cpu,
+            supports_inference: true,
+            supports_training: true,
+            supports_strict_determinism: true,
+            default_determinism: DeterminismLevel::Strict,
+        }
+    }
+
     fn compile(&self, plan: &ExecutionPlan) -> Result<CompiledProgram, BackendError> {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         use std::hash::{Hash, Hasher};
@@ -38,6 +51,16 @@ impl Backend for CpuBackend {
 pub struct LlvmBackend;
 
 impl Backend for LlvmBackend {
+    fn capabilities(&self) -> BackendCapabilities {
+        BackendCapabilities {
+            backend: BackendKind::Llvm,
+            supports_inference: false,
+            supports_training: false,
+            supports_strict_determinism: false,
+            default_determinism: DeterminismLevel::Balanced,
+        }
+    }
+
     fn compile(&self, _plan: &ExecutionPlan) -> Result<CompiledProgram, BackendError> {
         Err(BackendError {
             message: "LLVM backend is not implemented yet".to_string(),
@@ -49,9 +72,38 @@ impl Backend for LlvmBackend {
 pub struct CudaBackend;
 
 impl Backend for CudaBackend {
-    fn compile(&self, _plan: &ExecutionPlan) -> Result<CompiledProgram, BackendError> {
-        Err(BackendError {
-            message: "CUDA backend is not implemented yet".to_string(),
+    fn capabilities(&self) -> BackendCapabilities {
+        BackendCapabilities {
+            backend: BackendKind::Cuda,
+            supports_inference: true,
+            supports_training: false,
+            supports_strict_determinism: true,
+            default_determinism: DeterminismLevel::Balanced,
+        }
+    }
+
+    fn compile(&self, plan: &ExecutionPlan) -> Result<CompiledProgram, BackendError> {
+        let lowered = lower_plan(plan).map_err(|err| BackendError {
+            message: err.message,
+        })?;
+
+        let flags = CompilerFlags::from_env();
+        let policy = policy_for(flags.determinism);
+        enforce_policy(&lowered, policy).map_err(|err| BackendError {
+            message: err.message,
+        })?;
+
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        use std::hash::{Hash, Hasher};
+        plan.schedule.ordered_nodes.hash(&mut hasher);
+        plan.allocation.peak_bytes.hash(&mut hasher);
+        lowered.executable_nodes.hash(&mut hasher);
+        lowered.memory_bindings.hash(&mut hasher);
+
+        Ok(CompiledProgram {
+            schedule_len: plan.schedule.ordered_nodes.len(),
+            peak_bytes: plan.allocation.peak_bytes,
+            fingerprint: hasher.finish(),
         })
     }
 }

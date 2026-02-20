@@ -54,6 +54,16 @@ impl ModelBuilder {
         Ok(value)
     }
 
+    pub fn input_with_shape(
+        &mut self,
+        name: &str,
+        shape: Vec<usize>,
+    ) -> Result<ValueId, ModelBuildError> {
+        let value = self.input(name)?;
+        self.graph.bind_input_shape(name, shape);
+        Ok(value)
+    }
+
     pub fn add_parameter(&mut self, parameter: Parameter) -> Result<ValueId, ModelBuildError> {
         let name = parameter.name.clone();
         if self.parameter_values.contains_key(&name) {
@@ -68,6 +78,9 @@ impl ModelBuilder {
             .map_err(|err| ModelBuildError {
                 message: format!("Failed to add parameter '{name}': {}", err.message),
             })?;
+
+        self.graph
+            .bind_parameter_shape(&name, parameter.tensor.shape.clone());
 
         if parameter.trainable {
             self.parameters.insert(name.clone(), parameter.tensor);
