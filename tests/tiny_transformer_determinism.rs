@@ -49,16 +49,6 @@ fn tiny_transformer_training_is_repeatable_for_fixed_seed() {
     let (param_diff, compared_values) =
         max_parameter_abs_diff(&first.final_parameters, &second.final_parameters);
 
-    println!(
-        "task8-metrics seed={} loss_run1={} loss_run2={} loss_diff={} param_max_abs_diff={} compared_values={}",
-        cfg.shuffle_seed,
-        first.final_loss,
-        second.final_loss,
-        loss_diff,
-        param_diff,
-        compared_values
-    );
-
     assert!(loss_diff <= 1e-9, "loss diff too high: {}", loss_diff);
     assert!(compared_values > 0, "no parameter values compared");
     assert!(

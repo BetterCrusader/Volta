@@ -12,11 +12,6 @@ fn tiny_transformer_peak_memory_stays_within_budget() {
     let current_bytes = plan.peak_live_bytes;
     let current_values = plan.peak_live_values;
 
-    println!(
-        "tiny-transformer peak_live_values={} peak_live_bytes={}",
-        current_values, current_bytes
-    );
-
     let baseline_bytes = load_usize_baseline(BYTES_BASELINE_PATH, current_bytes, "peak_live_bytes")
         .unwrap_or_else(|message| {
             panic!("{message}");

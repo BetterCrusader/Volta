@@ -64,19 +64,6 @@ fn tiny_transformer_cpu_train_infer_save_load_roundtrip() {
     let epsilon = 1e-6_f32;
     let parity_diff = max_abs_diff(&after_reload.data, &after.data);
 
-    println!(
-        "task4-metrics lr={} epochs={} initial_loss={} final_loss={} epsilon={} max_abs_diff={}",
-        match train_config.optimizer {
-            volta::ir::OptimizerConfig::Sgd { lr } => lr,
-            volta::ir::OptimizerConfig::Adam { lr, .. } => lr,
-        },
-        train_config.epochs,
-        baseline.final_loss,
-        trained.final_loss,
-        epsilon,
-        parity_diff
-    );
-
     assert_eq!(before.shape, model.output_shape.0);
     assert_eq!(after.shape, model.output_shape.0);
     assert_eq!(after_reload.shape, model.output_shape.0);
