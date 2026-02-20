@@ -5,6 +5,9 @@ use crate::ir::{
     verify_schedule,
 };
 
+const F32_BYTES: usize = std::mem::size_of::<f32>();
+const MIN_BUFFER_ALIGNMENT_BYTES: usize = 16;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BufferId(pub usize);
 
@@ -206,13 +209,33 @@ fn classify_storage(op: &Op, value: ValueId, gradients: &HashSet<ValueId>) -> St
 
 fn estimate_bytes(shape: Option<&ShapeFact>) -> usize {
     match shape {
-        Some(ShapeFact::Tensor(dims)) => dims
-            .iter()
-            .try_fold(1usize, |acc, dim| acc.checked_mul(*dim))
-            .unwrap_or(0)
-            .saturating_mul(4),
+        Some(ShapeFact::Tensor(dims)) => {
+            if dims.contains(&0) {
+                return 0;
+            }
+
+            let Some(raw_bytes) = dims
+                .iter()
+                .try_fold(1usize, |acc, dim| acc.checked_mul(*dim))
+                .and_then(|elements| elements.checked_mul(F32_BYTES))
+            else {
+                return 0;
+            };
+
+            align_bytes(raw_bytes)
+        }
         _ => 0,
     }
+}
+
+fn align_bytes(raw_bytes: usize) -> usize {
+    if raw_bytes == 0 {
+        return 0;
+    }
+
+    raw_bytes
+        .div_ceil(MIN_BUFFER_ALIGNMENT_BYTES)
+        .saturating_mul(MIN_BUFFER_ALIGNMENT_BYTES)
 }
 
 fn compute_peak_bytes(

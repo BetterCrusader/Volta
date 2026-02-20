@@ -52,7 +52,7 @@ pub use elementwise_fusion::ElementwiseFusionPass;
 pub use execution_plan::{ExecutionPlan, ExecutionPlanError, build_execution_plan};
 pub use fingerprint::graph_fingerprint;
 pub use gradient_fusion::GradientFusionPass;
-pub use graph::{Graph, GraphError};
+pub use graph::{Graph, GraphError, ShapeSignature};
 pub use interpreter::{
     ExecutionContext, InterpreterError, RuntimeValue, execute, execute_value,
     execute_value_with_context, execute_value_with_schedule_context, execute_with_context,
