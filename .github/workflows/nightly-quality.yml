@@ -28,6 +28,24 @@ jobs:
       - name: Wave 1 gates
         run: bash scripts/ci/wave1_local_verify.sh
 
+  nightly-cuda-infer:
+    runs-on: ubuntu-latest
+    needs: nightly-core
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: CUDA inference verify
+        run: bash scripts/ci/cuda_infer_verify.sh
+
   nightly-fuzz-heavy:
     runs-on: ubuntu-latest
     needs: nightly-core
