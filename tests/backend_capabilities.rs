@@ -13,13 +13,13 @@ fn cpu_backend_reports_strict_deterministic_capabilities() {
 }
 
 #[test]
-fn cuda_backend_reports_inference_only_placeholder_capabilities() {
+fn cuda_backend_reports_training_capabilities() {
     let backend = CudaBackend;
     let caps = backend.capabilities();
 
     assert_eq!(caps.backend, BackendKind::Cuda);
     assert!(caps.supports_inference);
-    assert!(!caps.supports_training);
+    assert!(caps.supports_training);
     assert!(caps.supports_strict_determinism);
     assert_eq!(caps.default_determinism, DeterminismLevel::Balanced);
 }

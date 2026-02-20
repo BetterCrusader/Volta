@@ -31,8 +31,8 @@ pub fn dispatch_group(kind: KernelKind, nodes: &[NodeId]) -> Result<BackendExecu
         KernelKind::Add => CudaKernel::Add,
         KernelKind::Relu => CudaKernel::Relu,
         KernelKind::Softmax => CudaKernel::Softmax,
-        KernelKind::Backward => CudaKernel::Backward,
-        KernelKind::Elementwise | KernelKind::Conv2D | KernelKind::Control => {
+        KernelKind::Backward | KernelKind::Elementwise => CudaKernel::Backward,
+        KernelKind::Conv2D | KernelKind::Control => {
             return Err(format!("unsupported CUDA kernel class: {:?}", kind));
         }
     };

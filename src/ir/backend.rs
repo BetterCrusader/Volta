@@ -76,7 +76,7 @@ impl Backend for CudaBackend {
         BackendCapabilities {
             backend: BackendKind::Cuda,
             supports_inference: true,
-            supports_training: false,
+            supports_training: true,
             supports_strict_determinism: true,
             default_determinism: DeterminismLevel::Balanced,
         }
