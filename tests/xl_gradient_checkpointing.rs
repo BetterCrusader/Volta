@@ -1,6 +1,8 @@
+use std::sync::{Mutex, OnceLock};
+use volta::ir::CudaBackend;
 use volta::model::{
     GradientCheckpointingConfig, build_tiny_transformer_fixture_for_tests,
-    plan_gradient_checkpointing,
+    plan_gradient_checkpointing, train_with_backend,
 };
 
 #[test]
@@ -35,4 +37,81 @@ fn checkpoint_plan_rejects_zero_interval() {
     .expect_err("zero interval must be rejected");
 
     assert!(err.message.contains("interval_nodes"));
+}
+
+#[test]
+fn strict_training_with_and_without_checkpointing_produces_identical_result() {
+    with_determinism("strict", || {
+        let (model, dataset, mut config, _infer_input) = build_tiny_transformer_fixture_for_tests();
+        let cuda = CudaBackend;
+
+        config.epochs = 10;
+        config.gradient_checkpointing = None;
+        let without_checkpointing = train_with_backend(&model, &dataset, &config, &cuda)
+            .expect("strict train without checkpointing should pass");
+
+        let mut with_checkpointing_config = config.clone();
+        with_checkpointing_config.gradient_checkpointing = Some(GradientCheckpointingConfig {
+            interval_nodes: 2,
+            min_tensor_bytes: 16,
+        });
+        let with_checkpointing =
+            train_with_backend(&model, &dataset, &with_checkpointing_config, &cuda)
+                .expect("strict train with checkpointing should pass");
+
+        assert_eq!(
+            without_checkpointing.final_parameters,
+            with_checkpointing.final_parameters
+        );
+        assert_eq!(
+            without_checkpointing.optimizer_state,
+            with_checkpointing.optimizer_state
+        );
+        assert_eq!(
+            without_checkpointing.final_loss.to_bits(),
+            with_checkpointing.final_loss.to_bits()
+        );
+    });
+}
+
+fn with_determinism(level: &str, run: impl FnOnce()) {
+    let _guard = match env_lock().lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let _restore = EnvVarRestore::set("VOLTA_DETERMINISM", level);
+    run();
+}
+
+fn env_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+struct EnvVarRestore {
+    key: &'static str,
+    previous: Option<String>,
+}
+
+impl EnvVarRestore {
+    fn set(key: &'static str, value: &str) -> Self {
+        let previous = std::env::var(key).ok();
+        unsafe {
+            std::env::set_var(key, value);
+        }
+        Self { key, previous }
+    }
+}
+
+impl Drop for EnvVarRestore {
+    fn drop(&mut self) {
+        match self.previous.take() {
+            Some(value) => unsafe {
+                std::env::set_var(self.key, value);
+            },
+            None => unsafe {
+                std::env::remove_var(self.key);
+            },
+        }
+    }
 }

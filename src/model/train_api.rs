@@ -2,13 +2,14 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use crate::ir::{
-    Backend, CpuBackend, ExecutionContext, Graph, NodeId, OptimizerConfig, RuntimeValue, Tensor,
-    TrainConfig, TrainSample, ValueId, build_execution_plan, execute_value_with_backend,
-    train_graph_with_backend,
+    Backend, CpuBackend, ExecutionContext, Graph, NodeId, OptimizerConfig, OptimizerState,
+    RuntimeValue, Tensor, TrainConfig, TrainSample, ValueId, build_execution_plan,
+    execute_value_with_backend, train_graph_with_backend,
 };
 
 use crate::model::{
-    BatchIterator, CompiledModel, Dataset, Example, load_checkpoint, save_checkpoint,
+    BatchIterator, CompiledModel, Dataset, Example, GradientCheckpointingConfig, load_checkpoint,
+    plan_gradient_checkpointing, save_checkpoint,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,6 +25,7 @@ pub struct TrainApiConfig {
     pub shuffle: bool,
     pub shuffle_seed: u64,
     pub optimizer: OptimizerConfig,
+    pub gradient_checkpointing: Option<GradientCheckpointingConfig>,
     pub reproducibility: ReproducibilityMode,
     pub checkpoint_path: Option<String>,
 }
@@ -32,6 +34,7 @@ pub struct TrainApiConfig {
 pub struct TrainApiResult {
     pub final_parameters: HashMap<String, Tensor>,
     pub final_loss: f32,
+    pub optimizer_state: OptimizerState,
 }
 
 #[derive(Debug, Clone)]
@@ -193,6 +196,12 @@ pub fn train_with_backend<D: Dataset>(
         });
     };
 
+    if let Some(checkpointing) = &config.gradient_checkpointing {
+        let _ = plan_gradient_checkpointing(model, checkpointing).map_err(|err| TrainApiError {
+            message: format!("Gradient checkpointing planning failed: {}", err.message),
+        })?;
+    }
+
     let result = train_graph_with_backend(
         &model.graph,
         loss,
@@ -215,6 +224,7 @@ pub fn train_with_backend<D: Dataset>(
     Ok(TrainApiResult {
         final_parameters: result.final_parameters,
         final_loss: result.final_loss,
+        optimizer_state: result.optimizer_state,
     })
 }
 
@@ -261,6 +271,7 @@ mod tests {
             shuffle: true,
             shuffle_seed: 7,
             optimizer: OptimizerConfig::Sgd { lr: 0.01 },
+            gradient_checkpointing: None,
             reproducibility: ReproducibilityMode::Deterministic,
             checkpoint_path: None,
         };
