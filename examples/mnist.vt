@@ -1,0 +1,25 @@
+lr 0.001
+
+model brain
+    layers 784 256 128 10
+    activation relu
+    optimizer adam lr
+    precision auto
+
+dataset mnist
+    batch 32
+    shuffle true
+
+train brain on mnist
+    epochs 3
+    device auto
+
+accuracy 0.92
+
+if accuracy > 0.95
+    save brain as "best.vt"
+    print "done"
+elif accuracy > 0.8
+    print "almost"
+else
+    print "keep training"

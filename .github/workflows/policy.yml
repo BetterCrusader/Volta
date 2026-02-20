@@ -1,0 +1,73 @@
+name: Policy Guard
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  policy-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Run policy checks
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          base_sha = os.environ.get("BASE_SHA", "").strip()
+          head_sha = os.environ.get("HEAD_SHA", "").strip()
+
+          paths = []
+          if base_sha and head_sha:
+              diff = subprocess.check_output(
+                  ["git", "diff", "--name-only", base_sha, head_sha],
+                  text=True,
+              )
+              paths = [line.strip() for line in diff.splitlines() if line.strip()]
+
+          event_payload = {}
+          event_path = os.environ.get("GITHUB_EVENT_PATH", "")
+          if event_path:
+              with open(event_path, "r", encoding="utf-8") as handle:
+                  event_payload = json.load(handle)
+
+          pull_request = event_payload.get("pull_request") or {}
+          pr_body = pull_request.get("body") or ""
+          labels = []
+          for label in pull_request.get("labels") or []:
+              name = label.get("name") if isinstance(label, dict) else None
+              if name:
+                  labels.append(name)
+
+          cmd = [
+              "python3",
+              "scripts/ci/policy_check.py",
+              "--branch",
+              os.environ.get("BRANCH_NAME", ""),
+              "--pr-body",
+              pr_body,
+              "--labels-json",
+              json.dumps(labels),
+          ]
+          if paths:
+              cmd.extend(["--paths", *paths])
+
+          raise SystemExit(subprocess.run(cmd, check=False).returncode)
+          PY
