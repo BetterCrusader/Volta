@@ -1,9 +1,10 @@
 use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
 
 use crate::ir::{
     AllocationPlan, Graph, KernelGroup, Schedule, StorageClass, ValueId, build_schedule,
-    group_kernels, optimize_schedule, plan_allocation, verify_allocation, verify_graph,
-    verify_schedule,
+    graph_fingerprint, group_kernels, optimize_schedule, plan_allocation, verify_allocation,
+    verify_graph, verify_schedule,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -27,6 +28,8 @@ pub struct ExecutionPlan {
     pub allocation: AllocationPlan,
     pub kernel_groups: Vec<KernelGroup>,
     pub placement_hints: Vec<PlacementHint>,
+    pub graph_fingerprint: u64,
+    pub shape_signature_hash: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -76,7 +79,15 @@ pub fn build_execution_plan(
         allocation,
         kernel_groups,
         placement_hints,
+        graph_fingerprint: graph_fingerprint(graph),
+        shape_signature_hash: hash_shape_signature(graph),
     })
+}
+
+fn hash_shape_signature(graph: &Graph) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    graph.shape_signature.hash(&mut hasher);
+    hasher.finish()
 }
 
 fn build_placement_hints(allocation: &AllocationPlan) -> Vec<PlacementHint> {

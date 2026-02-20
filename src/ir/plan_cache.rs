@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, OnceLock};
 
 use crate::ir::{
@@ -10,7 +9,8 @@ use crate::ir::{
 struct PlanCacheKey {
     backend: BackendKind,
     determinism: DeterminismLevel,
-    plan_fingerprint: u64,
+    graph_fingerprint: u64,
+    shape_signature_hash: u64,
 }
 
 #[derive(Debug, Default)]
@@ -26,7 +26,8 @@ pub fn compile_or_get_cached(
     let key = PlanCacheKey {
         backend: backend.capabilities().backend,
         determinism,
-        plan_fingerprint: fingerprint_plan(plan),
+        graph_fingerprint: plan.graph_fingerprint,
+        shape_signature_hash: plan.shape_signature_hash,
     };
 
     {
@@ -60,31 +61,6 @@ pub fn clear_plan_cache() {
 fn cache() -> &'static Mutex<PlanCache> {
     static CACHE: OnceLock<Mutex<PlanCache>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(PlanCache::default()))
-}
-
-fn fingerprint_plan(plan: &ExecutionPlan) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-
-    plan.schedule.ordered_nodes.hash(&mut hasher);
-    plan.allocation.peak_bytes.hash(&mut hasher);
-
-    let mut buffer_pairs = plan
-        .allocation
-        .buffer_map
-        .iter()
-        .map(|(value, buffer)| (value.0, buffer.0))
-        .collect::<Vec<_>>();
-    buffer_pairs.sort_unstable();
-    buffer_pairs.hash(&mut hasher);
-
-    plan.placement_hints.hash(&mut hasher);
-
-    for group in &plan.kernel_groups {
-        group.kind.hash(&mut hasher);
-        group.nodes.hash(&mut hasher);
-    }
-
-    hasher.finish()
 }
 
 #[cfg(test)]
