@@ -24,6 +24,7 @@ pub struct TrainConfig {
 pub struct TrainResult {
     pub final_parameters: HashMap<String, Tensor>,
     pub final_loss: f32,
+    pub optimizer_state: OptimizerState,
 }
 
 #[derive(Debug, Clone)]
@@ -183,6 +184,7 @@ pub fn train_graph_with_backend(
     Ok(TrainResult {
         final_parameters: parameter_tensors,
         final_loss,
+        optimizer_state,
     })
 }
 
