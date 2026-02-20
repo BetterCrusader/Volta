@@ -276,6 +276,18 @@ This CUDA training verify script enforces:
 - strict replay and optimizer-state parity gates
 - CUDA training memory regression guard
 
+### Phase 3 XL + performance checks
+
+```bash
+bash scripts/ci/xl_verify.sh
+```
+
+This XL verify script enforces:
+
+- execution plan cache regression gate
+- static memory budget and checkpointing gates
+- backend capability matrix + model export gates
+
 CUDA strict determinism governance policy:
 
 - `docs/governance/cuda-determinism-policy.md`

@@ -39,6 +39,9 @@ jobs:
       - name: Wave 1 quality gates
         run: bash scripts/ci/wave1_local_verify.sh
 
+      - name: XL verify gates
+        run: bash scripts/ci/xl_verify.sh
+
       - name: Fuzz smoke
         run: bash scripts/ci/fuzz_smoke.sh
 
