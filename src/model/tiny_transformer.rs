@@ -8,7 +8,7 @@ use super::{CompiledModel, Dataset, Example, MSELoss, ModelBuilder, Parameter, T
 #[derive(Debug, Clone)]
 struct FixtureSample {
     x: [f32; 4],
-    target: [f32; 2],
+    target: [f32; 1],
 }
 
 #[derive(Debug, Clone)]
@@ -22,19 +22,19 @@ impl TinyTransformerFixtureDataset {
             rows: vec![
                 FixtureSample {
                     x: [1.0, 0.0, 0.0, 0.0],
-                    target: [1.0, 0.0],
+                    target: [1.0],
                 },
                 FixtureSample {
                     x: [0.0, 1.0, 0.0, 0.0],
-                    target: [0.0, 1.0],
+                    target: [0.0],
                 },
                 FixtureSample {
                     x: [1.0, 1.0, 0.0, 0.0],
-                    target: [1.0, 1.0],
+                    target: [1.0],
                 },
                 FixtureSample {
                     x: [0.5, 0.5, 0.0, 0.0],
-                    target: [0.5, 0.5],
+                    target: [0.5],
                 },
             ],
         }
@@ -62,7 +62,7 @@ impl Dataset for TinyTransformerFixtureDataset {
         );
         inputs.insert(
             "target".to_string(),
-            Tensor::new(vec![1, 2], row.target.to_vec()).map_err(|err| TrainApiError {
+            Tensor::new(vec![1, 1], row.target.to_vec()).map_err(|err| TrainApiError {
                 message: format!("fixture tensor target is invalid: {}", err.message),
             })?,
         );
@@ -112,12 +112,12 @@ pub fn build_tiny_transformer_fixture_for_tests() -> (
         .add_parameter(Parameter::new(
             "tiny.w_o",
             Tensor::new(
-                vec![4, 2],
+                vec![4, 1],
                 vec![
-                    0.1, 0.0, // row 0
-                    0.0, 0.1, // row 1
-                    0.0, 0.0, // row 2
-                    0.0, 0.0, // row 3
+                    0.1, // row 0
+                    0.0, // row 1
+                    0.0, // row 2
+                    0.0, // row 3
                 ],
             )
             .expect("fixture w_o tensor must be valid"),
@@ -128,7 +128,7 @@ pub fn build_tiny_transformer_fixture_for_tests() -> (
     let b_o = builder
         .add_parameter(Parameter::new(
             "tiny.b_o",
-            Tensor::new(vec![1, 2], vec![0.0, 0.0]).expect("fixture b_o tensor must be valid"),
+            Tensor::new(vec![1, 1], vec![0.0]).expect("fixture b_o tensor must be valid"),
             true,
         ))
         .expect("fixture parameter tiny.b_o must build");
@@ -149,7 +149,7 @@ pub fn build_tiny_transformer_fixture_for_tests() -> (
         .add_op(Op::Add(out_linear, b_o))
         .expect("fixture add out+b must build");
 
-    let output_shape = TensorShape(vec![1, 2]);
+    let output_shape = TensorShape(vec![1, 1]);
     let loss = MSELoss
         .build(&mut builder, logits, &output_shape, target, &output_shape)
         .expect("fixture loss must build");
@@ -191,7 +191,7 @@ mod tests {
             4,
             "fixture dataset size changed unexpectedly"
         );
-        assert_eq!(model.output_shape.0, vec![1, 2]);
+        assert_eq!(model.output_shape.0, vec![1, 1]);
         assert!(
             model.loss.is_some(),
             "fixture model must include loss value"
