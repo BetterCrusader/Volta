@@ -43,6 +43,16 @@
 - Distributed training (multi-GPU), checkpointing format, export model format.
 - Auto-tuning cluster / telemetry dashboard.
 
+## Wave 1 (Quality Fortress Foundation)
+
+Wave 1 establishes enforceable governance and gate foundations before deeper release hardening.
+
+- Add governance docs under `docs/governance/` and validate them with tests.
+- Add ownership and PR policy files (`.github/CODEOWNERS`, PR template).
+- Add tier-detection and policy-check scripts with unit tests.
+- Add PR gate workflow for fmt/clippy/tests/CLI smoke/property-fast checks.
+- Keep CLI/API behavior backward compatible while introducing quality enforcement.
+
 ---
 
 ## Функціональні вимоги (детально)

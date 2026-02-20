@@ -1,0 +1,25 @@
+# Volta ownership model (replace placeholder handles with real maintainers)
+
+# Default owner
+* @volta-maintainers
+
+# Tier A (kernel-level)
+/src/ir/ @volta-runtime-owner @volta-build-quality-owner
+/src/device/ @volta-runtime-owner @volta-build-quality-owner
+/src/ir/tensor.rs @volta-runtime-owner @volta-build-quality-owner
+
+# Tier B (model/runtime behavior)
+/src/model/ @volta-model-owner @volta-build-quality-owner
+
+# Tier C (language and control plane)
+/src/lexer.rs @volta-language-owner
+/src/parser.rs @volta-language-owner
+/src/semantic.rs @volta-language-owner
+/src/executor.rs @volta-language-owner
+/src/autopilot.rs @volta-language-owner
+
+# Governance and quality automation
+/docs/governance/ @volta-build-quality-owner @volta-runtime-owner
+/.github/workflows/ @volta-build-quality-owner
+/scripts/ci/ @volta-build-quality-owner
+/scripts/perf/ @volta-build-quality-owner @volta-runtime-owner
