@@ -8,6 +8,9 @@ use volta::ir::{
 
 #[test]
 fn cpu_and_cuda_optimizers_match_state_in_strict_mode() {
+    if !cuda_runtime_available() {
+        return;
+    }
     with_determinism("strict", || {
         let (graph, loss) = build_linear_mse_graph();
         let dataset = vec![sample(1.0, 2.0), sample(2.0, 4.0), sample(3.0, 6.0)];
@@ -103,6 +106,15 @@ fn with_determinism(level: &str, run: impl FnOnce()) {
     };
     let _restore = EnvVarRestore::set("VOLTA_DETERMINISM", level);
     run();
+}
+
+fn cuda_runtime_available() -> bool {
+    let result = std::panic::catch_unwind(|| volta::ir::cuda::device::CudaDevice::new(0));
+    match result {
+        Ok(Ok(_)) => true,
+        Ok(Err(_)) => false,
+        Err(_) => false,
+    }
 }
 
 fn env_lock() -> &'static Mutex<()> {

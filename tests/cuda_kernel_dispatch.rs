@@ -27,6 +27,9 @@ fn cuda_lowering_dispatches_supported_inference_kernels() {
 
 #[test]
 fn cuda_and_cpu_runtime_paths_match_for_supported_dispatch_graph() {
+    if !cuda_runtime_available() {
+        return;
+    }
     let graph = build_supported_inference_graph();
     let plan = build_execution_plan(&graph, &HashSet::new()).expect("plan should build");
     let context = supported_inference_context();
@@ -114,4 +117,13 @@ fn supported_inference_context() -> ExecutionContext {
         },
     );
     context
+}
+
+fn cuda_runtime_available() -> bool {
+    let result = std::panic::catch_unwind(|| volta::ir::cuda::device::CudaDevice::new(0));
+    match result {
+        Ok(Ok(_)) => true,
+        Ok(Err(_)) => false,
+        Err(_) => false,
+    }
 }

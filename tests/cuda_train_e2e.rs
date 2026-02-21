@@ -5,6 +5,9 @@ use volta::model::{
 
 #[test]
 fn tiny_transformer_training_runs_with_cuda_backend() {
+    if !cuda_runtime_available() {
+        return;
+    }
     let (model, dataset, train_config, infer_input) = build_tiny_transformer_fixture_for_tests();
     let cuda = CudaBackend;
 
@@ -15,4 +18,13 @@ fn tiny_transformer_training_runs_with_cuda_backend() {
     let out = infer_with_backend(&model, &trained.final_parameters, &infer_input, &cuda)
         .expect("tiny transformer infer should run with cuda backend");
     assert_eq!(out.shape, model.output_shape.0);
+}
+
+fn cuda_runtime_available() -> bool {
+    let result = std::panic::catch_unwind(|| volta::ir::cuda::device::CudaDevice::new(0));
+    match result {
+        Ok(Ok(_)) => true,
+        Ok(Err(_)) => false,
+        Err(_) => false,
+    }
 }

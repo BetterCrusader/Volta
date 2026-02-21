@@ -193,15 +193,27 @@ def baseline_path(baseline_dir: pathlib.Path, signature: str) -> pathlib.Path:
 
 def baseline_candidates(signature: str) -> List[str]:
     candidates = [signature]
-
     parts = signature.split("-")
     if len(parts) >= 2:
-        generic_signature = f"{parts[0]}-{parts[1]}-generic"
-        if generic_signature not in candidates:
-            candidates.append(generic_signature)
-        example_signature = f"example-{parts[0]}-{parts[1]}-generic"
-        if example_signature not in candidates:
-            candidates.append(example_signature)
+        system = parts[0]
+        machine = parts[1]
+        # Keep compatibility for normalized machines like x86-64.
+        if len(parts) >= 3 and parts[2].isdigit():
+            machine = f"{parts[1]}-{parts[2]}"
+
+        machine_variants: List[str] = [machine]
+        if "-" in machine and "_" not in machine:
+            underscore_variant = machine.replace("-", "_")
+            if underscore_variant not in machine_variants:
+                machine_variants.append(underscore_variant)
+
+        for machine_variant in machine_variants:
+            generic_signature = f"{system}-{machine_variant}-generic"
+            if generic_signature not in candidates:
+                candidates.append(generic_signature)
+            example_signature = f"example-{system}-{machine_variant}-generic"
+            if example_signature not in candidates:
+                candidates.append(example_signature)
 
     return candidates
 

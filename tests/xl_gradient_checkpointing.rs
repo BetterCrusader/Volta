@@ -41,6 +41,9 @@ fn checkpoint_plan_rejects_zero_interval() {
 
 #[test]
 fn strict_training_with_and_without_checkpointing_produces_identical_result() {
+    if !cuda_runtime_available() {
+        return;
+    }
     with_determinism("strict", || {
         let (model, dataset, mut config, _infer_input) = build_tiny_transformer_fixture_for_tests();
         let cuda = CudaBackend;
@@ -81,6 +84,15 @@ fn with_determinism(level: &str, run: impl FnOnce()) {
     };
     let _restore = EnvVarRestore::set("VOLTA_DETERMINISM", level);
     run();
+}
+
+fn cuda_runtime_available() -> bool {
+    let result = std::panic::catch_unwind(|| volta::ir::cuda::device::CudaDevice::new(0));
+    match result {
+        Ok(Ok(_)) => true,
+        Ok(Err(_)) => false,
+        Err(_) => false,
+    }
 }
 
 fn env_lock() -> &'static Mutex<()> {

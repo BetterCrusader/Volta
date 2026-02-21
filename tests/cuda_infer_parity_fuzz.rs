@@ -7,7 +7,7 @@ use volta::model::{CompiledModel, ModelBuilder, Parameter, TensorShape, infer_wi
 #[test]
 fn cuda_infer_matches_cpu_for_seeded_fuzz_cases() {
     with_determinism("strict", || {
-        if volta::ir::cuda::device::CudaDevice::default_shared().is_err() {
+        if !cuda_runtime_available() {
             return;
         }
 
@@ -146,6 +146,15 @@ fn is_cuda_unavailable(message: &str) -> bool {
         || message.contains("NVRTC")
         || message.contains("cuBLAS init failed")
         || message.contains("CUDA context init failed")
+}
+
+fn cuda_runtime_available() -> bool {
+    let result = std::panic::catch_unwind(|| volta::ir::cuda::device::CudaDevice::new(0));
+    match result {
+        Ok(Ok(_)) => true,
+        Ok(Err(_)) => false,
+        Err(_) => false,
+    }
 }
 
 fn with_determinism(level: &str, run: impl FnOnce()) {

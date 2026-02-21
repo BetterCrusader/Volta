@@ -6,9 +6,8 @@ use volta::ir::cuda::kernels::softmax::softmax_f32;
 
 #[test]
 fn cuda_add_matches_cpu() {
-    let device = match CudaDevice::new(0) {
-        Ok(device) => device,
-        Err(_) => return,
+    let Some(device) = safe_cuda_device() else {
+        return;
     };
 
     let left = vec![1.0_f32, -2.0, 3.5, 4.0];
@@ -32,9 +31,8 @@ fn cuda_add_matches_cpu() {
 
 #[test]
 fn cuda_relu_matches_cpu() {
-    let device = match CudaDevice::new(0) {
-        Ok(device) => device,
-        Err(_) => return,
+    let Some(device) = safe_cuda_device() else {
+        return;
     };
 
     let input = vec![-3.0_f32, -0.1, 0.0, 0.5, 2.0];
@@ -55,9 +53,8 @@ fn cuda_relu_matches_cpu() {
 
 #[test]
 fn cuda_div_matches_cpu() {
-    let device = match CudaDevice::new(0) {
-        Ok(device) => device,
-        Err(_) => return,
+    let Some(device) = safe_cuda_device() else {
+        return;
     };
 
     let left = vec![6.0_f32, 8.0, 9.0, 12.0];
@@ -81,9 +78,8 @@ fn cuda_div_matches_cpu() {
 
 #[test]
 fn cuda_softmax_strict_is_deterministic() {
-    let device = match CudaDevice::new(0) {
-        Ok(device) => device,
-        Err(_) => return,
+    let Some(device) = safe_cuda_device() else {
+        return;
     };
 
     let input = vec![1.0_f32, 2.0, 3.0, 4.0];
@@ -103,4 +99,13 @@ fn cuda_softmax_strict_is_deterministic() {
         (sum - 1.0).abs() <= 1e-5,
         "softmax must sum to one, got {sum}"
     );
+}
+
+fn safe_cuda_device() -> Option<CudaDevice> {
+    let result = std::panic::catch_unwind(|| CudaDevice::new(0));
+    match result {
+        Ok(Ok(device)) => Some(device),
+        Ok(Err(_)) => None,
+        Err(_) => None,
+    }
 }

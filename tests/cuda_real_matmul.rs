@@ -4,9 +4,8 @@ use volta::ir::cuda::kernels::matmul::matmul_f32;
 
 #[test]
 fn cuda_device_reports_runtime_properties_when_available() {
-    let device = match CudaDevice::new(0) {
-        Ok(device) => device,
-        Err(_) => return,
+    let Some(device) = safe_cuda_device() else {
+        return;
     };
 
     assert!(device.total_memory_bytes > 0);
@@ -19,9 +18,8 @@ fn cuda_device_reports_runtime_properties_when_available() {
 
 #[test]
 fn cuda_matmul_matches_cpu() {
-    let device = match CudaDevice::new(0) {
-        Ok(device) => device,
-        Err(_) => return,
+    let Some(device) = safe_cuda_device() else {
+        return;
     };
 
     let m = 2usize;
@@ -57,4 +55,13 @@ fn cpu_matmul(lhs: &[f32], rhs: &[f32], m: usize, n: usize, k: usize) -> Vec<f32
         }
     }
     out
+}
+
+fn safe_cuda_device() -> Option<CudaDevice> {
+    let result = std::panic::catch_unwind(|| CudaDevice::new(0));
+    match result {
+        Ok(Ok(device)) => Some(device),
+        Ok(Err(_)) => None,
+        Err(_) => None,
+    }
 }

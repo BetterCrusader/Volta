@@ -7,6 +7,9 @@ use volta::model::{build_tiny_transformer_fixture_for_tests, train_with_backend}
 
 #[test]
 fn strict_cuda_training_replay_is_bitwise_stable() {
+    if !cuda_runtime_available() {
+        return;
+    }
     with_determinism("strict", || {
         let (model, dataset, train_config, _infer_input) =
             build_tiny_transformer_fixture_for_tests();
@@ -73,6 +76,15 @@ fn with_determinism(level: &str, run: impl FnOnce()) {
     };
     let _restore = EnvVarRestore::set("VOLTA_DETERMINISM", level);
     run();
+}
+
+fn cuda_runtime_available() -> bool {
+    let result = std::panic::catch_unwind(|| volta::ir::cuda::device::CudaDevice::new(0));
+    match result {
+        Ok(Ok(_)) => true,
+        Ok(Err(_)) => false,
+        Err(_) => false,
+    }
 }
 
 fn env_lock() -> &'static Mutex<()> {

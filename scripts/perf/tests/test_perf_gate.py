@@ -71,6 +71,32 @@ class PerfGateBaselineLookupTests(unittest.TestCase):
             self.assertEqual(resolved_signature, "linux-x86_64-generic")
             self.assertEqual(resolved_file, generic_file)
 
+    def test_baseline_candidates_support_dash_normalized_machine(self):
+        candidates = baseline_candidates("linux-x86-64-intel-xeon")
+        self.assertEqual(
+            candidates,
+            [
+                "linux-x86-64-intel-xeon",
+                "linux-x86-64-generic",
+                "example-linux-x86-64-generic",
+                "linux-x86_64-generic",
+                "example-linux-x86_64-generic",
+            ],
+        )
+
+    def test_resolve_baseline_file_handles_dash_machine_signature(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            baseline_dir = Path(temp_dir) / "baselines"
+            baseline_dir.mkdir(parents=True, exist_ok=True)
+            generic_file = baseline_dir / "linux-x86_64-generic.json"
+            generic_file.write_text("{}", encoding="utf-8")
+
+            resolved_signature, resolved_file = resolve_baseline_file(
+                baseline_dir, "linux-x86-64-intel-r-xeon"
+            )
+            self.assertEqual(resolved_signature, "linux-x86_64-generic")
+            self.assertEqual(resolved_file, generic_file)
+
 
 class PerfGateCliTests(unittest.TestCase):
     def test_cli_creates_baseline_when_missing_and_allowed(self):
