@@ -23,4 +23,7 @@ pub use contract::{
 pub use plugin::{OpImportPlugin, PluginRegistry};
 
 #[cfg(feature = "onnx-import")]
-pub use onnx::{OnnxGraphStub, OnnxImporter, OnnxNodeStub, OnnxOpStub, import_onnx_stub_graph};
+pub use onnx::{
+    OnnxGraphStub, OnnxImporter, OnnxNodeStub, OnnxOpStub, import_onnx_bytes, import_onnx_file,
+    import_onnx_stub_graph,
+};

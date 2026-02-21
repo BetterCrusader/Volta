@@ -42,6 +42,9 @@ jobs:
       - name: XL verify gates
         run: bash scripts/ci/xl_verify.sh
 
+      - name: Interop ONNX verify
+        run: bash scripts/ci/interop_onnx_verify.sh
+
       - name: Fuzz smoke
         run: bash scripts/ci/fuzz_smoke.sh
 

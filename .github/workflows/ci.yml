@@ -28,3 +28,6 @@ jobs:
 
       - name: Tests (release)
         run: cargo test --release
+
+      - name: Interop ONNX verify
+        run: bash scripts/ci/interop_onnx_verify.sh

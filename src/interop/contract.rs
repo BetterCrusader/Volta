@@ -36,7 +36,9 @@ pub enum IrOpContract {
     Sub { lhs: String, rhs: String },
     Mul { lhs: String, rhs: String },
     Div { lhs: String, rhs: String },
+    Neg { input: String },
     MatMul { lhs: String, rhs: String },
+    Transpose { input: String },
     Relu { input: String },
     Softmax { input: String },
     Output { value: String },
@@ -215,11 +217,25 @@ impl IrGraphContract {
                         .map_err(|err| InteropError::new(err.message))?;
                     value
                 }
+                IrOpContract::Neg { input } => {
+                    let input = resolve_value(&ids, input)?;
+                    let (_, value) = graph
+                        .add_op(block, Op::Neg(input))
+                        .map_err(|err| InteropError::new(err.message))?;
+                    value
+                }
                 IrOpContract::MatMul { lhs, rhs } => {
                     let lhs = resolve_value(&ids, lhs)?;
                     let rhs = resolve_value(&ids, rhs)?;
                     let (_, value) = graph
                         .add_op(block, Op::MatMul(lhs, rhs))
+                        .map_err(|err| InteropError::new(err.message))?;
+                    value
+                }
+                IrOpContract::Transpose { input } => {
+                    let input = resolve_value(&ids, input)?;
+                    let (_, value) = graph
+                        .add_op(block, Op::Transpose(input))
                         .map_err(|err| InteropError::new(err.message))?;
                     value
                 }
@@ -288,7 +304,9 @@ fn op_inputs(op: &IrOpContract) -> Vec<&str> {
         | IrOpContract::Mul { lhs, rhs }
         | IrOpContract::Div { lhs, rhs }
         | IrOpContract::MatMul { lhs, rhs } => vec![lhs.as_str(), rhs.as_str()],
-        IrOpContract::Relu { input }
+        IrOpContract::Neg { input }
+        | IrOpContract::Transpose { input }
+        | IrOpContract::Relu { input }
         | IrOpContract::Softmax { input }
         | IrOpContract::Output { value: input } => vec![input.as_str()],
     }
