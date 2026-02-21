@@ -225,8 +225,18 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
             let mut doctor_strict = false;
             for arg in args.iter().skip(1) {
                 match arg.as_str() {
-                    "--json" => doctor_json = true,
-                    "--strict" => doctor_strict = true,
+                    "--json" => {
+                        if doctor_json {
+                            return Err("'doctor --json' was provided more than once".to_string());
+                        }
+                        doctor_json = true;
+                    }
+                    "--strict" => {
+                        if doctor_strict {
+                            return Err("'doctor --strict' was provided more than once".to_string());
+                        }
+                        doctor_strict = true;
+                    }
                     _ => {
                         return Err(
                             "'doctor' accepts only optional '--json' and '--strict'".to_string()
@@ -597,6 +607,28 @@ mod tests {
         let args = vec!["doctor".to_string(), "--yaml".to_string()];
         let err = parse_command(&args).expect_err("doctor unknown flag must fail");
         assert!(err.contains("accepts only optional '--json' and '--strict'"));
+    }
+
+    #[test]
+    fn parse_command_rejects_duplicate_doctor_json_flag() {
+        let args = vec![
+            "doctor".to_string(),
+            "--json".to_string(),
+            "--json".to_string(),
+        ];
+        let err = parse_command(&args).expect_err("duplicate --json must fail");
+        assert!(err.contains("provided more than once"));
+    }
+
+    #[test]
+    fn parse_command_rejects_duplicate_doctor_strict_flag() {
+        let args = vec![
+            "doctor".to_string(),
+            "--strict".to_string(),
+            "--strict".to_string(),
+        ];
+        let err = parse_command(&args).expect_err("duplicate --strict must fail");
+        assert!(err.contains("provided more than once"));
     }
 
     #[test]

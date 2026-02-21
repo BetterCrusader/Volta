@@ -159,6 +159,22 @@ fn doctor_command_rejects_unknown_flag() {
 }
 
 #[test]
+fn doctor_command_rejects_duplicate_json_flag() {
+    let output = run_volta(&["doctor", "--json", "--json"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "duplicate --json must fail");
+    assert!(stderr.contains("provided more than once"));
+}
+
+#[test]
+fn doctor_command_rejects_duplicate_strict_flag() {
+    let output = run_volta(&["doctor", "--strict", "--strict"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "duplicate --strict must fail");
+    assert!(stderr.contains("provided more than once"));
+}
+
+#[test]
 fn doctor_reports_invalid_gpu_env_value() {
     let output = run_volta_with_env(&["doctor"], "VOLTA_GPU_AVAILABLE", "maybe");
     let stdout = String::from_utf8_lossy(&output.stdout);
