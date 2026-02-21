@@ -328,14 +328,12 @@ Release/nightly workflows are defined in:
 
 V1 release checklist and cut script:
 
-- `docs/release/v1-release-checklist.md`
 - `scripts/release/cut_v1.sh`
 - `scripts/release/cut_v1.ps1` (Windows-native flow, no WSL required)
 
 Contributor onboarding:
 
 - `CONTRIBUTING.md`
-- `docs/community/first-pr-guide.md`
 
 Run demo binary:
 
