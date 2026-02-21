@@ -2,11 +2,11 @@ use std::collections::HashMap;
 
 use crate::ir::autograd::build_reverse_graph;
 use crate::ir::interpreter::{ExecutionContext, RuntimeValue};
-use crate::ir::optimizer::{OptimizerConfig, OptimizerState, apply_gradients};
+use crate::ir::optimizer::{OptimizerConfig, OptimizerState};
 use crate::ir::tensor::Tensor;
 use crate::ir::{
-    Backend, CpuBackend, Graph, Op, ValueId, build_execution_plan, execute_terminal_with_backend,
-    execute_value_with_backend, verify_graph,
+    Backend, CompilerFlags, CpuBackend, Graph, Op, ValueId, build_execution_plan,
+    execute_terminal_with_backend, execute_value_with_backend, verify_graph,
 };
 
 #[derive(Debug, Clone)]
@@ -65,6 +65,7 @@ pub fn train_graph_with_backend(
         .map_err(|err| TrainError {
             message: format!("Failed to build forward execution plan: {}", err.message),
         })?;
+    let determinism = CompilerFlags::from_env().determinism;
 
     let parameter_values = collect_parameter_values(forward_graph);
     let parameter_names = collect_parameter_names(forward_graph);
@@ -147,15 +148,17 @@ pub fn train_graph_with_backend(
                 gradients_by_name.insert(name.clone(), grad_tensor);
             }
 
-            apply_gradients(
-                &mut parameter_tensors,
-                &gradients_by_name,
-                &config.optimizer,
-                &mut optimizer_state,
-            )
-            .map_err(|e| TrainError {
-                message: format!("Optimizer step failed: {}", e.message),
-            })?;
+            backend
+                .apply_gradients(
+                    &mut parameter_tensors,
+                    &gradients_by_name,
+                    &config.optimizer,
+                    &mut optimizer_state,
+                    determinism,
+                )
+                .map_err(|e| TrainError {
+                    message: format!("Optimizer step failed: {}", e.message),
+                })?;
         }
     }
 

@@ -1,9 +1,10 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use volta::ir::{
     Backend, BackendCapabilities, BackendError, BackendKind, CompiledProgram, DeterminismLevel,
-    ExecutionPlan,
+    ExecutionPlan, clear_plan_cache,
 };
 
 #[derive(Debug, Clone)]
@@ -46,6 +47,8 @@ impl Backend for SpyBackend {
 
 #[test]
 fn infer_uses_runtime_gateway_single_path() {
+    let _guard = cache_lock();
+    clear_plan_cache();
     let (backend, calls) = SpyBackend::new();
     let (model, _dataset, _cfg, infer_input) =
         volta::model::build_tiny_transformer_fixture_for_tests();
@@ -62,6 +65,8 @@ fn infer_uses_runtime_gateway_single_path() {
 
 #[test]
 fn train_uses_runtime_gateway_single_path() {
+    let _guard = cache_lock();
+    clear_plan_cache();
     let (backend, calls) = SpyBackend::new();
     let (model, dataset, mut cfg, _infer_input) =
         volta::model::build_tiny_transformer_fixture_for_tests();
@@ -77,3 +82,13 @@ fn train_uses_runtime_gateway_single_path() {
         "runtime gateway should compile at least one execution plan for training"
     );
 }
+
+fn cache_lock() -> std::sync::MutexGuard<'static, ()> {
+    let lock = CACHE_LOCK.get_or_init(|| Mutex::new(()));
+    match lock.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
+static CACHE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();

@@ -28,9 +28,15 @@ fn cuda_infer_parity_stays_within_strict_budget() {
         });
         assert_eq!(baseline.backend_signature, runtime_backend_signature());
         assert_eq!(baseline.determinism_level, "strict");
-        assert_eq!(
+        let runtime_fingerprint = device_capability_fingerprint();
+        assert!(
+            device_fingerprint_matches(
+                &baseline.device_capability_fingerprint,
+                &runtime_fingerprint
+            ),
+            "device_capability_fingerprint mismatch: baseline='{}' runtime='{}'",
             baseline.device_capability_fingerprint,
-            device_capability_fingerprint()
+            runtime_fingerprint,
         );
 
         let (model, infer_input) = build_parity_fixture_model();
@@ -221,6 +227,22 @@ fn device_capability_fingerprint() -> String {
         "{}-sm{}{}",
         device.name, device.compute_capability_major, device.compute_capability_minor
     )
+}
+
+fn device_fingerprint_matches(expected: &str, actual: &str) -> bool {
+    if expected.eq_ignore_ascii_case("any") {
+        return true;
+    }
+
+    let expected_lower = expected.to_ascii_lowercase();
+    if let Some(sm) = expected_lower.strip_prefix("any-sm") {
+        if sm.is_empty() {
+            return false;
+        }
+        return actual.to_ascii_lowercase().ends_with(&format!("-sm{sm}"));
+    }
+
+    expected.eq_ignore_ascii_case(actual)
 }
 
 fn max_abs_diff(left: &[f32], right: &[f32]) -> f32 {

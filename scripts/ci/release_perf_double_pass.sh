@@ -6,7 +6,6 @@ BASELINE_DIR="${BASELINE_DIR:-benchmarks/baselines}"
 REPORT_DIR="${REPORT_DIR:-benchmarks/reports}"
 
 SIGNATURE="$(python scripts/perf/cpu_signature.py)"
-BASELINE_FILE="${BASELINE_DIR}/${SIGNATURE}.json"
 
 mkdir -p "$REPORT_DIR"
 
@@ -42,14 +41,31 @@ if run_single_pass 2; then
   PASS2_OK=1
 fi
 
-if [[ -f "$BASELINE_FILE" ]]; then
+resolve_baseline_file() {
+  local gate_file="$1"
+  python - "$gate_file" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+print(payload.get("baseline_file", ""))
+PY
+}
+
+BASELINE_FILE_PASS1="$(resolve_baseline_file "${REPORT_DIR}/release-perf-pass-1-gate.json")"
+BASELINE_FILE_PASS2="$(resolve_baseline_file "${REPORT_DIR}/release-perf-pass-2-gate.json")"
+
+if [[ -n "$BASELINE_FILE_PASS1" && -f "$BASELINE_FILE_PASS1" ]]; then
   python scripts/perf/baseline_compare.py \
-    --baseline-file "$BASELINE_FILE" \
+    --baseline-file "$BASELINE_FILE_PASS1" \
     --candidate-file "${REPORT_DIR}/release-perf-pass-1-probe.json" \
     --output-markdown "${REPORT_DIR}/release-perf-pass-1.md" >/dev/null
+fi
 
+if [[ -n "$BASELINE_FILE_PASS2" && -f "$BASELINE_FILE_PASS2" ]]; then
   python scripts/perf/baseline_compare.py \
-    --baseline-file "$BASELINE_FILE" \
+    --baseline-file "$BASELINE_FILE_PASS2" \
     --candidate-file "${REPORT_DIR}/release-perf-pass-2-probe.json" \
     --output-markdown "${REPORT_DIR}/release-perf-pass-2.md" >/dev/null
 fi

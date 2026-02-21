@@ -4,6 +4,7 @@ pub mod executor;
 pub mod kernels;
 pub mod lowering;
 pub mod memory;
+pub mod optimizer;
 pub mod train_executor;
 
 pub use determinism::{CudaDeterminismError, CudaDeterminismPolicy, enforce_policy, policy_for};
