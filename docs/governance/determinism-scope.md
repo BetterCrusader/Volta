@@ -1,5 +1,7 @@
 # Determinism Scope
 
+Determinism is powerful only when its boundaries are explicit.
+
 This document defines deterministic guarantees and explicit non-guarantees.
 
 ## Guaranteed Determinism

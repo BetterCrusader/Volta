@@ -7,7 +7,8 @@
 
 ## Why
 
-Volta already has a solid internal IR and CI quality gates. To safely import models from external ecosystems, we need a stable, versioned contract that is:
+Volta already has a strong internal IR and hard CI gates.
+To import external models safely, we need a stable, versioned contract that is:
 
 - deterministic by default
 - strict about graph validity

@@ -1,11 +1,12 @@
 # Contributing to Volta
 
-Volta prioritizes determinism, verifier-backed correctness, and explicit contracts over rapid unchecked feature growth.
+You are contributing to a deterministic compiler core, not a demo repo.
+Every change should improve clarity, correctness, and replayability.
 
-## Development setup
+## Quick Setup
 
-1. Install stable Rust and Cargo.
-2. Clone repository.
+1. Install stable Rust + Cargo.
+2. Clone the repository.
 3. Run baseline checks:
 
 ```bash
@@ -20,20 +21,20 @@ For ONNX interop work:
 cargo test --features onnx-import --test interop_onnx_parser
 ```
 
-## Branch and PR workflow
+## Branch and PR Workflow
 
 1. Branch from `main`.
-2. Keep changes scoped to one clear objective.
+2. Keep each PR scoped to one objective.
 3. Include tests for behavior changes.
 4. Push branch and open PR.
 5. Merge only when all CI checks are green.
 
-Recommended branch naming:
+Recommended branch names:
 
 - `codex/<feature-or-fix>`
 - `milestone/<milestone-name>`
 
-## Quality gates (required)
+## Required Quality Gates
 
 Before opening a PR, run:
 
@@ -46,33 +47,41 @@ bash scripts/ci/interop_onnx_verify.sh
 bash scripts/ci/xl_verify.sh
 ```
 
-Windows users can run release parity flow with:
+Windows release parity path:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/release/cut_v1.ps1
 ```
 
-## Engineering rules
+## Engineering Rules (Hard)
 
 1. No silent fallback paths.
 2. No verifier bypasses.
 3. Preserve deterministic behavior.
 4. Keep contract/version changes explicit.
-5. If a feature is parsed but not lowered, fail loudly with actionable error text.
+5. If parsed but not lowered, fail loudly with actionable diagnostics.
 
-## Commit guidance
+## Commit Message Guidance
 
-Write descriptive commit messages tied to impact:
+Use impact-oriented commits:
 
 - `feat(interop): add wave2 op parsing guards`
 - `fix(ci): align docs sync assertions`
-- `docs(community): add first-pr guide`
+- `docs(community): improve onboarding and guardrails`
 
-## Reporting issues
+## Reporting Issues
 
-Include:
+Always include:
 
 1. Minimal reproduction.
 2. Expected behavior.
 3. Actual behavior.
 4. Environment (`rustc -V`, OS, feature flags).
+
+## Review Bar
+
+A good PR in Volta is:
+
+- deterministic by design,
+- explicit about risk and rollback,
+- easy to verify from CI output.

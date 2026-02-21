@@ -1,5 +1,7 @@
 # Owner Model
 
+Clear ownership turns "someone should fix this" into "this gets fixed now".
+
 ## Roles
 
 - Runtime Owner: Tier A runtime contracts and invariants.

@@ -1,5 +1,7 @@
 # Incident Playbook
 
+When failures happen, this playbook reduces panic and speeds containment.
+
 ## Severity
 
 - `SEV-1`: production-blocking correctness or data integrity failure.

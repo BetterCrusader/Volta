@@ -4,13 +4,17 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use volta::ast::{Program, Stmt};
-use volta::diagnostics::{render_diagnostic, render_span_diagnostic};
+use volta::diagnostics::{best_suggestion, render_diagnostic, render_span_diagnostic};
 use volta::executor::Executor;
 use volta::lexer::Lexer;
 use volta::parser::Parser;
 use volta::semantic::SemanticAnalyzer;
 
-const USAGE: &str = "Usage:\n  volta run <file.vt>\n  volta check <file.vt>\n  volta info <file.vt>\n  volta doctor [--json] [--strict]\n  volta version\n  volta help";
+const USAGE: &str = "Usage:\n  volta run <file.vt> [--quiet]\n  volta check <file.vt> [--quiet]\n  volta info <file.vt>\n  volta doctor [--json] [--strict]\n  volta init [project_dir]\n  volta version\n  volta help";
+const CLI_COMMANDS: [&str; 7] = ["run", "check", "info", "doctor", "init", "version", "help"];
+const INIT_MODEL_TEMPLATE: &str = "x 1\nprint x\n";
+const INIT_CONFIG_TEMPLATE: &str =
+    "[project]\nname = \"volta-project\"\nentry = \"model.vt\"\n";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CommandKind {
@@ -18,6 +22,7 @@ enum CommandKind {
     Check,
     Info,
     Doctor,
+    Init,
     Version,
     Help,
     LegacyBenchInfer,
@@ -80,6 +85,19 @@ fn main() -> ExitCode {
                 return ExitCode::from(1);
             }
             ExitCode::SUCCESS
+        }
+        CommandKind::Init => {
+            let target_dir = command.path.as_deref().unwrap_or(".");
+            match init_project(target_dir) {
+                Ok(summary) => {
+                    println!("{summary}");
+                    ExitCode::SUCCESS
+                }
+                Err(message) => {
+                    eprintln!("{message}");
+                    ExitCode::from(1)
+                }
+            }
         }
         CommandKind::LegacyBenchInfer => {
             println!("Legacy '--bench-infer' mode is deprecated and currently a no-op.");
@@ -225,9 +243,9 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
     }
 
     match cmd.as_str() {
-        "run" => parse_file_command(CommandKind::Run, args),
-        "check" => parse_file_command(CommandKind::Check, args),
-        "info" => parse_file_command(CommandKind::Info, args),
+        "run" => parse_file_command(CommandKind::Run, args, true),
+        "check" => parse_file_command(CommandKind::Check, args, true),
+        "info" => parse_file_command(CommandKind::Info, args, false),
         "doctor" => {
             let mut doctor_json = false;
             let mut doctor_strict = false;
@@ -260,6 +278,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
                 quiet: false,
             })
         }
+        "init" => parse_init_command(args),
         "version" | "-v" | "--version" => {
             if args.len() != 1 {
                 return Err("'version' does not accept positional arguments".to_string());
@@ -284,26 +303,81 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
                 quiet: false,
             })
         }
-        _ if args.len() == 1 && !cmd.starts_with('-') => Ok(CommandSpec {
-            kind: CommandKind::Run,
-            path: Some(args[0].clone()),
-            doctor_json: false,
-            doctor_strict: false,
-            quiet: false,
-        }),
-        _ => Err(format!(
-            "Unknown command '{}'. Expected run/check/info/doctor/version/help",
-            args[0]
-        )),
+        _ if args.len() == 1 && !cmd.starts_with('-') => {
+            let token = args[0].as_str();
+            let looks_like_path = token.ends_with(".vt")
+                || token.contains('/')
+                || token.contains('\\')
+                || Path::new(token).exists();
+            if looks_like_path {
+                Ok(CommandSpec {
+                    kind: CommandKind::Run,
+                    path: Some(args[0].clone()),
+                    doctor_json: false,
+                    doctor_strict: false,
+                    quiet: false,
+                })
+            } else {
+                Err(unknown_command_message(&args[0]))
+            }
+        }
+        _ => Err(unknown_command_message(&args[0])),
     }
 }
 
-fn parse_file_command(kind: CommandKind, args: &[String]) -> Result<CommandSpec, String> {
+fn parse_init_command(args: &[String]) -> Result<CommandSpec, String> {
+    if args.len() > 2 {
+        return Err("'init' accepts at most one optional project directory".to_string());
+    }
+    if args.len() == 2 && args[1].starts_with('-') {
+        return Err("'init' does not accept flags".to_string());
+    }
+
+    let target_dir = if args.len() == 2 {
+        let trimmed = args[1].trim();
+        if trimmed.is_empty() {
+            return Err("'init' expects a non-empty project directory".to_string());
+        }
+        trimmed.to_string()
+    } else {
+        ".".to_string()
+    };
+
+    Ok(CommandSpec {
+        kind: CommandKind::Init,
+        path: Some(target_dir),
+        doctor_json: false,
+        doctor_strict: false,
+        quiet: false,
+    })
+}
+
+fn unknown_command_message(input: &str) -> String {
+    if let Some(suggestion) = best_suggestion(input, &CLI_COMMANDS) {
+        return format!(
+            "Unknown command '{}'. Did you mean '{}'? Expected run/check/info/doctor/init/version/help",
+            input, suggestion
+        );
+    }
+    format!(
+        "Unknown command '{}'. Expected run/check/info/doctor/init/version/help",
+        input
+    )
+}
+
+fn parse_file_command(
+    kind: CommandKind,
+    args: &[String],
+    allow_quiet: bool,
+) -> Result<CommandSpec, String> {
     let mut quiet = false;
     let mut path: Option<&str> = None;
 
     for arg in args.iter().skip(1) {
         if arg == "--quiet" {
+            if !allow_quiet {
+                return Err(format!("Command '{}' does not accept '--quiet'", args[0]));
+            }
             if quiet {
                 return Err(format!(
                     "Command '{}' received '--quiet' more than once",
@@ -312,6 +386,21 @@ fn parse_file_command(kind: CommandKind, args: &[String]) -> Result<CommandSpec,
             }
             quiet = true;
             continue;
+        }
+        if arg.starts_with('-') {
+            if allow_quiet {
+                if let Some(suggestion) = best_suggestion(arg, &["--quiet"]) {
+                    return Err(format!(
+                        "Command '{}' accepts only optional '--quiet' plus one file path (did you mean '{}'?)",
+                        args[0], suggestion
+                    ));
+                }
+                return Err(format!(
+                    "Command '{}' accepts only optional '--quiet' plus one file path",
+                    args[0]
+                ));
+            }
+            return Err(format!("Command '{}' does not accept flags", args[0]));
         }
         if path.is_some() {
             return Err(format!(
@@ -348,6 +437,54 @@ fn parse_file_command(kind: CommandKind, args: &[String]) -> Result<CommandSpec,
 fn read_source(path: &str) -> Result<String, String> {
     let p = Path::new(path);
     fs::read_to_string(p).map_err(|err| format!("Failed to read '{}': {}", p.display(), err))
+}
+
+fn init_project(target_dir: &str) -> Result<String, String> {
+    let dir = Path::new(target_dir);
+    if !dir.exists() {
+        fs::create_dir_all(dir).map_err(|err| {
+            format!(
+                "Failed to create project directory '{}': {}",
+                dir.display(),
+                err
+            )
+        })?;
+    } else if !dir.is_dir() {
+        return Err(format!(
+            "Init target '{}' exists but is not a directory",
+            dir.display()
+        ));
+    }
+
+    let files = [
+        ("model.vt", INIT_MODEL_TEMPLATE),
+        ("volta.toml", INIT_CONFIG_TEMPLATE),
+    ];
+
+    let mut created = Vec::new();
+    let mut skipped = Vec::new();
+    for (name, content) in files {
+        let path = dir.join(name);
+        if path.exists() {
+            skipped.push(path.display().to_string());
+            continue;
+        }
+        fs::write(&path, content)
+            .map_err(|err| format!("Failed to write '{}': {}", path.display(), err))?;
+        created.push(path.display().to_string());
+    }
+
+    let mut lines = vec![format!("Initialized Volta project at '{}'", dir.display())];
+    if created.is_empty() {
+        lines.push("Created: none".to_string());
+    } else {
+        lines.push(format!("Created: {}", created.join(", ")));
+    }
+    if !skipped.is_empty() {
+        lines.push(format!("Skipped existing: {}", skipped.join(", ")));
+    }
+    lines.push("Next: volta run model.vt".to_string());
+    Ok(lines.join("\n"))
 }
 
 #[derive(Debug, Clone)]
@@ -727,6 +864,46 @@ mod tests {
     }
 
     #[test]
+    fn parse_command_rejects_unknown_flag_for_run() {
+        let args = vec![
+            "run".to_string(),
+            "--verbose".to_string(),
+            "example.vt".to_string(),
+        ];
+        let err = parse_command(&args).expect_err("unknown run flag must fail");
+        assert!(err.contains("accepts only optional '--quiet' plus one file path"));
+    }
+
+    #[test]
+    fn parse_command_suggests_quiet_for_close_run_flag() {
+        let args = vec![
+            "run".to_string(),
+            "--quite".to_string(),
+            "example.vt".to_string(),
+        ];
+        let err = parse_command(&args).expect_err("misspelled quiet must fail");
+        assert!(err.contains("did you mean '--quiet'?"));
+    }
+
+    #[test]
+    fn parse_command_suggests_closest_command_name() {
+        let args = vec!["chek".to_string()];
+        let err = parse_command(&args).expect_err("unknown command must fail");
+        assert!(err.contains("Did you mean 'check'?"));
+    }
+
+    #[test]
+    fn parse_command_rejects_quiet_for_info() {
+        let args = vec![
+            "info".to_string(),
+            "--quiet".to_string(),
+            "example.vt".to_string(),
+        ];
+        let err = parse_command(&args).expect_err("info must reject --quiet");
+        assert!(err.contains("does not accept '--quiet'"));
+    }
+
+    #[test]
     fn parse_command_accepts_legacy_bench_flags() {
         let args = vec![
             "--bench-infer".to_string(),
@@ -743,6 +920,29 @@ mod tests {
         ];
         let command = parse_command(&args).expect("command should parse");
         assert_eq!(command.kind, CommandKind::LegacyTuneMatmul);
+    }
+
+    #[test]
+    fn parse_command_accepts_init_default_dir() {
+        let args = vec!["init".to_string()];
+        let command = parse_command(&args).expect("init should parse");
+        assert_eq!(command.kind, CommandKind::Init);
+        assert_eq!(command.path.as_deref(), Some("."));
+    }
+
+    #[test]
+    fn parse_command_accepts_init_custom_dir() {
+        let args = vec!["init".to_string(), "my-volta-project".to_string()];
+        let command = parse_command(&args).expect("init with custom dir should parse");
+        assert_eq!(command.kind, CommandKind::Init);
+        assert_eq!(command.path.as_deref(), Some("my-volta-project"));
+    }
+
+    #[test]
+    fn parse_command_rejects_init_flags() {
+        let args = vec!["init".to_string(), "--force".to_string()];
+        let err = parse_command(&args).expect_err("init flags should fail");
+        assert!(err.contains("'init' does not accept flags"));
     }
 
     #[test]

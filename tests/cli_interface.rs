@@ -15,6 +15,16 @@ fn unique_temp_file(name: &str, content: &str) -> PathBuf {
     path
 }
 
+fn unique_temp_dir(name: &str) -> PathBuf {
+    let mut path = env::temp_dir();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be valid")
+        .as_nanos();
+    path.push(format!("volta_cli_{name}_{nanos}"));
+    path
+}
+
 fn run_volta(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_volta"))
         .args(args)
@@ -208,6 +218,65 @@ fn file_commands_reject_duplicate_quiet_flag() {
 }
 
 #[test]
+fn info_command_rejects_quiet_flag() {
+    let output = run_volta(&["info", "--quiet", "x.vt"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "info must reject --quiet");
+    assert!(stderr.contains("does not accept '--quiet'"));
+}
+
+#[test]
+fn run_command_rejects_unknown_flag() {
+    let output = run_volta(&["run", "--verbose", "x.vt"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "run must reject unknown flags");
+    assert!(stderr.contains("accepts only optional '--quiet' plus one file path"));
+}
+
+#[test]
+fn run_command_suggests_quiet_for_close_flag() {
+    let output = run_volta(&["run", "--quite", "x.vt"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "run must reject misspelled quiet");
+    assert!(stderr.contains("did you mean '--quiet'?"));
+}
+
+#[test]
+fn unknown_command_suggests_closest_match() {
+    let output = run_volta(&["chek"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "unknown command should fail");
+    assert!(stderr.contains("Did you mean 'check'?"));
+}
+
+#[test]
+fn init_command_creates_project_files() {
+    let dir = unique_temp_dir("init_project");
+    let dir_text = dir.to_str().expect("utf8 path").to_string();
+
+    let output = run_volta(&["init", &dir_text]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "init should succeed: {stdout}");
+    assert!(stdout.contains("Initialized Volta project"));
+    assert!(dir.join("model.vt").exists());
+    assert!(dir.join("volta.toml").exists());
+}
+
+#[test]
+fn init_command_is_idempotent_and_reports_skips() {
+    let dir = unique_temp_dir("init_idempotent");
+    let dir_text = dir.to_str().expect("utf8 path").to_string();
+
+    let first = run_volta(&["init", &dir_text]);
+    assert!(first.status.success(), "first init should succeed");
+
+    let second = run_volta(&["init", &dir_text]);
+    let stdout = String::from_utf8_lossy(&second.stdout);
+    assert!(second.status.success(), "second init should succeed");
+    assert!(stdout.contains("Skipped existing:"));
+}
+
+#[test]
 fn doctor_reports_invalid_gpu_env_value() {
     let output = run_volta_with_env(&["doctor"], "VOLTA_GPU_AVAILABLE", "maybe");
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -276,5 +345,9 @@ fn help_output_includes_doctor_flags() {
     let output = run_volta(&["help"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success(), "help should succeed");
+    assert!(stdout.contains("volta run <file.vt> [--quiet]"));
+    assert!(stdout.contains("volta check <file.vt> [--quiet]"));
+    assert!(stdout.contains("volta info <file.vt>"));
     assert!(stdout.contains("volta doctor [--json] [--strict]"));
+    assert!(stdout.contains("volta init [project_dir]"));
 }
