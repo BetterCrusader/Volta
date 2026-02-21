@@ -5,7 +5,6 @@ If your model gives two different answers for the same input, Volta is built for
 Volta is a compiler-first ML runtime in Rust focused on one promise: **same inputs, same graph, same policy, same result**.
 
 ## Why This Is Different
-
 Most stacks optimize for speed first and explain behavior later.
 Volta does the opposite:
 
@@ -31,7 +30,6 @@ This is the engine for people who want ML systems that are inspectable, replayab
 - governance hardening under **Quality Fortress**
 - CUDA inference MVP in Wave 3 hardening track
 - CUDA training hardening in Wave 4 hardening track
-
 ## Quick Start
 
 ```bash
