@@ -41,18 +41,28 @@ fn readme_mentions_quality_fortress_wave1() {
 
 #[test]
 fn design_doc_mentions_wave1_foundation() {
-    let text = read_text("docs/plans/2026-02-20-volta-quality-fortress-design.md");
+    let text = read_text("docs/plans/2026-02-21-volta-roadmap-v3.md");
     assert!(
-        text.contains("Wave 1"),
-        "design doc must mention Wave 1 governance foundation"
+        text.contains("Volta is not a blank project"),
+        "roadmap must document the current baseline explicitly"
     );
 }
 
 #[test]
 fn wave23_plan_mentions_release_and_nightly() {
-    let text = read_text("docs/plans/2026-02-20-volta-quality-fortress-wave23-implementation.md");
-    assert!(text.contains("Wave 2"), "wave23 plan must mention Wave 2");
-    assert!(text.contains("Wave 3"), "wave23 plan must mention Wave 3");
+    let text = read_text("docs/plans/2026-02-21-volta-roadmap-v3.md");
+    assert!(
+        text.contains("ONNX Interop Wave 2"),
+        "roadmap must include ONNX interop wave 2 scope"
+    );
+    assert!(
+        text.contains("70% Core Fortress"),
+        "roadmap must include 70/20/10 execution split"
+    );
+    assert!(
+        text.contains("release-gates.yml"),
+        "roadmap must reference release gate workflow"
+    );
 }
 
 #[test]
