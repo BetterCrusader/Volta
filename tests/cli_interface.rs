@@ -22,6 +22,14 @@ fn run_volta(args: &[&str]) -> std::process::Output {
         .expect("volta binary should execute")
 }
 
+fn run_volta_with_env(args: &[&str], key: &str, value: &str) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_volta"))
+        .args(args)
+        .env(key, value)
+        .output()
+        .expect("volta binary should execute")
+}
+
 #[test]
 fn check_command_passes_for_valid_script() {
     let path = unique_temp_file("check_ok", "x 1\nprint x\n");
@@ -145,4 +153,24 @@ fn doctor_command_rejects_unknown_flag() {
         "doctor with unknown flag must fail"
     );
     assert!(stderr.contains("accepts only optional '--json'"));
+}
+
+#[test]
+fn doctor_reports_invalid_gpu_env_value() {
+    let output = run_volta_with_env(&["doctor"], "VOLTA_GPU_AVAILABLE", "maybe");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success(), "doctor should still succeed");
+    assert!(stdout.contains("gpu_env_raw: maybe"));
+    assert!(stdout.contains("warning: VOLTA_GPU_AVAILABLE has invalid value"));
+}
+
+#[test]
+fn doctor_json_reports_invalid_gpu_env_value() {
+    let output = run_volta_with_env(&["doctor", "--json"], "VOLTA_GPU_AVAILABLE", "maybe");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success(), "doctor --json should still succeed");
+    assert!(stdout.contains("\"gpu_env_raw\":\"maybe\""));
+    assert!(stdout.contains("\"gpu_env_valid\":false"));
 }

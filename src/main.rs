@@ -287,19 +287,20 @@ fn print_doctor(json: bool) {
     let cpu_threads = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1);
-    let gpu_available = std::env::var("VOLTA_GPU_AVAILABLE")
-        .ok()
-        .is_some_and(|value| value == "1" || value.eq_ignore_ascii_case("true"));
+    let gpu_env = parse_gpu_env_status();
     let onnx_import_enabled = cfg!(feature = "onnx-import");
 
     if json {
+        let raw = gpu_env.raw.clone().unwrap_or_default();
         println!(
-            "{{\"tool\":\"volta-doctor\",\"version\":\"{}\",\"os\":\"{}\",\"arch\":\"{}\",\"cpu_threads\":{},\"gpu_available\":{},\"feature_onnx_import\":{}}}",
+            "{{\"tool\":\"volta-doctor\",\"version\":\"{}\",\"os\":\"{}\",\"arch\":\"{}\",\"cpu_threads\":{},\"gpu_available\":{},\"gpu_env_raw\":\"{}\",\"gpu_env_valid\":{},\"feature_onnx_import\":{}}}",
             env!("CARGO_PKG_VERSION"),
             std::env::consts::OS,
             std::env::consts::ARCH,
             cpu_threads,
-            gpu_available,
+            gpu_env.available,
+            json_escape(&raw),
+            gpu_env.parse_warning.is_none(),
             onnx_import_enabled
         );
         return;
@@ -312,8 +313,14 @@ fn print_doctor(json: bool) {
     println!("  cpu_threads: {cpu_threads}");
     println!(
         "  gpu_available: {} (from VOLTA_GPU_AVAILABLE)",
-        if gpu_available { "yes" } else { "no" }
+        if gpu_env.available { "yes" } else { "no" }
     );
+    if let Some(raw) = &gpu_env.raw {
+        println!("  gpu_env_raw: {raw}");
+    }
+    if let Some(warning) = &gpu_env.parse_warning {
+        println!("  warning: {warning}");
+    }
     println!(
         "  feature_onnx_import: {}",
         if onnx_import_enabled {
@@ -322,6 +329,58 @@ fn print_doctor(json: bool) {
             "disabled"
         }
     );
+}
+
+#[derive(Debug, Clone)]
+struct GpuEnvStatus {
+    available: bool,
+    raw: Option<String>,
+    parse_warning: Option<String>,
+}
+
+fn parse_gpu_env_status() -> GpuEnvStatus {
+    let raw = std::env::var("VOLTA_GPU_AVAILABLE").ok();
+    let Some(value) = raw.clone() else {
+        return GpuEnvStatus {
+            available: false,
+            raw: None,
+            parse_warning: None,
+        };
+    };
+
+    if value == "1" || value.eq_ignore_ascii_case("true") {
+        return GpuEnvStatus {
+            available: true,
+            raw,
+            parse_warning: None,
+        };
+    }
+
+    if value == "0" || value.eq_ignore_ascii_case("false") {
+        return GpuEnvStatus {
+            available: false,
+            raw,
+            parse_warning: None,
+        };
+    }
+
+    GpuEnvStatus {
+        available: false,
+        raw,
+        parse_warning: Some(
+            "VOLTA_GPU_AVAILABLE has invalid value; expected one of: 1, true, 0, false"
+                .to_string(),
+        ),
+    }
+}
+
+fn json_escape(input: &str) -> String {
+    input
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
 }
 
 fn print_info(path: &str, program: &Program, warning_count: usize) {
@@ -484,5 +543,11 @@ mod tests {
         ];
         let command = parse_command(&args).expect("command should parse");
         assert_eq!(command.kind, CommandKind::LegacyTuneMatmul);
+    }
+
+    #[test]
+    fn json_escape_escapes_quotes_and_backslashes() {
+        let escaped = super::json_escape("a\"b\\c");
+        assert_eq!(escaped, "a\\\"b\\\\c");
     }
 }
