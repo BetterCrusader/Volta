@@ -251,7 +251,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
             doctor_json: false,
         }),
         _ => Err(format!(
-            "Unknown command '{}'. Expected run/check/info/version/help",
+            "Unknown command '{}'. Expected run/check/info/doctor/version/help",
             args[0]
         )),
     }
