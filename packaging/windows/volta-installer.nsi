@@ -4,8 +4,9 @@
 !include "WinMessages.nsh"
 !include "StrFunc.nsh"
 
-!insertmacro StrStr
-!insertmacro StrRep
+${Using:StrFunc} StrStr
+${Using:StrFunc} StrRep
+${Using:StrFunc} UnStrRep
 
 !ifndef VERSION
 !define VERSION "dev"
@@ -103,11 +104,14 @@ Section "Install Volta" SEC_MAIN
 SectionEnd
 
 Section "Uninstall"
-  StrCpy $InstallLog "$INSTDIR\\installer.log"
-  Push "[volta-installer] uninstall started"
-  Call WriteLogLine
-
-  Call RemoveUserPath
+  ReadRegStr $0 HKCU "Environment" "Path"
+  ${If} $0 != ""
+    ${UnStrRep} $0 $0 "$INSTDIR;" ""
+    ${UnStrRep} $0 $0 ";$INSTDIR" ""
+    ${UnStrRep} $0 $0 "$INSTDIR" ""
+    WriteRegExpandStr HKCU "Environment" "Path" "$0"
+    SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
+  ${EndIf}
 
   Delete "$INSTDIR\\volta.exe"
   Delete "$INSTDIR\\Uninstall Volta.exe"
