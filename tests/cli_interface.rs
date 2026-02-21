@@ -152,7 +152,7 @@ fn doctor_command_rejects_unknown_flag() {
         !output.status.success(),
         "doctor with unknown flag must fail"
     );
-    assert!(stderr.contains("accepts only optional '--json'"));
+    assert!(stderr.contains("accepts only optional '--json' and '--strict'"));
 }
 
 #[test]
@@ -170,7 +170,25 @@ fn doctor_json_reports_invalid_gpu_env_value() {
     let output = run_volta_with_env(&["doctor", "--json"], "VOLTA_GPU_AVAILABLE", "maybe");
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    assert!(output.status.success(), "doctor --json should still succeed");
+    assert!(
+        output.status.success(),
+        "doctor --json should still succeed"
+    );
     assert!(stdout.contains("\"gpu_env_raw\":\"maybe\""));
     assert!(stdout.contains("\"gpu_env_valid\":false"));
+}
+
+#[test]
+fn doctor_strict_fails_on_invalid_gpu_env_value() {
+    let output = run_volta_with_env(&["doctor", "--strict"], "VOLTA_GPU_AVAILABLE", "maybe");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(!output.status.success(), "doctor --strict must fail");
+    assert!(stdout.contains("warning: VOLTA_GPU_AVAILABLE has invalid value"));
+}
+
+#[test]
+fn doctor_strict_passes_on_valid_gpu_env_value() {
+    let output = run_volta_with_env(&["doctor", "--strict"], "VOLTA_GPU_AVAILABLE", "true");
+    assert!(output.status.success(), "doctor --strict should pass");
 }
