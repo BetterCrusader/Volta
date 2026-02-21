@@ -4,7 +4,7 @@ use crate::ir::block::{BasicBlock, BasicBlockId};
 use crate::ir::node::{Node, NodeId, ValueId};
 use crate::ir::op::Op;
 
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
 pub struct ShapeSignature {
     pub inputs: BTreeMap<String, Vec<usize>>,
     pub parameters: BTreeMap<String, Vec<usize>>,

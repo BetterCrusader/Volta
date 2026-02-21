@@ -15,11 +15,11 @@ pub enum OptimizerConfig {
     },
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct OptimizerState {
-    step: usize,
-    adam_m: HashMap<String, Tensor>,
-    adam_v: HashMap<String, Tensor>,
+    pub(crate) step: usize,
+    pub(crate) adam_m: HashMap<String, Tensor>,
+    pub(crate) adam_v: HashMap<String, Tensor>,
 }
 
 #[derive(Debug, Clone)]

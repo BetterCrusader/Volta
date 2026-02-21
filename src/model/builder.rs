@@ -1,6 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use crate::ir::{Graph, Op, Tensor, ValueId, verify_graph};
+use crate::ir::{
+    ExecutionPlan, Graph, NodeId, Op, Tensor, ValueId, build_execution_plan, verify_graph,
+};
 use crate::model::{Parameter, TensorShape};
 
 #[derive(Debug, Clone)]
@@ -16,6 +18,8 @@ pub struct CompiledModel {
     pub loss: Option<ValueId>,
     pub parameters: HashMap<String, Tensor>,
     pub parameter_values: HashMap<String, ValueId>,
+    pub inference_plan: ExecutionPlan,
+    pub inference_ordered_nodes: Vec<NodeId>,
 }
 
 #[derive(Debug, Clone)]
@@ -109,6 +113,15 @@ impl ModelBuilder {
         verify_graph(&self.graph).map_err(|err| ModelBuildError {
             message: format!("Model graph verification failed: {}", err.message),
         })?;
+        let inference_plan =
+            build_execution_plan(&self.graph, &HashSet::new()).map_err(|err| ModelBuildError {
+                message: format!(
+                    "Infer plan build failed during model finalize: {}",
+                    err.message
+                ),
+            })?;
+        let inference_ordered_nodes =
+            dependency_ordered_nodes(&self.graph, output, &inference_plan.schedule.ordered_nodes)?;
 
         Ok(CompiledModel {
             graph: self.graph,
@@ -117,6 +130,46 @@ impl ModelBuilder {
             loss,
             parameters: self.parameters,
             parameter_values: self.parameter_values,
+            inference_plan,
+            inference_ordered_nodes,
         })
     }
+}
+
+fn dependency_ordered_nodes(
+    graph: &Graph,
+    target: ValueId,
+    ordered_nodes: &[NodeId],
+) -> Result<Vec<NodeId>, ModelBuildError> {
+    if target.0 >= graph.nodes.len() {
+        return Err(ModelBuildError {
+            message: format!("Infer target value out of range: {}", target.0),
+        });
+    }
+
+    let mut required_values = HashSet::<ValueId>::new();
+    let mut stack = vec![target];
+    while let Some(value) = stack.pop() {
+        if !required_values.insert(value) {
+            continue;
+        }
+        let node = graph.nodes.get(value.0).ok_or_else(|| ModelBuildError {
+            message: format!("Infer dependency value out of range: {}", value.0),
+        })?;
+        for input in node.op.input_values() {
+            stack.push(input);
+        }
+    }
+
+    let mut filtered = Vec::new();
+    for node_id in ordered_nodes {
+        let node = graph.nodes.get(node_id.0).ok_or_else(|| ModelBuildError {
+            message: format!("Infer schedule node out of range: {}", node_id.0),
+        })?;
+        if required_values.contains(&node.output) {
+            filtered.push(*node_id);
+        }
+    }
+
+    Ok(filtered)
 }

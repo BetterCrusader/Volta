@@ -167,6 +167,7 @@ pub fn build_tiny_transformer_fixture_for_tests() -> (
         shuffle: true,
         shuffle_seed: 11,
         optimizer: OptimizerConfig::Sgd { lr: 0.05 },
+        gradient_checkpointing: None,
         reproducibility: ReproducibilityMode::Deterministic,
         checkpoint_path: None,
     };

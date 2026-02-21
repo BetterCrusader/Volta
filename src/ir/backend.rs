@@ -1,6 +1,12 @@
+use std::collections::HashMap;
+
 use crate::ir::ExecutionPlan;
 use crate::ir::cuda::{enforce_policy, lower_plan, policy_for};
-use crate::ir::{BackendCapabilities, BackendKind, CompilerFlags, DeterminismLevel};
+use crate::ir::{
+    BackendCapabilities, BackendKind, CompilerFlags, DeterminismLevel, ExecutionContext, Graph,
+    NodeId, OptimizerConfig, OptimizerState, RuntimeValue, Tensor, ValueId, apply_gradients,
+    execute_value_with_schedule_context, execute_with_schedule_context,
+};
 
 #[derive(Debug, Clone)]
 pub struct CompiledProgram {
@@ -17,6 +23,48 @@ pub struct BackendError {
 pub trait Backend {
     fn capabilities(&self) -> BackendCapabilities;
     fn compile(&self, plan: &ExecutionPlan) -> Result<CompiledProgram, BackendError>;
+
+    fn apply_gradients(
+        &self,
+        parameters: &mut HashMap<String, Tensor>,
+        gradients: &HashMap<String, Tensor>,
+        config: &OptimizerConfig,
+        state: &mut OptimizerState,
+        _determinism: DeterminismLevel,
+    ) -> Result<(), BackendError> {
+        apply_gradients(parameters, gradients, config, state).map_err(|err| BackendError {
+            message: err.message,
+        })
+    }
+
+    fn execute_terminal(
+        &self,
+        graph: &Graph,
+        _plan: &ExecutionPlan,
+        ordered_nodes: &[NodeId],
+        context: &ExecutionContext,
+        _determinism: DeterminismLevel,
+    ) -> Result<Option<RuntimeValue>, BackendError> {
+        execute_with_schedule_context(graph, ordered_nodes, context).map_err(|err| BackendError {
+            message: format!("Runtime execute failed: {}", err.message),
+        })
+    }
+
+    fn execute_value(
+        &self,
+        graph: &Graph,
+        _plan: &ExecutionPlan,
+        target: ValueId,
+        ordered_nodes: &[NodeId],
+        context: &ExecutionContext,
+        _determinism: DeterminismLevel,
+    ) -> Result<RuntimeValue, BackendError> {
+        execute_value_with_schedule_context(graph, target, ordered_nodes, context).map_err(|err| {
+            BackendError {
+                message: format!("Runtime execute-value failed: {}", err.message),
+            }
+        })
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -76,7 +124,7 @@ impl Backend for CudaBackend {
         BackendCapabilities {
             backend: BackendKind::Cuda,
             supports_inference: true,
-            supports_training: false,
+            supports_training: true,
             supports_strict_determinism: true,
             default_determinism: DeterminismLevel::Balanced,
         }
@@ -99,11 +147,74 @@ impl Backend for CudaBackend {
         plan.allocation.peak_bytes.hash(&mut hasher);
         lowered.executable_nodes.hash(&mut hasher);
         lowered.memory_bindings.hash(&mut hasher);
+        lowered.workspace_buffers.hash(&mut hasher);
 
         Ok(CompiledProgram {
             schedule_len: plan.schedule.ordered_nodes.len(),
             peak_bytes: plan.allocation.peak_bytes,
             fingerprint: hasher.finish(),
+        })
+    }
+
+    fn execute_terminal(
+        &self,
+        graph: &Graph,
+        plan: &ExecutionPlan,
+        ordered_nodes: &[NodeId],
+        context: &ExecutionContext,
+        determinism: DeterminismLevel,
+    ) -> Result<Option<RuntimeValue>, BackendError> {
+        crate::ir::cuda::executor::execute_terminal_cuda(
+            graph,
+            plan,
+            ordered_nodes,
+            context,
+            determinism,
+        )
+        .map_err(|err| BackendError {
+            message: err.message,
+        })
+    }
+
+    fn execute_value(
+        &self,
+        graph: &Graph,
+        plan: &ExecutionPlan,
+        target: ValueId,
+        ordered_nodes: &[NodeId],
+        context: &ExecutionContext,
+        determinism: DeterminismLevel,
+    ) -> Result<RuntimeValue, BackendError> {
+        crate::ir::cuda::executor::execute_value_cuda(
+            graph,
+            plan,
+            target,
+            ordered_nodes,
+            context,
+            determinism,
+        )
+        .map_err(|err| BackendError {
+            message: err.message,
+        })
+    }
+
+    fn apply_gradients(
+        &self,
+        parameters: &mut HashMap<String, Tensor>,
+        gradients: &HashMap<String, Tensor>,
+        config: &OptimizerConfig,
+        state: &mut OptimizerState,
+        determinism: DeterminismLevel,
+    ) -> Result<(), BackendError> {
+        crate::ir::cuda::optimizer::apply_gradients_cuda(
+            parameters,
+            gradients,
+            config,
+            state,
+            determinism,
+        )
+        .map_err(|err| BackendError {
+            message: err.message,
         })
     }
 }

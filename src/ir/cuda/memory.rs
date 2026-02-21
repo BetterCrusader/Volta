@@ -1,12 +1,185 @@
 use std::collections::{BTreeMap, HashMap};
 use std::hash::{Hash, Hasher};
 
+use cudarc::driver::{CudaSlice, DevicePtr, DeviceRepr, ValidAsZeroBits};
+
+use crate::ir::cuda::device::CudaDevice;
 use crate::ir::cuda::{CudaMemoryClass, LoweredCudaPlan};
 use crate::ir::{
     ExecutionPlan, Graph, PlacementClass, ShapeFact, ValueId, infer_shapes, plan_memory,
 };
 
 const MIN_BUFFER_ALIGNMENT_BYTES: usize = 16;
+const DEVICE_BUFFER_ALIGNMENT_BYTES: usize = 256;
+
+#[derive(Debug, Clone)]
+pub struct CudaDeviceMemoryError {
+    pub message: String,
+}
+
+#[derive(Debug)]
+pub struct DeviceBuffer<T: DeviceRepr> {
+    storage: CudaSlice<T>,
+    len: usize,
+    padded_len: usize,
+    aligned_256: bool,
+}
+
+impl<T: DeviceRepr> DeviceBuffer<T> {
+    pub fn alloc(device: &CudaDevice, len: usize) -> Result<Self, CudaDeviceMemoryError> {
+        let stream = device.stream().map_err(|err| CudaDeviceMemoryError {
+            message: err.message,
+        })?;
+        let padded_len = padded_len_for_allocation::<T>(len)?;
+        let alloc_len = padded_len.max(1);
+        let storage =
+            unsafe { stream.alloc::<T>(alloc_len) }.map_err(|err| CudaDeviceMemoryError {
+                message: format!("cudaMalloc failed for {} elements: {err}", padded_len),
+            })?;
+        let aligned_256 = pointer_is_256_aligned(&storage, &stream);
+
+        Ok(Self {
+            storage,
+            len,
+            padded_len,
+            aligned_256,
+        })
+    }
+
+    pub fn from_host(device: &CudaDevice, host: &[T]) -> Result<Self, CudaDeviceMemoryError> {
+        let mut buffer = Self::alloc(device, host.len())?;
+        buffer.copy_from_host(device, host)?;
+        Ok(buffer)
+    }
+
+    pub fn copy_from_host(
+        &mut self,
+        device: &CudaDevice,
+        host: &[T],
+    ) -> Result<(), CudaDeviceMemoryError> {
+        if host.is_empty() {
+            return Ok(());
+        }
+        if host.len() > self.len {
+            return Err(CudaDeviceMemoryError {
+                message: format!(
+                    "host copy overflow: host_len={} buffer_len={}",
+                    host.len(),
+                    self.len
+                ),
+            });
+        }
+
+        let stream = device.stream().map_err(|err| CudaDeviceMemoryError {
+            message: err.message,
+        })?;
+        stream
+            .memcpy_htod(host, &mut self.storage)
+            .map_err(|err| CudaDeviceMemoryError {
+                message: format!("cudaMemcpy H2D failed: {err}"),
+            })?;
+        Ok(())
+    }
+
+    pub fn copy_to_host(&self, device: &CudaDevice) -> Result<Vec<T>, CudaDeviceMemoryError> {
+        if self.len == 0 {
+            return Ok(Vec::new());
+        }
+        let stream = device.stream().map_err(|err| CudaDeviceMemoryError {
+            message: err.message,
+        })?;
+        let mut host = stream
+            .clone_dtoh(&self.storage)
+            .map_err(|err| CudaDeviceMemoryError {
+                message: format!("cudaMemcpy D2H failed: {err}"),
+            })?;
+        stream.synchronize().map_err(|err| CudaDeviceMemoryError {
+            message: format!("CUDA stream synchronize failed after D2H copy: {err}"),
+        })?;
+        host.truncate(self.len);
+        Ok(host)
+    }
+
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    pub fn padded_len(&self) -> usize {
+        self.padded_len
+    }
+
+    pub fn is_256_aligned(&self) -> bool {
+        self.aligned_256
+    }
+
+    pub(crate) fn cuda_slice(&self) -> &CudaSlice<T> {
+        &self.storage
+    }
+
+    pub(crate) fn cuda_slice_mut(&mut self) -> &mut CudaSlice<T> {
+        &mut self.storage
+    }
+}
+
+impl<T: DeviceRepr + ValidAsZeroBits> DeviceBuffer<T> {
+    pub fn zeros(device: &CudaDevice, len: usize) -> Result<Self, CudaDeviceMemoryError> {
+        let stream = device.stream().map_err(|err| CudaDeviceMemoryError {
+            message: err.message,
+        })?;
+        let padded_len = padded_len_for_allocation::<T>(len)?;
+        let alloc_len = padded_len.max(1);
+        let storage = stream
+            .alloc_zeros::<T>(alloc_len)
+            .map_err(|err| CudaDeviceMemoryError {
+                message: format!(
+                    "cudaMalloc zeroed failed for {} elements: {err}",
+                    padded_len
+                ),
+            })?;
+        let aligned_256 = pointer_is_256_aligned(&storage, &stream);
+
+        Ok(Self {
+            storage,
+            len,
+            padded_len,
+            aligned_256,
+        })
+    }
+}
+
+fn padded_len_for_allocation<T: DeviceRepr>(len: usize) -> Result<usize, CudaDeviceMemoryError> {
+    let elem_bytes = std::mem::size_of::<T>();
+    if elem_bytes == 0 {
+        return Err(CudaDeviceMemoryError {
+            message: "zero-sized CUDA buffer element type is unsupported".to_string(),
+        });
+    }
+
+    let total_bytes = len
+        .checked_mul(elem_bytes)
+        .ok_or_else(|| CudaDeviceMemoryError {
+            message: format!("buffer byte size overflow: len={len} elem_bytes={elem_bytes}"),
+        })?;
+    if total_bytes == 0 {
+        return Ok(0);
+    }
+
+    let padded_bytes =
+        total_bytes.div_ceil(DEVICE_BUFFER_ALIGNMENT_BYTES) * DEVICE_BUFFER_ALIGNMENT_BYTES;
+    Ok(padded_bytes.div_ceil(elem_bytes))
+}
+
+fn pointer_is_256_aligned<T: DeviceRepr>(
+    storage: &CudaSlice<T>,
+    stream: &std::sync::Arc<cudarc::driver::CudaStream>,
+) -> bool {
+    let (ptr, _sync) = storage.device_ptr(stream);
+    (ptr as usize).is_multiple_of(DEVICE_BUFFER_ALIGNMENT_BYTES)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CudaMemoryProfile {

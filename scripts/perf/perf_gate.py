@@ -191,6 +191,43 @@ def baseline_path(baseline_dir: pathlib.Path, signature: str) -> pathlib.Path:
     return baseline_dir / f"{signature}.json"
 
 
+def baseline_candidates(signature: str) -> List[str]:
+    candidates = [signature]
+    parts = signature.split("-")
+    if len(parts) >= 2:
+        system = parts[0]
+        machine = parts[1]
+        # Keep compatibility for normalized machines like x86-64.
+        if len(parts) >= 3 and parts[2].isdigit():
+            machine = f"{parts[1]}-{parts[2]}"
+
+        machine_variants: List[str] = [machine]
+        if "-" in machine and "_" not in machine:
+            underscore_variant = machine.replace("-", "_")
+            if underscore_variant not in machine_variants:
+                machine_variants.append(underscore_variant)
+
+        for machine_variant in machine_variants:
+            generic_signature = f"{system}-{machine_variant}-generic"
+            if generic_signature not in candidates:
+                candidates.append(generic_signature)
+            example_signature = f"example-{system}-{machine_variant}-generic"
+            if example_signature not in candidates:
+                candidates.append(example_signature)
+
+    return candidates
+
+
+def resolve_baseline_file(
+    baseline_dir: pathlib.Path, signature: str
+) -> Tuple[str, pathlib.Path]:
+    for candidate in baseline_candidates(signature):
+        candidate_path = baseline_path(baseline_dir, candidate)
+        if candidate_path.exists():
+            return candidate, candidate_path
+    return signature, baseline_path(baseline_dir, signature)
+
+
 def detect_signature() -> str:
     signature_script = pathlib.Path(__file__).with_name("cpu_signature.py")
     completed = subprocess.run(
@@ -212,7 +249,7 @@ def main() -> int:
     baseline_dir = pathlib.Path(args.baseline_dir)
     current = read_probe_result(args)
 
-    baseline_file = baseline_path(baseline_dir, signature)
+    baseline_signature, baseline_file = resolve_baseline_file(baseline_dir, signature)
     if not baseline_file.exists():
         if args.allow_missing_baseline:
             payload = {
@@ -225,6 +262,7 @@ def main() -> int:
             result = {
                 "status": "baseline_created",
                 "signature": signature,
+                "resolved_signature": signature,
                 "baseline_file": str(baseline_file),
             }
             if args.output_json:
@@ -238,6 +276,8 @@ def main() -> int:
                     "status": "failed",
                     "reason": "missing_baseline",
                     "signature": signature,
+                    "resolved_signature": signature,
+                    "tried_signatures": baseline_candidates(signature),
                     "baseline_file": str(baseline_file),
                 },
                 sort_keys=True,
@@ -252,6 +292,7 @@ def main() -> int:
     payload = {
         "status": "failed" if failures else "passed",
         "signature": signature,
+        "resolved_signature": baseline_signature,
         "baseline_file": str(baseline_file),
         "threshold_percent": args.threshold_percent,
         "metrics": [

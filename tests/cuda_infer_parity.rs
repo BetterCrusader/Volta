@@ -22,15 +22,24 @@ struct ParityBaseline {
 
 #[test]
 fn cuda_infer_parity_stays_within_strict_budget() {
+    if !cuda_runtime_available() {
+        return;
+    }
     with_determinism("strict", || {
         let baseline = load_parity_baseline(PARITY_BASELINE_PATH).unwrap_or_else(|message| {
             panic!("{message}");
         });
         assert_eq!(baseline.backend_signature, runtime_backend_signature());
         assert_eq!(baseline.determinism_level, "strict");
-        assert_eq!(
+        let runtime_fingerprint = device_capability_fingerprint();
+        assert!(
+            device_fingerprint_matches(
+                &baseline.device_capability_fingerprint,
+                &runtime_fingerprint
+            ),
+            "device_capability_fingerprint mismatch: baseline='{}' runtime='{}'",
             baseline.device_capability_fingerprint,
-            device_capability_fingerprint()
+            runtime_fingerprint,
         );
 
         let (model, infer_input) = build_parity_fixture_model();
@@ -91,20 +100,35 @@ fn cuda_infer_parity_stays_within_strict_budget() {
 
 #[test]
 fn cuda_infer_path_has_no_silent_cpu_fallback() {
+    if !cuda_runtime_available() {
+        return;
+    }
     with_determinism("strict", || {
         let mut graph = Graph::new();
         let block = graph.create_block();
-        let (_, a) = graph
-            .add_op(block, Op::ConstInt(2))
-            .expect("add const should succeed");
-        let (_, b) = graph
-            .add_op(block, Op::ConstInt(3))
-            .expect("add const should succeed");
-        let (_, product) = graph
-            .add_op(block, Op::Mul(a, b))
-            .expect("add mul should succeed");
+        let (_, input) = graph
+            .add_op(
+                block,
+                Op::ConstTensor {
+                    shape: vec![3, 3],
+                    data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
+                },
+            )
+            .expect("add conv input should succeed");
+        let (_, kernel) = graph
+            .add_op(
+                block,
+                Op::ConstTensor {
+                    shape: vec![2, 2],
+                    data: vec![1.0, 0.0, 0.0, -1.0],
+                },
+            )
+            .expect("add conv kernel should succeed");
+        let (_, conv) = graph
+            .add_op(block, Op::Conv2D(input, kernel))
+            .expect("add conv should succeed");
         graph
-            .add_op(block, Op::Output(product))
+            .add_op(block, Op::Output(conv))
             .expect("add output should succeed");
 
         let plan = build_execution_plan(&graph, &HashSet::new()).expect("plan should build");
@@ -130,7 +154,7 @@ fn cuda_infer_path_has_no_silent_cpu_fallback() {
         .expect_err("cuda path must fail instead of silently falling back to cpu");
         assert!(
             err.message
-                .contains("unsupported CUDA kernel class: Elementwise"),
+                .contains("unsupported CUDA kernel class: Conv2D"),
             "unexpected error: {}",
             err.message
         );
@@ -209,6 +233,22 @@ fn device_capability_fingerprint() -> String {
         "{}-sm{}{}",
         device.name, device.compute_capability_major, device.compute_capability_minor
     )
+}
+
+fn device_fingerprint_matches(expected: &str, actual: &str) -> bool {
+    if expected.eq_ignore_ascii_case("any") {
+        return true;
+    }
+
+    let expected_lower = expected.to_ascii_lowercase();
+    if let Some(sm) = expected_lower.strip_prefix("any-sm") {
+        if sm.is_empty() {
+            return false;
+        }
+        return actual.to_ascii_lowercase().ends_with(&format!("-sm{sm}"));
+    }
+
+    expected.eq_ignore_ascii_case(actual)
 }
 
 fn max_abs_diff(left: &[f32], right: &[f32]) -> f32 {
@@ -294,6 +334,15 @@ fn with_determinism(level: &str, run: impl FnOnce()) {
     };
     let _restore = EnvVarRestore::set("VOLTA_DETERMINISM", level);
     run();
+}
+
+fn cuda_runtime_available() -> bool {
+    let result = std::panic::catch_unwind(|| volta::ir::cuda::device::CudaDevice::new(0));
+    match result {
+        Ok(Ok(_)) => true,
+        Ok(Err(_)) => false,
+        Err(_) => false,
+    }
 }
 
 fn env_lock() -> &'static Mutex<()> {

@@ -1,14 +1,13 @@
 use std::collections::HashMap;
-use std::collections::HashSet;
 
 use crate::ir::{
-    Backend, CpuBackend, ExecutionContext, Graph, NodeId, OptimizerConfig, RuntimeValue, Tensor,
-    TrainConfig, TrainSample, ValueId, build_execution_plan, execute_value_with_backend,
-    train_graph_with_backend,
+    Backend, CpuBackend, ExecutionContext, OptimizerConfig, OptimizerState, RuntimeValue, Tensor,
+    TrainConfig, TrainSample, execute_value_with_backend, train_graph_with_backend,
 };
 
 use crate::model::{
-    BatchIterator, CompiledModel, Dataset, Example, load_checkpoint, save_checkpoint,
+    BatchIterator, CompiledModel, Dataset, Example, GradientCheckpointingConfig, load_checkpoint,
+    plan_gradient_checkpointing, save_checkpoint,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,6 +23,7 @@ pub struct TrainApiConfig {
     pub shuffle: bool,
     pub shuffle_seed: u64,
     pub optimizer: OptimizerConfig,
+    pub gradient_checkpointing: Option<GradientCheckpointingConfig>,
     pub reproducibility: ReproducibilityMode,
     pub checkpoint_path: Option<String>,
 }
@@ -32,6 +32,7 @@ pub struct TrainApiConfig {
 pub struct TrainApiResult {
     pub final_parameters: HashMap<String, Tensor>,
     pub final_loss: f32,
+    pub optimizer_state: OptimizerState,
 }
 
 #[derive(Debug, Clone)]
@@ -54,11 +55,6 @@ pub fn infer_with_backend(
     inputs: &HashMap<String, Tensor>,
     backend: &dyn Backend,
 ) -> Result<Tensor, TrainApiError> {
-    let plan =
-        build_execution_plan(&model.graph, &HashSet::new()).map_err(|err| TrainApiError {
-            message: format!("Infer plan build failed: {}", err.message),
-        })?;
-
     let mut context = ExecutionContext::default();
     for (name, tensor) in inputs {
         context.inputs.insert(
@@ -79,14 +75,11 @@ pub fn infer_with_backend(
         );
     }
 
-    let ordered_nodes =
-        dependency_ordered_nodes(&model.graph, model.output, &plan.schedule.ordered_nodes)?;
-
     let runtime = execute_value_with_backend(
         &model.graph,
-        &plan,
+        &model.inference_plan,
         model.output,
-        &ordered_nodes,
+        &model.inference_ordered_nodes,
         backend,
         &context,
     )
@@ -104,46 +97,6 @@ pub fn infer_with_backend(
             message: "Infer output must be a tensor".to_string(),
         }),
     }
-}
-
-fn dependency_ordered_nodes(
-    graph: &Graph,
-    target: ValueId,
-    ordered_nodes: &[NodeId],
-) -> Result<Vec<NodeId>, TrainApiError> {
-    if target.0 >= graph.nodes.len() {
-        return Err(TrainApiError {
-            message: format!("Infer target value out of range: {}", target.0),
-        });
-    }
-
-    let mut required_values = HashSet::<ValueId>::new();
-    let mut stack = vec![target];
-
-    while let Some(value) = stack.pop() {
-        if !required_values.insert(value) {
-            continue;
-        }
-
-        let node = graph.nodes.get(value.0).ok_or_else(|| TrainApiError {
-            message: format!("Infer dependency value out of range: {}", value.0),
-        })?;
-        for input in node.op.input_values() {
-            stack.push(input);
-        }
-    }
-
-    let mut filtered = Vec::new();
-    for node_id in ordered_nodes {
-        let node = graph.nodes.get(node_id.0).ok_or_else(|| TrainApiError {
-            message: format!("Infer schedule node out of range: {}", node_id.0),
-        })?;
-        if required_values.contains(&node.output) {
-            filtered.push(*node_id);
-        }
-    }
-
-    Ok(filtered)
 }
 
 pub fn train<D: Dataset>(
@@ -193,6 +146,12 @@ pub fn train_with_backend<D: Dataset>(
         });
     };
 
+    if let Some(checkpointing) = &config.gradient_checkpointing {
+        let _ = plan_gradient_checkpointing(model, checkpointing).map_err(|err| TrainApiError {
+            message: format!("Gradient checkpointing planning failed: {}", err.message),
+        })?;
+    }
+
     let result = train_graph_with_backend(
         &model.graph,
         loss,
@@ -215,6 +174,7 @@ pub fn train_with_backend<D: Dataset>(
     Ok(TrainApiResult {
         final_parameters: result.final_parameters,
         final_loss: result.final_loss,
+        optimizer_state: result.optimizer_state,
     })
 }
 
@@ -222,7 +182,7 @@ pub fn train_with_backend<D: Dataset>(
 mod tests {
     use std::collections::HashMap;
 
-    use crate::ir::{OptimizerConfig, Tensor};
+    use crate::ir::{Graph, NodeId, OptimizerConfig, Tensor, ValueId, build_execution_plan};
     use crate::model::{
         CompiledModel, Dataset, Example, ReproducibilityMode, TensorShape, TrainApiConfig,
         build_tiny_transformer_fixture_for_tests, infer, train,
@@ -261,6 +221,7 @@ mod tests {
             shuffle: true,
             shuffle_seed: 7,
             optimizer: OptimizerConfig::Sgd { lr: 0.01 },
+            gradient_checkpointing: None,
             reproducibility: ReproducibilityMode::Deterministic,
             checkpoint_path: None,
         };
@@ -339,6 +300,12 @@ mod tests {
         let mut param_values = HashMap::new();
         param_values.insert("w".to_string(), w);
 
+        let inference_plan = build_execution_plan(&graph, &std::collections::HashSet::new())
+            .expect("infer plan should build");
+        let inference_ordered_nodes =
+            infer_nodes_for_target(&graph, pred, &inference_plan.schedule.ordered_nodes)
+                .expect("infer dependency nodes should resolve");
+
         let model = CompiledModel {
             graph,
             output: pred,
@@ -346,6 +313,8 @@ mod tests {
             loss: Some(loss),
             parameters: params,
             parameter_values: param_values,
+            inference_plan,
+            inference_ordered_nodes,
         };
 
         let dataset = TinyDataset {
@@ -353,5 +322,43 @@ mod tests {
         };
 
         (model, dataset)
+    }
+
+    fn infer_nodes_for_target(
+        graph: &Graph,
+        target: ValueId,
+        ordered_nodes: &[NodeId],
+    ) -> Result<Vec<NodeId>, String> {
+        if target.0 >= graph.nodes.len() {
+            return Err(format!("target out of range: {}", target.0));
+        }
+
+        let mut required_values = std::collections::HashSet::<ValueId>::new();
+        let mut stack = vec![target];
+        while let Some(value) = stack.pop() {
+            if !required_values.insert(value) {
+                continue;
+            }
+            let node = graph
+                .nodes
+                .get(value.0)
+                .ok_or_else(|| format!("dependency out of range: {}", value.0))?;
+            for input in node.op.input_values() {
+                stack.push(input);
+            }
+        }
+
+        let mut filtered = Vec::new();
+        for node_id in ordered_nodes {
+            let node = graph
+                .nodes
+                .get(node_id.0)
+                .ok_or_else(|| format!("schedule node out of range: {}", node_id.0))?;
+            if required_values.contains(&node.output) {
+                filtered.push(*node_id);
+            }
+        }
+
+        Ok(filtered)
     }
 }

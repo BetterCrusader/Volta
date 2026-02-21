@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+cudarc = { version = "0.19.2", default-features = false, features = ["std", "driver", "runtime", "cublas", "nvrtc", "fallback-dynamic-loading", "cuda-13010"] }
 
 [dev-dependencies]
 proptest = "1"

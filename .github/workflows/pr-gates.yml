@@ -94,6 +94,28 @@ jobs:
       - name: Release tests
         run: cargo test --release
 
+  perf-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Performance regression gate
+        run: bash scripts/ci/perf_gate.sh
+      - name: Upload perf reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-perf-reports
+          path: benchmarks/reports/pr/
+
   cli-smoke:
     runs-on: ubuntu-latest
     steps:
@@ -129,6 +151,30 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: CUDA inference verify
         run: bash scripts/ci/cuda_infer_verify.sh
+
+  cuda-train-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: CUDA training verify
+        run: bash scripts/ci/cuda_train_verify.sh
+
+  xl-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: XL verify
+        run: bash scripts/ci/xl_verify.sh
 
   tier-a-guards:
     runs-on: ubuntu-latest

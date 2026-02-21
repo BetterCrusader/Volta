@@ -29,6 +29,14 @@ fn readme_mentions_quality_fortress_wave1() {
         text.contains("scripts/ci/cuda_infer_verify.sh"),
         "README must include CUDA inference verify script"
     );
+    assert!(
+        text.contains("scripts/ci/cuda_train_verify.sh"),
+        "README must include CUDA training verify script"
+    );
+    assert!(
+        text.contains("scripts/ci/xl_verify.sh"),
+        "README must include XL verify script"
+    );
 }
 
 #[test]
@@ -65,5 +73,25 @@ fn cuda_determinism_policy_is_documented() {
     assert!(
         text.contains("fast-math"),
         "cuda determinism policy must describe fast-math policy"
+    );
+}
+
+#[test]
+fn workflows_include_xl_verify_lanes() {
+    let pr = read_text(".github/workflows/pr-gates.yml");
+    let release = read_text(".github/workflows/release-gates.yml");
+    let nightly = read_text(".github/workflows/nightly-quality.yml");
+
+    assert!(
+        pr.contains("scripts/ci/xl_verify.sh"),
+        "pr-gates must include xl verify lane"
+    );
+    assert!(
+        release.contains("scripts/ci/xl_verify.sh"),
+        "release-gates must include xl verify lane"
+    );
+    assert!(
+        nightly.contains("scripts/ci/xl_verify.sh"),
+        "nightly-quality must include xl verify lane"
     );
 }

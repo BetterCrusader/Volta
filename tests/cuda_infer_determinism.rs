@@ -8,6 +8,9 @@ use volta::ir::{
 
 #[test]
 fn cuda_inference_is_repeatable_in_strict_mode() {
+    if !cuda_runtime_available() {
+        return;
+    }
     with_determinism("strict", || {
         let graph = build_repeatable_graph();
         let plan = build_execution_plan(&graph, &HashSet::new()).expect("plan should build");
@@ -37,6 +40,9 @@ fn cuda_inference_is_repeatable_in_strict_mode() {
 
 #[test]
 fn strict_mode_fails_fast_for_nondeterministic_softmax_grouping() {
+    if !cuda_runtime_available() {
+        return;
+    }
     with_determinism("strict", || {
         let graph = build_multi_softmax_graph();
         let plan = build_execution_plan(&graph, &HashSet::new()).expect("plan should build");
@@ -179,7 +185,10 @@ fn multi_softmax_context() -> ExecutionContext {
 }
 
 fn with_determinism(level: &str, run: impl FnOnce()) {
-    let guard = env_lock().lock().expect("env lock should not be poisoned");
+    let guard = match env_lock().lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
     let key = "VOLTA_DETERMINISM";
     let previous = std::env::var(key).ok();
 
@@ -197,6 +206,15 @@ fn with_determinism(level: &str, run: impl FnOnce()) {
     }
 
     drop(guard);
+}
+
+fn cuda_runtime_available() -> bool {
+    let result = std::panic::catch_unwind(|| volta::ir::cuda::device::CudaDevice::new(0));
+    match result {
+        Ok(Ok(_)) => true,
+        Ok(Err(_)) => false,
+        Err(_) => false,
+    }
 }
 
 fn env_lock() -> &'static Mutex<()> {

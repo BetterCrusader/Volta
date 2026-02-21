@@ -264,6 +264,30 @@ This CUDA inference MVP verify script enforces:
 - CPU/CUDA parity gate
 - CUDA memory regression guard
 
+### CUDA training v0.4 checks
+
+```bash
+bash scripts/ci/cuda_train_verify.sh
+```
+
+This CUDA training verify script enforces:
+
+- backward lowering and runtime train E2E gates
+- strict replay and optimizer-state parity gates
+- CUDA training memory regression guard
+
+### Phase 3 XL + performance checks
+
+```bash
+bash scripts/ci/xl_verify.sh
+```
+
+This XL verify script enforces:
+
+- execution plan cache regression gate
+- static memory budget and checkpointing gates
+- backend capability matrix + model export gates
+
 CUDA strict determinism governance policy:
 
 - `docs/governance/cuda-determinism-policy.md`
