@@ -42,6 +42,16 @@ fn check_command_passes_for_valid_script() {
 }
 
 #[test]
+fn check_command_quiet_suppresses_success_banner() {
+    let path = unique_temp_file("check_quiet_ok", "x 1\nprint x\n");
+    let output = run_volta(&["check", "--quiet", path.to_str().expect("utf8 path")]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success(), "check --quiet should pass");
+    assert!(!stdout.contains("Check passed"));
+}
+
+#[test]
 fn run_command_executes_program() {
     let path = unique_temp_file("run_ok", "x 1\nprint x\n");
 
@@ -51,6 +61,17 @@ fn run_command_executes_program() {
     assert!(output.status.success(), "run should pass: {stdout}");
     assert!(stdout.contains("1"));
     assert!(stdout.contains("Run completed"));
+}
+
+#[test]
+fn run_command_quiet_suppresses_completion_banner() {
+    let path = unique_temp_file("run_quiet_ok", "x 1\nprint x\n");
+    let output = run_volta(&["run", "--quiet", path.to_str().expect("utf8 path")]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success(), "run --quiet should pass");
+    assert!(stdout.contains("1"));
+    assert!(!stdout.contains("Run completed"));
 }
 
 #[test]
@@ -176,6 +197,14 @@ fn doctor_command_rejects_duplicate_strict_flag() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success(), "duplicate --strict must fail");
     assert!(stderr.contains("provided more than once"));
+}
+
+#[test]
+fn file_commands_reject_duplicate_quiet_flag() {
+    let output = run_volta(&["run", "--quiet", "--quiet", "x.vt"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "duplicate --quiet must fail");
+    assert!(stderr.contains("more than once"));
 }
 
 #[test]

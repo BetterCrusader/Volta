@@ -30,6 +30,7 @@ struct CommandSpec {
     path: Option<String>,
     doctor_json: bool,
     doctor_strict: bool,
+    quiet: bool,
 }
 
 #[derive(Debug, Default)]
@@ -150,10 +151,12 @@ fn main() -> ExitCode {
 
             match command.kind {
                 CommandKind::Check => {
-                    println!(
-                        "Check passed: syntax+semantic OK (warnings: {})",
-                        analyzer.warnings().len()
-                    );
+                    if !command.quiet {
+                        println!(
+                            "Check passed: syntax+semantic OK (warnings: {})",
+                            analyzer.warnings().len()
+                        );
+                    }
                     ExitCode::SUCCESS
                 }
                 CommandKind::Info => {
@@ -164,7 +167,9 @@ fn main() -> ExitCode {
                     let mut executor = Executor::new();
                     match executor.execute(&program) {
                         Ok(()) => {
-                            println!("Run completed: {path}");
+                            if !command.quiet {
+                                println!("Run completed: {path}");
+                            }
                             ExitCode::SUCCESS
                         }
                         Err(err) => {
@@ -195,6 +200,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
             path: None,
             doctor_json: false,
             doctor_strict: false,
+            quiet: false,
         });
     }
 
@@ -205,6 +211,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
             path: None,
             doctor_json: false,
             doctor_strict: false,
+            quiet: false,
         });
     }
     if cmd == "--tune-matmul" {
@@ -213,6 +220,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
             path: None,
             doctor_json: false,
             doctor_strict: false,
+            quiet: false,
         });
     }
 
@@ -249,6 +257,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
                 path: None,
                 doctor_json,
                 doctor_strict,
+                quiet: false,
             })
         }
         "version" | "-v" | "--version" => {
@@ -260,6 +269,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
                 path: None,
                 doctor_json: false,
                 doctor_strict: false,
+                quiet: false,
             })
         }
         "help" | "-h" | "--help" => {
@@ -271,6 +281,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
                 path: None,
                 doctor_json: false,
                 doctor_strict: false,
+                quiet: false,
             })
         }
         _ if args.len() == 1 && !cmd.starts_with('-') => Ok(CommandSpec {
@@ -278,6 +289,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
             path: Some(args[0].clone()),
             doctor_json: false,
             doctor_strict: false,
+            quiet: false,
         }),
         _ => Err(format!(
             "Unknown command '{}'. Expected run/check/info/doctor/version/help",
@@ -287,13 +299,37 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
 }
 
 fn parse_file_command(kind: CommandKind, args: &[String]) -> Result<CommandSpec, String> {
-    if args.len() != 2 {
+    let mut quiet = false;
+    let mut path: Option<&str> = None;
+
+    for arg in args.iter().skip(1) {
+        if arg == "--quiet" {
+            if quiet {
+                return Err(format!(
+                    "Command '{}' received '--quiet' more than once",
+                    args[0]
+                ));
+            }
+            quiet = true;
+            continue;
+        }
+        if path.is_some() {
+            return Err(format!(
+                "Command '{}' expects exactly one file path",
+                args[0]
+            ));
+        }
+        path = Some(arg.as_str());
+    }
+
+    let Some(path) = path else {
         return Err(format!(
             "Command '{}' expects exactly one file path",
             args[0]
         ));
-    }
-    let path = args[1].trim();
+    };
+
+    let path = path.trim();
     if path.is_empty() {
         return Err(format!(
             "Command '{}' expects a non-empty file path",
@@ -305,6 +341,7 @@ fn parse_file_command(kind: CommandKind, args: &[String]) -> Result<CommandSpec,
         path: Some(path.to_string()),
         doctor_json: false,
         doctor_strict: false,
+        quiet,
     })
 }
 
@@ -544,6 +581,7 @@ mod tests {
         let command = parse_command(&args).expect("command should parse");
         assert_eq!(command.kind, CommandKind::Run);
         assert_eq!(command.path.as_deref(), Some("example.vt"));
+        assert!(!command.quiet);
     }
 
     #[test]
@@ -647,6 +685,45 @@ mod tests {
         let command = parse_command(&args).expect("command should parse");
         assert_eq!(command.kind, CommandKind::Run);
         assert_eq!(command.path.as_deref(), Some("examples/mnist.vt"));
+        assert!(!command.quiet);
+    }
+
+    #[test]
+    fn parse_command_accepts_quiet_before_file_for_run() {
+        let args = vec![
+            "run".to_string(),
+            "--quiet".to_string(),
+            "example.vt".to_string(),
+        ];
+        let command = parse_command(&args).expect("run --quiet should parse");
+        assert_eq!(command.kind, CommandKind::Run);
+        assert_eq!(command.path.as_deref(), Some("example.vt"));
+        assert!(command.quiet);
+    }
+
+    #[test]
+    fn parse_command_accepts_quiet_after_file_for_check() {
+        let args = vec![
+            "check".to_string(),
+            "example.vt".to_string(),
+            "--quiet".to_string(),
+        ];
+        let command = parse_command(&args).expect("check --quiet should parse");
+        assert_eq!(command.kind, CommandKind::Check);
+        assert_eq!(command.path.as_deref(), Some("example.vt"));
+        assert!(command.quiet);
+    }
+
+    #[test]
+    fn parse_command_rejects_duplicate_quiet_flag() {
+        let args = vec![
+            "run".to_string(),
+            "--quiet".to_string(),
+            "--quiet".to_string(),
+            "example.vt".to_string(),
+        ];
+        let err = parse_command(&args).expect_err("duplicate --quiet must fail");
+        assert!(err.contains("more than once"));
     }
 
     #[test]
