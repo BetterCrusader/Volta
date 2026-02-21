@@ -14,7 +14,13 @@ if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
 }
 
 if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
-    throw "makensis is required (install NSIS)"
+    $fallbackMakensis = "C:\Program Files (x86)\NSIS\makensis.exe"
+    if (Test-Path $fallbackMakensis) {
+        $env:Path += ";C:\Program Files (x86)\NSIS"
+    }
+    else {
+        throw "makensis is required (install NSIS)"
+    }
 }
 
 Write-Host "[windows-installer] building release binary..."
@@ -36,6 +42,13 @@ $welcomeBmp = Join-Path $repoRoot "packaging/windows/assets/generated/welcome.bm
 
 $nsi = Join-Path $repoRoot "packaging/windows/volta-installer.nsi"
 Write-Host "[windows-installer] compiling NSIS installer..."
-& makensis "/DVERSION=$Version" "/DVOLTA_BINARY=$binary" "/DOUT_DIR=$winOut" "/DHEADER_BMP=$headerBmp" "/DWELCOME_BMP=$welcomeBmp" $nsi
+$makensisCmd = Get-Command makensis -ErrorAction SilentlyContinue
+if ($makensisCmd) {
+    & $makensisCmd.Source "/DVERSION=$Version" "/DVOLTA_BINARY=$binary" "/DOUT_DIR=$winOut" "/DHEADER_BMP=$headerBmp" "/DWELCOME_BMP=$welcomeBmp" $nsi
+}
+else {
+    $fallbackMakensis = "C:\Program Files (x86)\NSIS\makensis.exe"
+    & $fallbackMakensis "/DVERSION=$Version" "/DVOLTA_BINARY=$binary" "/DOUT_DIR=$winOut" "/DHEADER_BMP=$headerBmp" "/DWELCOME_BMP=$welcomeBmp" $nsi
+}
 
 Write-Host "[windows-installer] done: $winOut"

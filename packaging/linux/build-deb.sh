@@ -5,6 +5,8 @@ VERSION="${1:-v1.0.0}"
 OUT_DIR="${2:-dist/release/${VERSION}/linux}"
 BINARY_PATH="${3:-target/release/volta}"
 ARCH="amd64"
+DEB_VERSION="${VERSION#release-}"
+DEB_VERSION="${DEB_VERSION#v}"
 
 if [[ "$(uname -s)" != "Linux" ]]; then
   echo "This script must run on Linux" >&2
@@ -36,7 +38,7 @@ chmod 755 "$STAGE/usr/bin/volta"
 
 cat > "$STAGE/DEBIAN/control" <<EOF
 Package: volta
-Version: ${VERSION#v}
+Version: ${DEB_VERSION}
 Section: utils
 Priority: optional
 Architecture: ${ARCH}
@@ -50,7 +52,7 @@ cp packaging/linux/deb/prerm "$STAGE/DEBIAN/prerm"
 chmod 755 "$STAGE/DEBIAN/postinst" "$STAGE/DEBIAN/prerm"
 
 mkdir -p "$OUT_DIR"
-DEB_PATH="$OUT_DIR/volta_${VERSION#v}_${ARCH}.deb"
+DEB_PATH="$OUT_DIR/volta_${DEB_VERSION}_${ARCH}.deb"
 dpkg-deb --build "$STAGE" "$DEB_PATH" >/dev/null
 rm -rf "$STAGE"
 
