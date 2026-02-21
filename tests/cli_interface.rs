@@ -68,3 +68,30 @@ fn invalid_syntax_returns_nonzero() {
     assert!(!output.status.success(), "expected failure for parse error");
     assert!(stderr.contains("Parse error"));
 }
+
+#[test]
+fn bare_file_argument_runs_for_backward_compatibility() {
+    let path = unique_temp_file("run_compat", "x 1\nprint x\n");
+    let output = run_volta(&[path.to_str().expect("utf8 path")]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success(), "run should pass: {stdout}");
+    assert!(stdout.contains("Run completed"));
+}
+
+#[test]
+fn legacy_bench_and_tune_flags_exit_successfully() {
+    let bench = run_volta(&[
+        "--bench-infer",
+        "--runs",
+        "1",
+        "--warmup",
+        "0",
+        "--tokens",
+        "4",
+    ]);
+    assert!(bench.status.success(), "legacy bench-infer should succeed");
+
+    let tune = run_volta(&["--tune-matmul", "--dim", "64", "--runs", "1"]);
+    assert!(tune.status.success(), "legacy tune-matmul should succeed");
+}

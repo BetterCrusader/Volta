@@ -19,6 +19,8 @@ enum CommandKind {
     Info,
     Version,
     Help,
+    LegacyBenchInfer,
+    LegacyTuneMatmul,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,6 +63,14 @@ fn main() -> ExitCode {
         }
         CommandKind::Version => {
             println!("volta {}", env!("CARGO_PKG_VERSION"));
+            ExitCode::SUCCESS
+        }
+        CommandKind::LegacyBenchInfer => {
+            println!("Legacy '--bench-infer' mode is deprecated and currently a no-op.");
+            ExitCode::SUCCESS
+        }
+        CommandKind::LegacyTuneMatmul => {
+            println!("Legacy '--tune-matmul' mode is deprecated and currently a no-op.");
             ExitCode::SUCCESS
         }
         CommandKind::Run | CommandKind::Check | CommandKind::Info => {
@@ -172,6 +182,19 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
     }
 
     let cmd = args[0].to_ascii_lowercase();
+    if cmd == "--bench-infer" {
+        return Ok(CommandSpec {
+            kind: CommandKind::LegacyBenchInfer,
+            path: None,
+        });
+    }
+    if cmd == "--tune-matmul" {
+        return Ok(CommandSpec {
+            kind: CommandKind::LegacyTuneMatmul,
+            path: None,
+        });
+    }
+
     match cmd.as_str() {
         "run" => parse_file_command(CommandKind::Run, args),
         "check" => parse_file_command(CommandKind::Check, args),
@@ -194,6 +217,10 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
                 path: None,
             })
         }
+        _ if args.len() == 1 && !cmd.starts_with('-') => Ok(CommandSpec {
+            kind: CommandKind::Run,
+            path: Some(args[0].clone()),
+        }),
         _ => Err(format!(
             "Unknown command '{}'. Expected run/check/info/version/help",
             args[0]
@@ -320,5 +347,32 @@ mod tests {
         let command = parse_command(&args).expect("command should parse");
         assert_eq!(command.kind, CommandKind::Help);
         assert!(command.path.is_none());
+    }
+
+    #[test]
+    fn parse_command_treats_single_path_as_run_for_compat() {
+        let args = vec!["examples/mnist.vt".to_string()];
+        let command = parse_command(&args).expect("command should parse");
+        assert_eq!(command.kind, CommandKind::Run);
+        assert_eq!(command.path.as_deref(), Some("examples/mnist.vt"));
+    }
+
+    #[test]
+    fn parse_command_accepts_legacy_bench_flags() {
+        let args = vec![
+            "--bench-infer".to_string(),
+            "--runs".to_string(),
+            "1".to_string(),
+        ];
+        let command = parse_command(&args).expect("command should parse");
+        assert_eq!(command.kind, CommandKind::LegacyBenchInfer);
+
+        let args = vec![
+            "--tune-matmul".to_string(),
+            "--dim".to_string(),
+            "64".to_string(),
+        ];
+        let command = parse_command(&args).expect("command should parse");
+        assert_eq!(command.kind, CommandKind::LegacyTuneMatmul);
     }
 }
