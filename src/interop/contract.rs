@@ -29,19 +29,67 @@ pub struct IrTensorLiteral {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum IrOpContract {
-    Input { name: String },
-    Parameter { name: String },
+    Input {
+        name: String,
+    },
+    Parameter {
+        name: String,
+    },
     ConstTensor(IrTensorLiteral),
-    Add { lhs: String, rhs: String },
-    Sub { lhs: String, rhs: String },
-    Mul { lhs: String, rhs: String },
-    Div { lhs: String, rhs: String },
-    Neg { input: String },
-    MatMul { lhs: String, rhs: String },
-    Transpose { input: String },
-    Relu { input: String },
-    Softmax { input: String },
-    Output { value: String },
+    Add {
+        lhs: String,
+        rhs: String,
+    },
+    Sub {
+        lhs: String,
+        rhs: String,
+    },
+    Mul {
+        lhs: String,
+        rhs: String,
+    },
+    Div {
+        lhs: String,
+        rhs: String,
+    },
+    Neg {
+        input: String,
+    },
+    MatMul {
+        lhs: String,
+        rhs: String,
+    },
+    Transpose {
+        input: String,
+    },
+    Relu {
+        input: String,
+    },
+    Softmax {
+        input: String,
+    },
+    Reshape {
+        input: String,
+        shape: Vec<usize>,
+    },
+    Concat {
+        inputs: Vec<String>,
+        axis: usize,
+    },
+    Gather {
+        input: String,
+        indices: Vec<usize>,
+        axis: usize,
+    },
+    Slice {
+        input: String,
+        starts: Vec<usize>,
+        ends: Vec<usize>,
+        axes: Vec<usize>,
+    },
+    Output {
+        value: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -125,6 +173,68 @@ impl IrGraphContract {
                     "parameter '{}' must have non-empty shape",
                     parameter.name
                 )));
+            }
+        }
+
+        for node in &self.nodes {
+            match &node.op {
+                IrOpContract::Reshape { shape, .. } => {
+                    if shape.is_empty() {
+                        return Err(InteropError::new(format!(
+                            "node '{}' reshape target must be non-empty",
+                            node.id
+                        )));
+                    }
+                    if shape.contains(&0) {
+                        return Err(InteropError::new(format!(
+                            "node '{}' reshape target cannot contain zero dimension",
+                            node.id
+                        )));
+                    }
+                }
+                IrOpContract::Concat { inputs, .. } => {
+                    if inputs.len() < 2 {
+                        return Err(InteropError::new(format!(
+                            "node '{}' concat requires at least 2 inputs",
+                            node.id
+                        )));
+                    }
+                }
+                IrOpContract::Gather { indices, .. } => {
+                    if indices.is_empty() {
+                        return Err(InteropError::new(format!(
+                            "node '{}' gather requires at least one index",
+                            node.id
+                        )));
+                    }
+                }
+                IrOpContract::Slice {
+                    starts, ends, axes, ..
+                } => {
+                    if starts.is_empty() || ends.is_empty() || axes.is_empty() {
+                        return Err(InteropError::new(format!(
+                            "node '{}' slice starts/ends/axes must be non-empty",
+                            node.id
+                        )));
+                    }
+                    if starts.len() != ends.len() || starts.len() != axes.len() {
+                        return Err(InteropError::new(format!(
+                            "node '{}' slice starts/ends/axes lengths must match",
+                            node.id
+                        )));
+                    }
+                    if starts
+                        .iter()
+                        .zip(ends.iter())
+                        .any(|(start, end)| start >= end)
+                    {
+                        return Err(InteropError::new(format!(
+                            "node '{}' slice requires start < end for every axis",
+                            node.id
+                        )));
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -253,6 +363,26 @@ impl IrGraphContract {
                         .map_err(|err| InteropError::new(err.message))?;
                     value
                 }
+                IrOpContract::Reshape { .. } => {
+                    return Err(InteropError::new(
+                        "IR contract op 'Reshape' is parsed but not lowered to runtime yet",
+                    ));
+                }
+                IrOpContract::Concat { .. } => {
+                    return Err(InteropError::new(
+                        "IR contract op 'Concat' is parsed but not lowered to runtime yet",
+                    ));
+                }
+                IrOpContract::Gather { .. } => {
+                    return Err(InteropError::new(
+                        "IR contract op 'Gather' is parsed but not lowered to runtime yet",
+                    ));
+                }
+                IrOpContract::Slice { .. } => {
+                    return Err(InteropError::new(
+                        "IR contract op 'Slice' is parsed but not lowered to runtime yet",
+                    ));
+                }
                 IrOpContract::Output { value } => {
                     let value_id = resolve_value(&ids, value)?;
                     let (_, output_id) = graph
@@ -308,7 +438,11 @@ fn op_inputs(op: &IrOpContract) -> Vec<&str> {
         | IrOpContract::Transpose { input }
         | IrOpContract::Relu { input }
         | IrOpContract::Softmax { input }
+        | IrOpContract::Reshape { input, .. }
+        | IrOpContract::Gather { input, .. }
+        | IrOpContract::Slice { input, .. }
         | IrOpContract::Output { value: input } => vec![input.as_str()],
+        IrOpContract::Concat { inputs, .. } => inputs.iter().map(String::as_str).collect(),
     }
 }
 

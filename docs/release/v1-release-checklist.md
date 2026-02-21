@@ -5,6 +5,7 @@
 - Freeze feature scope for `v1.0.0`.
 - Confirm supported interop scope for Wave 1:
   - ONNX import subset: `Add`, `Sub`, `Mul`, `Div`, `Neg`, `MatMul`, `Transpose`, `Relu`, `Softmax`
+  - Wave 2 parser/contract guard paths: `Reshape`, `Concat`, `Gather`, `Slice` fail loudly until runtime lowering lands
   - static shape tensors only
   - deterministic runtime policy unchanged
 
@@ -34,6 +35,7 @@
   - Breaking changes / migration notes
 - Confirm rollback procedure:
   - `bash scripts/release/rollback.sh --verify-only`
+  - `powershell -ExecutionPolicy Bypass -File scripts/release/cut_v1.ps1`
 
 ## Sign-off
 
