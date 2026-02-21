@@ -10,7 +10,7 @@ use volta::lexer::Lexer;
 use volta::parser::Parser;
 use volta::semantic::SemanticAnalyzer;
 
-const USAGE: &str = "Usage:\n  volta run <file.vt>\n  volta check <file.vt>\n  volta info <file.vt>\n  volta doctor\n  volta version\n  volta help";
+const USAGE: &str = "Usage:\n  volta run <file.vt>\n  volta check <file.vt>\n  volta info <file.vt>\n  volta doctor [--json] [--strict]\n  volta version\n  volta help";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CommandKind {
@@ -72,6 +72,10 @@ fn main() -> ExitCode {
             let doctor = collect_doctor_report();
             print_doctor(&doctor, command.doctor_json);
             if command.doctor_strict && !doctor.warnings.is_empty() {
+                eprintln!(
+                    "doctor --strict failed: {} warning(s) detected",
+                    doctor.warnings.len()
+                );
                 return ExitCode::from(1);
             }
             ExitCode::SUCCESS

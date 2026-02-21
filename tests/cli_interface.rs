@@ -187,9 +187,11 @@ fn doctor_json_reports_invalid_gpu_env_value() {
 fn doctor_strict_fails_on_invalid_gpu_env_value() {
     let output = run_volta_with_env(&["doctor", "--strict"], "VOLTA_GPU_AVAILABLE", "maybe");
     let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
 
     assert!(!output.status.success(), "doctor --strict must fail");
     assert!(stdout.contains("warning: VOLTA_GPU_AVAILABLE has invalid value"));
+    assert!(stderr.contains("doctor --strict failed: 1 warning(s) detected"));
 }
 
 #[test]
@@ -206,9 +208,19 @@ fn doctor_strict_json_fails_on_invalid_gpu_env_value() {
         "maybe",
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         !output.status.success(),
         "doctor --strict --json must fail on warnings"
     );
     assert!(stdout.contains("\"warning_count\":1"));
+    assert!(stderr.contains("doctor --strict failed: 1 warning(s) detected"));
+}
+
+#[test]
+fn help_output_includes_doctor_flags() {
+    let output = run_volta(&["help"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "help should succeed");
+    assert!(stdout.contains("volta doctor [--json] [--strict]"));
 }
