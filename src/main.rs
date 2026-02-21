@@ -13,8 +13,7 @@ use volta::semantic::SemanticAnalyzer;
 const USAGE: &str = "Usage:\n  volta run <file.vt> [--quiet]\n  volta check <file.vt> [--quiet]\n  volta info <file.vt>\n  volta doctor [--json] [--strict]\n  volta init [project_dir]\n  volta version\n  volta help";
 const CLI_COMMANDS: [&str; 7] = ["run", "check", "info", "doctor", "init", "version", "help"];
 const INIT_MODEL_TEMPLATE: &str = "x 1\nprint x\n";
-const INIT_CONFIG_TEMPLATE: &str =
-    "[project]\nname = \"volta-project\"\nentry = \"model.vt\"\n";
+const INIT_CONFIG_TEMPLATE: &str = "[project]\nname = \"volta-project\"\nentry = \"model.vt\"\n";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CommandKind {
