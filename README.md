@@ -5,8 +5,7 @@ Volta is built to remove that roulette: **same inputs, same graph, same policy, 
 
 Volta is a compiler-first ML runtime in Rust with deterministic execution as a product feature, not an afterthought.
 
-## Why Volta Exists
-
+## Why This Is Different
 Most stacks optimize for speed first and explain behavior later.
 Volta flips that model:
 
@@ -30,13 +29,15 @@ This is the engine for teams that want ML systems that are inspectable, replayab
 - current stable release channel: `release-v1.0.0` (Volta V1)
 - historical milestone tags (pre-v1): `v0.1.0-core`, `v0.2.0-*`
 - governance hardening under **Quality Fortress**
+- CUDA inference MVP in Wave 3 hardening track
+- CUDA training hardening in Wave 4 hardening track
 - active engineering focus: deterministic runtime, ONNX interop, installer/release reliability
 
 ## Installer Experience (Windows/macOS/Linux)
 
-Volta now includes a real installer stack designed for production release flows:
+Volta includes a production-oriented cross-platform installer stack:
 
-- Windows: custom NSIS setup (`VoltaSetup-<version>.exe`) with optional PATH integration, verification, and uninstall
+- Windows: custom NSIS setup (`VoltaSetup-<version>.exe`) with PATH integration, verification, and uninstall
 - macOS: `.pkg` + optional `.dmg`, plus no-admin user installer mode
 - Linux: tarball + install/uninstall scripts, optional `.deb`
 - Release pack assembly with `checksums.txt` and `release-notes.md`
@@ -45,7 +46,6 @@ Installer implementation guide:
 
 - `docs/guides/installers.md`
 - `docs/guides/windows-installer-ui.md`
-
 ## Quick Start
 
 ```bash
