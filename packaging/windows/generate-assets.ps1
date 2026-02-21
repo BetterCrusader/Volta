@@ -122,11 +122,58 @@ function New-VoltaBitmap {
     $bmp.Dispose()
 }
 
+function New-InstallerPageBackground {
+    param(
+        [int]$Width,
+        [int]$Height,
+        [string]$FilePath
+    )
+
+    $bmp = New-Object System.Drawing.Bitmap($Width, $Height)
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+
+    $rect = New-Object System.Drawing.Rectangle(0, 0, $Width, $Height)
+    $c1 = [System.Drawing.ColorTranslator]::FromHtml($bgStart)
+    $c2 = [System.Drawing.ColorTranslator]::FromHtml($bgEnd)
+    $bg = New-Object System.Drawing.Drawing2D.LinearGradientBrush($rect, $c1, $c2, 35.0)
+    $g.FillRectangle($bg, $rect)
+
+    $glowPath = New-Object System.Drawing.Drawing2D.GraphicsPath
+    $glowPath.AddEllipse([int]($Width * 0.08), [int]($Height * 0.02), [int]($Width * 0.84), [int]($Height * 0.95))
+    $glowBrush = New-Object System.Drawing.Drawing2D.PathGradientBrush($glowPath)
+    $glowBrush.CenterColor = [System.Drawing.Color]::FromArgb(120, 10, 95, 155)
+    $glowBrush.SurroundColors = @([System.Drawing.Color]::FromArgb(0, 0, 0, 0))
+    $g.FillEllipse($glowBrush, [int]($Width * 0.05), [int]($Height * 0.0), [int]($Width * 0.9), [int]($Height * 1.0))
+
+    $rng = New-Object System.Random(42)
+    for ($i = 0; $i -lt 140; $i++) {
+        $x = [int]($rng.NextDouble() * $Width)
+        $y = [int]($rng.NextDouble() * $Height)
+        $size = if ($rng.NextDouble() -lt 0.12) { 2 } else { 1 }
+        $alpha = if ($size -eq 2) { 120 } else { 70 }
+        $starBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb($alpha, 140, 196, 238))
+        $g.FillEllipse($starBrush, $x, $y, $size, $size)
+        $starBrush.Dispose()
+    }
+
+    $bmp.Save($FilePath, [System.Drawing.Imaging.ImageFormat]::Bmp)
+
+    $glowBrush.Dispose()
+    $glowPath.Dispose()
+    $bg.Dispose()
+    $g.Dispose()
+    $bmp.Dispose()
+}
+
 $header = Join-Path $outPath "header.bmp"
 $welcome = Join-Path $outPath "welcome.bmp"
+$pageBg = Join-Path $outPath "page-bg.bmp"
 
 New-VoltaBitmap -Width 150 -Height 57 -FilePath $header
 New-VoltaBitmap -Width 164 -Height 314 -FilePath $welcome -DenseGrid
+New-InstallerPageBackground -Width 520 -Height 290 -FilePath $pageBg
 
 Write-Host "[windows-assets] generated: $header"
 Write-Host "[windows-assets] generated: $welcome"
+Write-Host "[windows-assets] generated: $pageBg"

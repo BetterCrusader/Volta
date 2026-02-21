@@ -27,6 +27,10 @@ ${Using:StrFunc} UnStrRep
 !define WELCOME_BMP "..\\..\\packaging\\windows\\assets\\generated\\welcome.bmp"
 !endif
 
+!ifndef PAGE_BG_BMP
+!define PAGE_BG_BMP "..\\..\\packaging\\windows\\assets\\generated\\page-bg.bmp"
+!endif
+
 Unicode true
 ManifestDPIAware true
 Name "Volta ${VERSION}"
@@ -50,6 +54,7 @@ Var SummaryLabel
 Var OptionAddToPath
 Var OptionRunDoctor
 Var InstallLog
+Var BgImageHandle
 
 !define MUI_ABORTWARNING
 !define MUI_HEADERIMAGE
@@ -132,59 +137,66 @@ Function OptionsPageCreate
     Abort
   ${EndIf}
 
-  ${NSD_CreateLabel} 0 0 100% 52u ""
+  ${NSD_CreateBitmap} 0 0 100% 100% ""
   Pop $0
-  SetCtlColors $0 0x00E8F4FF 0x00060912
+  ${NSD_SetStretchedBitmap} $0 "${PAGE_BG_BMP}" $BgImageHandle
 
-  ${NSD_CreateLabel} 8u 7u 64% 12u "VOLTA INSTALLER"
+  ${NSD_CreateLabel} 6u 8u 96% 52u ""
   Pop $0
-  SetCtlColors $0 0x00E8F4FF 0x00060912
+  SetCtlColors $0 0x00E8F4FF 0x00070E1D
 
-  ${NSD_CreateLabel} 8u 22u 64% 10u "Deterministic CLI runtime setup"
+  ${NSD_CreateLabel} 14u 16u 58% 12u "VOLTA INSTALLER"
   Pop $0
-  SetCtlColors $0 0x0088BBDD 0x00060912
+  SetCtlColors $0 0x00E8F4FF 0x00070E1D
 
-  ${NSD_CreateLabel} 8u 34u 64% 10u "release: ${VERSION} // per-user install"
+  ${NSD_CreateLabel} 14u 30u 58% 10u "Deterministic CLI runtime setup"
   Pop $0
-  SetCtlColors $0 0x00659EC0 0x00060912
+  SetCtlColors $0 0x0093C6EA 0x00070E1D
 
-  ${NSD_CreateLabel} 73% 6u 25% 38u ""
+  ${NSD_CreateLabel} 14u 42u 58% 10u "release: ${VERSION} // per-user install"
+  Pop $0
+  SetCtlColors $0 0x006EA7CD 0x00070E1D
+
+  ${NSD_CreateLabel} 74% 16u 22% 36u ""
   Pop $0
   SetCtlColors $0 0x00E8F4FF 0x000A1530
 
-  ${NSD_CreateLabel} 76% 11u 20% 10u "VOLTA"
+  ${NSD_CreateLabel} 77% 21u 18% 10u "VOLTA"
   Pop $0
   SetCtlColors $0 0x00E8F4FF 0x000A1530
 
-  ${NSD_CreateLabel} 76% 23u 20% 14u "DETERMINISTIC INSTALLER"
+  ${NSD_CreateLabel} 77% 33u 18% 14u "DETERMINISTIC$\r$\nINSTALLER"
   Pop $0
   SetCtlColors $0 0x0088BBDD 0x000A1530
 
-  ${NSD_CreateLabel} 0 60u 100% 10u "Install location"
+  ${NSD_CreateLabel} 8u 66u 96% 10u "Install location"
   Pop $0
-  SetCtlColors $0 0x004B637B 0x00F3F3F3
+  SetCtlColors $0 0x00DDEEFF 0x00101826
 
-  ${NSD_CreateText} 0 72u 79% 12u "$INSTDIR"
+  ${NSD_CreateText} 8u 78u 78% 13u "$INSTDIR"
   Pop $InstallPathInput
+  SetCtlColors $InstallPathInput 0x00EAF6FF 0x000E1B2E
 
-  ${NSD_CreateButton} 81% 72u 19% 12u "Browse..."
+  ${NSD_CreateButton} 88% 78u 11% 13u "Browse..."
   Pop $0
   ${NSD_OnClick} $0 OnBrowseInstallDir
 
-  ${NSD_CreateCheckbox} 0 93u 100% 12u "Add Volta binary directory to user PATH"
+  ${NSD_CreateCheckbox} 8u 98u 92% 12u "Add Volta binary directory to user PATH"
   Pop $CheckboxPath
+  SetCtlColors $CheckboxPath 0x00EAF6FF 0x00101826
   ${NSD_Check} $CheckboxPath
 
-  ${NSD_CreateCheckbox} 0 111u 100% 12u "Run 'volta doctor --strict' after install"
+  ${NSD_CreateCheckbox} 8u 114u 92% 12u "Run 'volta doctor --strict' after install"
   Pop $CheckboxDoctor
+  SetCtlColors $CheckboxDoctor 0x00EAF6FF 0x00101826
 
-  ${NSD_CreateLabel} 0 132u 100% 42u ""
+  ${NSD_CreateLabel} 8u 132u 96% 30u ""
   Pop $0
-  SetCtlColors $0 0x007FA9C7 0x00060912
+  SetCtlColors $0 0x009BC5E5 0x00070E1D
 
-  ${NSD_CreateLabel} 2% 136u 96% 34u ""
+  ${NSD_CreateLabel} 12u 138u 92% 20u ""
   Pop $SummaryLabel
-  SetCtlColors $SummaryLabel 0x007FA9C7 0x00060912
+  SetCtlColors $SummaryLabel 0x00B4D8F2 0x00070E1D
 
   Call UpdateInstallSummary
 
@@ -215,7 +227,7 @@ Function OnBrowseInstallDir
 FunctionEnd
 
 Function UpdateInstallSummary
-  ${NSD_SetText} $SummaryLabel "Install target: $INSTDIR$\r$\nNo admin rights are required.$\r$\nLogs: $INSTDIR\\installer.log"
+  ${NSD_SetText} $SummaryLabel "Install target selected above.$\r$\nNo admin rights are required.$\r$\nLogs: installer.log in install folder."
 FunctionEnd
 
 Function AddUserPath

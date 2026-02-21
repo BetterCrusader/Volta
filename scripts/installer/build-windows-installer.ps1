@@ -39,16 +39,17 @@ $assetScript = Join-Path $repoRoot "packaging/windows/generate-assets.ps1"
 
 $headerBmp = Join-Path $repoRoot "packaging/windows/assets/generated/header.bmp"
 $welcomeBmp = Join-Path $repoRoot "packaging/windows/assets/generated/welcome.bmp"
+$pageBgBmp = Join-Path $repoRoot "packaging/windows/assets/generated/page-bg.bmp"
 
 $nsi = Join-Path $repoRoot "packaging/windows/volta-installer.nsi"
 Write-Host "[windows-installer] compiling NSIS installer..."
 $makensisCmd = Get-Command makensis -ErrorAction SilentlyContinue
 if ($makensisCmd) {
-    & $makensisCmd.Source "/DVERSION=$Version" "/DVOLTA_BINARY=$binary" "/DOUT_DIR=$winOut" "/DHEADER_BMP=$headerBmp" "/DWELCOME_BMP=$welcomeBmp" $nsi
+    & $makensisCmd.Source "/DVERSION=$Version" "/DVOLTA_BINARY=$binary" "/DOUT_DIR=$winOut" "/DHEADER_BMP=$headerBmp" "/DWELCOME_BMP=$welcomeBmp" "/DPAGE_BG_BMP=$pageBgBmp" $nsi
 }
 else {
     $fallbackMakensis = "C:\Program Files (x86)\NSIS\makensis.exe"
-    & $fallbackMakensis "/DVERSION=$Version" "/DVOLTA_BINARY=$binary" "/DOUT_DIR=$winOut" "/DHEADER_BMP=$headerBmp" "/DWELCOME_BMP=$welcomeBmp" $nsi
+    & $fallbackMakensis "/DVERSION=$Version" "/DVOLTA_BINARY=$binary" "/DOUT_DIR=$winOut" "/DHEADER_BMP=$headerBmp" "/DWELCOME_BMP=$welcomeBmp" "/DPAGE_BG_BMP=$pageBgBmp" $nsi
 }
 
 Write-Host "[windows-installer] done: $winOut"
