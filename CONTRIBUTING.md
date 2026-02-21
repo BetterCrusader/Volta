@@ -53,6 +53,19 @@ Windows release parity path:
 powershell -ExecutionPolicy Bypass -File scripts/release/cut_v1.ps1
 ```
 
+Installer artifact path:
+
+```powershell
+pwsh ./scripts/installer/build-windows-installer.ps1 -Version "v1.0.0"
+pwsh ./scripts/installer/assemble-release.ps1 -Version "release-v1.0.0"
+```
+
+```bash
+bash packaging/macos/build-pkg.sh v1.0.0
+bash packaging/linux/build-tarball.sh v1.0.0 x86_64-unknown-linux-gnu
+bash packaging/linux/build-deb.sh v1.0.0
+```
+
 ## Engineering Rules (Hard)
 
 1. No silent fallback paths.

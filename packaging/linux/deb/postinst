@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+
+LOG_FILE="/var/log/volta-installer.log"
+
+{
+  echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] .deb postinst"
+  if command -v volta >/dev/null 2>&1; then
+    volta version || true
+    volta doctor --json || true
+  fi
+} >> "$LOG_FILE" 2>&1 || true
+
+exit 0

@@ -1,19 +1,20 @@
-# Volta: The Deterministic AI Compiler Core
+# Volta: Deterministic ML Runtime You Can Actually Trust
 
-If your model gives two different answers for the same input, Volta is built for you.
+If the same model input can produce different outcomes, production is roulette.
+Volta is built to remove that roulette: **same inputs, same graph, same policy, same result**.
 
-Volta is a compiler-first ML runtime in Rust focused on one promise: **same inputs, same graph, same policy, same result**.
+Volta is a compiler-first ML runtime in Rust with deterministic execution as a product feature, not an afterthought.
 
 ## Why This Is Different
 Most stacks optimize for speed first and explain behavior later.
-Volta does the opposite:
+Volta flips that model:
 
 - verifier-first graph discipline
 - deterministic schedule and allocation
 - strict contracts before runtime execution
 - policy-driven release gates
 
-This is the engine for people who want ML systems that are inspectable, replayable, and production-safe.
+This is the engine for teams that want ML systems that are inspectable, replayable, and production-safe.
 
 ## What You Can Do Right Now
 
@@ -25,11 +26,26 @@ This is the engine for people who want ML systems that are inspectable, replayab
 
 ## Project Status
 
-- public release line: `release-v1.0.0` (Volta V1)
-- core contract lineage started at `v0.1.0-core`
+- current stable release channel: `release-v1.0.0` (Volta V1)
+- historical milestone tags (pre-v1): `v0.1.0-core`, `v0.2.0-*`
 - governance hardening under **Quality Fortress**
 - CUDA inference MVP in Wave 3 hardening track
 - CUDA training hardening in Wave 4 hardening track
+- active engineering focus: deterministic runtime, ONNX interop, installer/release reliability
+
+## Installer Experience (Windows/macOS/Linux)
+
+Volta includes a production-oriented cross-platform installer stack:
+
+- Windows: custom NSIS setup (`VoltaSetup-<version>.exe`) with PATH integration, verification, and uninstall
+- macOS: `.pkg` + optional `.dmg`, plus no-admin user installer mode
+- Linux: tarball + install/uninstall scripts, optional `.deb`
+- Release pack assembly with `checksums.txt` and `release-notes.md`
+
+Installer implementation guide:
+
+- `docs/guides/installers.md`
+- `docs/guides/windows-installer-ui.md`
 ## Quick Start
 
 ```bash
@@ -102,6 +118,51 @@ train brain on mnist
 print "training complete"
 ```
 
+## Build and Verification
+
+```bash
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test
+cargo test --release
+```
+
+## Installer Build Commands
+
+### Windows
+
+```powershell
+pwsh ./scripts/installer/build-windows-installer.ps1 -Version "v1.0.0"
+```
+
+### macOS
+
+```bash
+bash packaging/macos/build-pkg.sh v1.0.0
+```
+
+### Linux tarball
+
+```bash
+bash packaging/linux/build-tarball.sh v1.0.0 x86_64-unknown-linux-gnu
+```
+
+### Linux deb (optional)
+
+```bash
+bash packaging/linux/build-deb.sh v1.0.0
+```
+
+### Assemble release layout + checksums
+
+```powershell
+pwsh ./scripts/installer/assemble-release.ps1 -Version "release-v1.0.0"
+```
+
+```bash
+bash scripts/installer/assemble-release.sh release-v1.0.0
+```
+
 ## Quality Fortress Gates
 
 ### Quality Fortress Wave 1 checks
@@ -160,15 +221,6 @@ Start here:
 - `docs/governance/perf-governance.md`
 - `docs/governance/ci-topology.md`
 
-## Build and Test
-
-```bash
-cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test
-cargo test --release
-```
-
 ## Contributor Onboarding
 
 - Contribution process: `CONTRIBUTING.md`
@@ -179,4 +231,4 @@ cargo test --release
 
 Volta is not "yet another eager framework".
 
-It is a deterministic compiler core for teams that want correctness and replayability as first-class product features.
+It is a deterministic compiler core for teams that treat correctness and replayability as first-class product requirements.
