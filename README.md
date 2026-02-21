@@ -287,7 +287,7 @@ This interop verify script enforces:
 - stable IR contract validation
 - real ONNX protobuf import for supported Wave 1 op-set
 - imported/native runtime parity for acceptance fixtures
-- Wave 2 ONNX runtime path for `Reshape`, `Concat`, `Gather`, `Slice` with strict shape/axis validation
+- Wave 2 parser/contract guards (`Reshape`, `Concat`, `Gather`, `Slice`) with explicit "not lowered yet" failures
 
 ### Phase 3 XL + performance checks
 
