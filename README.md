@@ -276,6 +276,18 @@ This CUDA training verify script enforces:
 - strict replay and optimizer-state parity gates
 - CUDA training memory regression guard
 
+### Interop ONNX Wave 1 checks
+
+```bash
+bash scripts/ci/interop_onnx_verify.sh
+```
+
+This interop verify script enforces:
+
+- stable IR contract validation
+- real ONNX protobuf import for supported Wave 1 op-set
+- imported/native runtime parity for acceptance fixtures
+
 ### Phase 3 XL + performance checks
 
 ```bash
@@ -296,6 +308,11 @@ Release/nightly workflows are defined in:
 
 - `.github/workflows/release-gates.yml`
 - `.github/workflows/nightly-quality.yml`
+
+V1 release checklist and cut script:
+
+- `docs/release/v1-release-checklist.md`
+- `scripts/release/cut_v1.sh`
 
 Run demo binary:
 

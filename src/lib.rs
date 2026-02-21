@@ -1,6 +1,7 @@
 pub mod ast;
 pub mod autopilot;
 pub mod executor;
+pub mod interop;
 pub mod ir;
 pub mod lexer;
 pub mod model;
