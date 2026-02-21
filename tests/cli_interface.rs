@@ -127,6 +127,8 @@ fn doctor_command_reports_environment() {
     assert!(stdout.contains("gpu_available:"));
     assert!(stdout.contains("feature_onnx_import:"));
     assert!(stdout.contains("warning_count:"));
+    assert!(stdout.contains("healthy:"));
+    assert!(stdout.contains("strict_would_fail:"));
 }
 
 #[test]
@@ -144,6 +146,8 @@ fn doctor_command_supports_json_mode() {
     assert!(stdout.contains("\"gpu_available\":"));
     assert!(stdout.contains("\"warning_count\":"));
     assert!(stdout.contains("\"warnings\":"));
+    assert!(stdout.contains("\"healthy\":"));
+    assert!(stdout.contains("\"strict_would_fail\":"));
 }
 
 #[test]
@@ -197,6 +201,8 @@ fn doctor_json_reports_invalid_gpu_env_value() {
     assert!(stdout.contains("\"gpu_env_valid\":false"));
     assert!(stdout.contains("\"warning_count\":1"));
     assert!(stdout.contains("\"warnings\":[\"VOLTA_GPU_AVAILABLE has invalid value"));
+    assert!(stdout.contains("\"healthy\":false"));
+    assert!(stdout.contains("\"strict_would_fail\":true"));
 }
 
 #[test]
@@ -213,7 +219,10 @@ fn doctor_strict_fails_on_invalid_gpu_env_value() {
 #[test]
 fn doctor_strict_passes_on_valid_gpu_env_value() {
     let output = run_volta_with_env(&["doctor", "--strict"], "VOLTA_GPU_AVAILABLE", "true");
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success(), "doctor --strict should pass");
+    assert!(stdout.contains("healthy: yes"));
+    assert!(stdout.contains("strict_would_fail: no"));
 }
 
 #[test]

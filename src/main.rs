@@ -319,6 +319,7 @@ struct DoctorReport {
     onnx_import_enabled: bool,
     gpu_env: GpuEnvStatus,
     warnings: Vec<String>,
+    healthy: bool,
 }
 
 fn collect_doctor_report() -> DoctorReport {
@@ -331,11 +332,13 @@ fn collect_doctor_report() -> DoctorReport {
     if let Some(warning) = &gpu_env.parse_warning {
         warnings.push(warning.clone());
     }
+    let healthy = warnings.is_empty();
     DoctorReport {
         cpu_threads,
         onnx_import_enabled,
         gpu_env,
         warnings,
+        healthy,
     }
 }
 
@@ -343,7 +346,7 @@ fn print_doctor(report: &DoctorReport, json: bool) {
     if json {
         let raw = report.gpu_env.raw.clone().unwrap_or_default();
         println!(
-            "{{\"tool\":\"volta-doctor\",\"version\":\"{}\",\"os\":\"{}\",\"arch\":\"{}\",\"cpu_threads\":{},\"gpu_available\":{},\"gpu_env_raw\":\"{}\",\"gpu_env_valid\":{},\"feature_onnx_import\":{},\"warning_count\":{},\"warnings\":[{}]}}",
+            "{{\"tool\":\"volta-doctor\",\"version\":\"{}\",\"os\":\"{}\",\"arch\":\"{}\",\"cpu_threads\":{},\"gpu_available\":{},\"gpu_env_raw\":\"{}\",\"gpu_env_valid\":{},\"feature_onnx_import\":{},\"warning_count\":{},\"warnings\":[{}],\"healthy\":{},\"strict_would_fail\":{}}}",
             env!("CARGO_PKG_VERSION"),
             std::env::consts::OS,
             std::env::consts::ARCH,
@@ -358,7 +361,9 @@ fn print_doctor(report: &DoctorReport, json: bool) {
                 .iter()
                 .map(|w| format!("\"{}\"", json_escape(w)))
                 .collect::<Vec<_>>()
-                .join(",")
+                .join(","),
+            report.healthy,
+            !report.healthy
         );
         return;
     }
@@ -387,6 +392,11 @@ fn print_doctor(report: &DoctorReport, json: bool) {
             println!("  warning: {warning}");
         }
     }
+    println!("  healthy: {}", if report.healthy { "yes" } else { "no" });
+    println!(
+        "  strict_would_fail: {}",
+        if report.healthy { "no" } else { "yes" }
+    );
     println!(
         "  feature_onnx_import: {}",
         if report.onnx_import_enabled {
