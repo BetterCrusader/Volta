@@ -1,5 +1,8 @@
 # Backend Capability Matrix
 
+The fastest way to ship regressions is to guess backend behavior.
+This matrix removes guesswork.
+
 ## Backend Capability Matrix
 
 This matrix is the source of truth for runtime capability negotiation.
@@ -9,6 +12,10 @@ This matrix is the source of truth for runtime capability negotiation.
 | CPU | yes | yes | yes | strict |
 | CUDA | yes | yes | yes | balanced |
 | LLVM | no | no | no | balanced |
+
+## Why This Matters
+
+When capabilities are explicit, runtime behavior stays predictable across CI, local runs, and releases.
 
 ## Enforcement Rules
 

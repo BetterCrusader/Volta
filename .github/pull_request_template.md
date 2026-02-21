@@ -1,14 +1,15 @@
-## Summary
+## What This PR Changes
 
-- Describe the change in 1-3 bullets.
+- Keep this to 1-3 concrete bullets.
+- Say what users/runtime behavior gets better.
 
-## Tier Impact
+## Blast Radius (Tier)
 
 - [ ] Tier A (`src/ir`, `src/device`, tensor core, matmul, KV internals)
 - [ ] Tier B (`src/model`)
 - [ ] Tier C (DSL/frontend/autopilot/executor)
 
-## Quality Fortress Checklist
+## Quality Fortress (must be green)
 
 - [ ] `cargo fmt --check`
 - [ ] `cargo clippy --all-targets --all-features -- -D warnings`
@@ -16,7 +17,7 @@
 - [ ] `cargo test --release`
 - [ ] CLI smoke checks passed (`scripts/ci/cli_smoke.sh` or `scripts/ci/cli_smoke.ps1`)
 
-## Performance Evidence (required for Tier A/B perf-sensitive changes)
+## Performance Proof (required for Tier A/B perf-sensitive changes)
 
 - Median delta vs baseline:
 - Sigma (stddev):
@@ -28,12 +29,12 @@
 - [ ] Numeric tolerances unchanged or updated with justification
 - [ ] No runtime panic path introduced
 
-## Rollback Readiness
+## Rollback Ready
 
 - Previous stable pointer/tag:
 - Rollback approach:
 
-## Governance Metadata
+## Governance Links
 
 - RFC reference (required for policy/Tier A invariant changes):
 - Incident links (if regression/hotfix):

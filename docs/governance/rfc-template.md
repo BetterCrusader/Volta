@@ -1,5 +1,7 @@
 # RFC Template
 
+Use this template when proposing changes that can affect correctness, determinism, performance, or release safety.
+
 ## Header
 
 - RFC ID (`RFC-YYYY-XXX`)

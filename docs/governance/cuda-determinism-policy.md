@@ -1,5 +1,7 @@
 # CUDA Determinism Policy
 
+Speed without determinism is just a faster way to produce non-reproducible bugs.
+
 ## Scope
 
 This policy defines deterministic execution guarantees for CUDA inference in Volta Phase 1.

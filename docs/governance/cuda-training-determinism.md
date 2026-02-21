@@ -1,5 +1,7 @@
 # CUDA Training Determinism Policy
 
+Training determinism is where compiler promises become product promises.
+
 ## Strict Mode Guarantees
 
 Strict mode is a fail-fast contract for CUDA training execution.

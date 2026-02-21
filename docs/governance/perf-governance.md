@@ -1,5 +1,7 @@
 # Performance Governance
 
+If a release is faster on your laptop but slower in production, governance failed.
+
 ## Baseline Identity
 
 - Perf baselines are keyed by CPU signature.

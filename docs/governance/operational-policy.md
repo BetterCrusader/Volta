@@ -1,5 +1,7 @@
 # Operational Policy
 
+Shipping fast is easy. Shipping safely and repeatedly is the hard part.
+
 ## Protected Branches
 
 - `main` and `release/*` are protected branches.
@@ -17,10 +19,10 @@
 - Release candidates must pass short soak, fuzz smoke, and double-pass perf gates.
 - Nightly runs execute heavy fuzz, long soak, and perf matrix reporting.
 
-## Rollback
+## rollback
 
 - Every release candidate must include a rollback pointer to previous stable tag.
-- Rollback procedure is scripted and validated in release workflow.
+- rollback procedure is scripted and validated in release workflow.
 - Incident response follows severity-based escalation and documented ownership.
 
 ## Quality Freeze Trigger

@@ -1,5 +1,7 @@
 # Tier A Contracts
 
+Tier A is where trust is won or lost. This file is the contract.
+
 This document is authoritative for Tier A behavior (`src/ir`, `src/device`, tensor core, matmul tuning, KV internals).
 
 ## Tier A Invariants

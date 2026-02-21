@@ -15,9 +15,27 @@ fn unique_temp_file(name: &str, content: &str) -> PathBuf {
     path
 }
 
+fn unique_temp_dir(name: &str) -> PathBuf {
+    let mut path = env::temp_dir();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be valid")
+        .as_nanos();
+    path.push(format!("volta_cli_{name}_{nanos}"));
+    path
+}
+
 fn run_volta(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_volta"))
         .args(args)
+        .output()
+        .expect("volta binary should execute")
+}
+
+fn run_volta_with_env(args: &[&str], key: &str, value: &str) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_volta"))
+        .args(args)
+        .env(key, value)
         .output()
         .expect("volta binary should execute")
 }
@@ -34,6 +52,16 @@ fn check_command_passes_for_valid_script() {
 }
 
 #[test]
+fn check_command_quiet_suppresses_success_banner() {
+    let path = unique_temp_file("check_quiet_ok", "x 1\nprint x\n");
+    let output = run_volta(&["check", "--quiet", path.to_str().expect("utf8 path")]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success(), "check --quiet should pass");
+    assert!(!stdout.contains("Check passed"));
+}
+
+#[test]
 fn run_command_executes_program() {
     let path = unique_temp_file("run_ok", "x 1\nprint x\n");
 
@@ -43,6 +71,17 @@ fn run_command_executes_program() {
     assert!(output.status.success(), "run should pass: {stdout}");
     assert!(stdout.contains("1"));
     assert!(stdout.contains("Run completed"));
+}
+
+#[test]
+fn run_command_quiet_suppresses_completion_banner() {
+    let path = unique_temp_file("run_quiet_ok", "x 1\nprint x\n");
+    let output = run_volta(&["run", "--quiet", path.to_str().expect("utf8 path")]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success(), "run --quiet should pass");
+    assert!(stdout.contains("1"));
+    assert!(!stdout.contains("Run completed"));
 }
 
 #[test]
@@ -70,6 +109,18 @@ fn invalid_syntax_returns_nonzero() {
 }
 
 #[test]
+fn file_commands_reject_empty_path() {
+    let output = run_volta(&["run", ""]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        !output.status.success(),
+        "empty path should return non-zero exit code"
+    );
+    assert!(stderr.contains("non-empty file path"));
+}
+
+#[test]
 fn bare_file_argument_runs_for_backward_compatibility() {
     let path = unique_temp_file("run_compat", "x 1\nprint x\n");
     let output = run_volta(&[path.to_str().expect("utf8 path")]);
@@ -94,4 +145,209 @@ fn legacy_bench_and_tune_flags_exit_successfully() {
 
     let tune = run_volta(&["--tune-matmul", "--dim", "64", "--runs", "1"]);
     assert!(tune.status.success(), "legacy tune-matmul should succeed");
+}
+
+#[test]
+fn doctor_command_reports_environment() {
+    let output = run_volta(&["doctor"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success(), "doctor should pass: {stdout}");
+    assert!(stdout.contains("Volta doctor"));
+    assert!(stdout.contains("cpu_threads:"));
+    assert!(stdout.contains("gpu_available:"));
+    assert!(stdout.contains("feature_onnx_import:"));
+    assert!(stdout.contains("warning_count:"));
+    assert!(stdout.contains("healthy:"));
+    assert!(stdout.contains("strict_would_fail:"));
+}
+
+#[test]
+fn doctor_command_supports_json_mode() {
+    let output = run_volta(&["doctor", "--json"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        output.status.success(),
+        "doctor --json should pass: {stdout}"
+    );
+    assert!(stdout.trim_start().starts_with('{'));
+    assert!(stdout.contains("\"tool\":\"volta-doctor\""));
+    assert!(stdout.contains("\"cpu_threads\":"));
+    assert!(stdout.contains("\"gpu_available\":"));
+    assert!(stdout.contains("\"warning_count\":"));
+    assert!(stdout.contains("\"warnings\":"));
+    assert!(stdout.contains("\"healthy\":"));
+    assert!(stdout.contains("\"strict_would_fail\":"));
+}
+
+#[test]
+fn doctor_command_rejects_unknown_flag() {
+    let output = run_volta(&["doctor", "--yaml"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        !output.status.success(),
+        "doctor with unknown flag must fail"
+    );
+    assert!(stderr.contains("accepts only optional '--json' and '--strict'"));
+}
+
+#[test]
+fn doctor_command_rejects_duplicate_json_flag() {
+    let output = run_volta(&["doctor", "--json", "--json"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "duplicate --json must fail");
+    assert!(stderr.contains("provided more than once"));
+}
+
+#[test]
+fn doctor_command_rejects_duplicate_strict_flag() {
+    let output = run_volta(&["doctor", "--strict", "--strict"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "duplicate --strict must fail");
+    assert!(stderr.contains("provided more than once"));
+}
+
+#[test]
+fn file_commands_reject_duplicate_quiet_flag() {
+    let output = run_volta(&["run", "--quiet", "--quiet", "x.vt"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "duplicate --quiet must fail");
+    assert!(stderr.contains("more than once"));
+}
+
+#[test]
+fn info_command_rejects_quiet_flag() {
+    let output = run_volta(&["info", "--quiet", "x.vt"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "info must reject --quiet");
+    assert!(stderr.contains("does not accept '--quiet'"));
+}
+
+#[test]
+fn run_command_rejects_unknown_flag() {
+    let output = run_volta(&["run", "--verbose", "x.vt"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "run must reject unknown flags");
+    assert!(stderr.contains("accepts only optional '--quiet' plus one file path"));
+}
+
+#[test]
+fn run_command_suggests_quiet_for_close_flag() {
+    let output = run_volta(&["run", "--quite", "x.vt"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "run must reject misspelled quiet");
+    assert!(stderr.contains("did you mean '--quiet'?"));
+}
+
+#[test]
+fn unknown_command_suggests_closest_match() {
+    let output = run_volta(&["chek"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "unknown command should fail");
+    assert!(stderr.contains("Did you mean 'check'?"));
+}
+
+#[test]
+fn init_command_creates_project_files() {
+    let dir = unique_temp_dir("init_project");
+    let dir_text = dir.to_str().expect("utf8 path").to_string();
+
+    let output = run_volta(&["init", &dir_text]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "init should succeed: {stdout}");
+    assert!(stdout.contains("Initialized Volta project"));
+    assert!(dir.join("model.vt").exists());
+    assert!(dir.join("volta.toml").exists());
+}
+
+#[test]
+fn init_command_is_idempotent_and_reports_skips() {
+    let dir = unique_temp_dir("init_idempotent");
+    let dir_text = dir.to_str().expect("utf8 path").to_string();
+
+    let first = run_volta(&["init", &dir_text]);
+    assert!(first.status.success(), "first init should succeed");
+
+    let second = run_volta(&["init", &dir_text]);
+    let stdout = String::from_utf8_lossy(&second.stdout);
+    assert!(second.status.success(), "second init should succeed");
+    assert!(stdout.contains("Skipped existing:"));
+}
+
+#[test]
+fn doctor_reports_invalid_gpu_env_value() {
+    let output = run_volta_with_env(&["doctor"], "VOLTA_GPU_AVAILABLE", "maybe");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success(), "doctor should still succeed");
+    assert!(stdout.contains("gpu_env_raw: maybe"));
+    assert!(stdout.contains("warning: VOLTA_GPU_AVAILABLE has invalid value"));
+}
+
+#[test]
+fn doctor_json_reports_invalid_gpu_env_value() {
+    let output = run_volta_with_env(&["doctor", "--json"], "VOLTA_GPU_AVAILABLE", "maybe");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        output.status.success(),
+        "doctor --json should still succeed"
+    );
+    assert!(stdout.contains("\"gpu_env_raw\":\"maybe\""));
+    assert!(stdout.contains("\"gpu_env_valid\":false"));
+    assert!(stdout.contains("\"warning_count\":1"));
+    assert!(stdout.contains("\"warnings\":[\"VOLTA_GPU_AVAILABLE has invalid value"));
+    assert!(stdout.contains("\"healthy\":false"));
+    assert!(stdout.contains("\"strict_would_fail\":true"));
+}
+
+#[test]
+fn doctor_strict_fails_on_invalid_gpu_env_value() {
+    let output = run_volta_with_env(&["doctor", "--strict"], "VOLTA_GPU_AVAILABLE", "maybe");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success(), "doctor --strict must fail");
+    assert!(stdout.contains("warning: VOLTA_GPU_AVAILABLE has invalid value"));
+    assert!(stderr.contains("doctor --strict failed: 1 warning(s) detected"));
+}
+
+#[test]
+fn doctor_strict_passes_on_valid_gpu_env_value() {
+    let output = run_volta_with_env(&["doctor", "--strict"], "VOLTA_GPU_AVAILABLE", "true");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "doctor --strict should pass");
+    assert!(stdout.contains("healthy: yes"));
+    assert!(stdout.contains("strict_would_fail: no"));
+}
+
+#[test]
+fn doctor_strict_json_fails_on_invalid_gpu_env_value() {
+    let output = run_volta_with_env(
+        &["doctor", "--strict", "--json"],
+        "VOLTA_GPU_AVAILABLE",
+        "maybe",
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success(),
+        "doctor --strict --json must fail on warnings"
+    );
+    assert!(stdout.contains("\"warning_count\":1"));
+    assert!(stderr.contains("doctor --strict failed: 1 warning(s) detected"));
+}
+
+#[test]
+fn help_output_includes_doctor_flags() {
+    let output = run_volta(&["help"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "help should succeed");
+    assert!(stdout.contains("volta run <file.vt> [--quiet]"));
+    assert!(stdout.contains("volta check <file.vt> [--quiet]"));
+    assert!(stdout.contains("volta info <file.vt>"));
+    assert!(stdout.contains("volta doctor [--json] [--strict]"));
+    assert!(stdout.contains("volta init [project_dir]"));
 }

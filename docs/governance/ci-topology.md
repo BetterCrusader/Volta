@@ -1,5 +1,7 @@
 # CI Topology
 
+If you cannot explain your CI topology in one page, you do not control your release risk.
+
 ## PR Pipelines
 
 - `pr-gates.yml` (blocking): fmt, clippy, debug tests, release tests, CLI smoke, property-fast.

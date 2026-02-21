@@ -1,5 +1,7 @@
 # Runtime Performance SLO
 
+These SLOs define when "fast enough" is actually true.
+
 ## Runtime SLOs
 
 These SLOs apply to stable release gates and nightly quality signals.
@@ -13,5 +15,5 @@ These SLOs apply to stable release gates and nightly quality signals.
 
 1. P95 metrics are collected from deterministic repeated runs.
 2. Plan cache hit rate is measured per backend and determinism mode.
-3. Memory budget regressions block release until baseline or architecture decision is updated.
+3. memory budget regressions block release until baseline or architecture decision is updated.
 4. Any SLO breach requires incident capture and corrective follow-up.
