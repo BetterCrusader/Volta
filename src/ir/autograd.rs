@@ -386,10 +386,6 @@ pub fn build_reverse_graph(
             | Op::ConstTensor { .. }
             | Op::Neg(_)
             | Op::ElementwiseChain { .. }
-            | Op::Reshape { .. }
-            | Op::Concat { .. }
-            | Op::Gather { .. }
-            | Op::Slice { .. }
             | Op::Transpose(_)
             | Op::ReluBackward(_, _)
             | Op::Softmax(_)
