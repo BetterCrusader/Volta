@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+INSTALL_ROOT="/usr/local/lib/volta/bin"
+LINK_PATH="/usr/local/bin/volta"
+LOG_FILE="/var/log/volta-installer.log"
+
+mkdir -p "$(dirname "$LINK_PATH")"
+ln -sf "$INSTALL_ROOT/volta" "$LINK_PATH"
+
+mkdir -p /etc/paths.d
+echo "$INSTALL_ROOT" > /etc/paths.d/volta
+
+{
+  echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] Volta macOS pkg postinstall"
+  "$LINK_PATH" version || true
+  "$LINK_PATH" doctor --json || true
+} >> "$LOG_FILE" 2>&1
+
+exit 0
