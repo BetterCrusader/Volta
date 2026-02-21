@@ -47,7 +47,7 @@ cargo build --release
 ### 2) Windows installer
 
 ```powershell
-pwsh ./scripts/installer/build-windows-installer.ps1 -Version "v1.0.0"
+pwsh ./scripts/installer/build-windows-installer.ps1 -Version "release-v1.0.0"
 ```
 
 Requirements:
@@ -58,7 +58,7 @@ Requirements:
 ### 3) macOS package (+ optional dmg)
 
 ```bash
-bash packaging/macos/build-pkg.sh v1.0.0
+bash packaging/macos/build-pkg.sh release-v1.0.0
 ```
 
 Requirements:
@@ -69,13 +69,13 @@ Requirements:
 ### 4) Linux tarball
 
 ```bash
-bash packaging/linux/build-tarball.sh v1.0.0 x86_64-unknown-linux-gnu
+bash packaging/linux/build-tarball.sh release-v1.0.0 x86_64-unknown-linux-gnu
 ```
 
 ### 5) Linux `.deb` (optional)
 
 ```bash
-bash packaging/linux/build-deb.sh v1.0.0
+bash packaging/linux/build-deb.sh release-v1.0.0
 ```
 
 Requirements:

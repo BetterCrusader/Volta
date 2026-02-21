@@ -5,7 +5,6 @@
 !include "StrFunc.nsh"
 
 ${Using:StrFunc} StrStr
-${Using:StrFunc} StrRep
 ${Using:StrFunc} UnStrRep
 
 !ifndef VERSION
@@ -39,12 +38,15 @@ BrandingText "VOLTA // deterministic installer"
 VIProductVersion "1.0.0.0"
 VIAddVersionKey "ProductName" "Volta CLI"
 VIAddVersionKey "CompanyName" "Volta OSS"
+VIAddVersionKey "LegalCopyright" "Copyright (c) Volta OSS"
 VIAddVersionKey "FileVersion" "${VERSION}"
 VIAddVersionKey "ProductVersion" "${VERSION}"
 VIAddVersionKey "FileDescription" "Volta Installer"
 
 Var CheckboxPath
 Var CheckboxDoctor
+Var InstallPathInput
+Var SummaryLabel
 Var OptionAddToPath
 Var OptionRunDoctor
 Var InstallLog
@@ -67,6 +69,7 @@ Page custom OptionsPageCreate OptionsPageLeave
 !insertmacro MUI_LANGUAGE "English"
 
 Section "Install Volta" SEC_MAIN
+  CreateDirectory "$INSTDIR"
   SetOutPath "$INSTDIR"
   File "/oname=volta.exe" "${VOLTA_BINARY}"
 
@@ -129,31 +132,90 @@ Function OptionsPageCreate
     Abort
   ${EndIf}
 
-  ${NSD_CreateLabel} 0 0 100% 24u "VOLTA INSTALLER"
+  ${NSD_CreateLabel} 0 0 100% 52u ""
   Pop $0
   SetCtlColors $0 0x00E8F4FF 0x00060912
 
-  ${NSD_CreateLabel} 0 18u 100% 24u "Deterministic CLI runtime setup"
+  ${NSD_CreateLabel} 8u 7u 64% 12u "VOLTA INSTALLER"
+  Pop $0
+  SetCtlColors $0 0x00E8F4FF 0x00060912
+
+  ${NSD_CreateLabel} 8u 22u 64% 10u "Deterministic CLI runtime setup"
   Pop $0
   SetCtlColors $0 0x0088BBDD 0x00060912
 
-  ${NSD_CreateCheckbox} 0 50u 100% 12u "Add Volta binary directory to user PATH"
+  ${NSD_CreateLabel} 8u 34u 64% 10u "release: ${VERSION} // per-user install"
+  Pop $0
+  SetCtlColors $0 0x00659EC0 0x00060912
+
+  ${NSD_CreateLabel} 73% 6u 25% 38u ""
+  Pop $0
+  SetCtlColors $0 0x00E8F4FF 0x000A1530
+
+  ${NSD_CreateLabel} 76% 11u 20% 10u "VOLTA"
+  Pop $0
+  SetCtlColors $0 0x00E8F4FF 0x000A1530
+
+  ${NSD_CreateLabel} 76% 23u 20% 14u "DETERMINISTIC INSTALLER"
+  Pop $0
+  SetCtlColors $0 0x0088BBDD 0x000A1530
+
+  ${NSD_CreateLabel} 0 60u 100% 10u "Install location"
+  Pop $0
+  SetCtlColors $0 0x004B637B 0x00F3F3F3
+
+  ${NSD_CreateText} 0 72u 79% 12u "$INSTDIR"
+  Pop $InstallPathInput
+
+  ${NSD_CreateButton} 81% 72u 19% 12u "Browse..."
+  Pop $0
+  ${NSD_OnClick} $0 OnBrowseInstallDir
+
+  ${NSD_CreateCheckbox} 0 93u 100% 12u "Add Volta binary directory to user PATH"
   Pop $CheckboxPath
   ${NSD_Check} $CheckboxPath
 
-  ${NSD_CreateCheckbox} 0 68u 100% 12u "Run 'volta doctor --strict' after install"
+  ${NSD_CreateCheckbox} 0 111u 100% 12u "Run 'volta doctor --strict' after install"
   Pop $CheckboxDoctor
 
-  ${NSD_CreateLabel} 0 92u 100% 56u "Install target: $LOCALAPPDATA\\Volta\\bin$\r$\nNo admin rights are required.$\r$\nLogs: $LOCALAPPDATA\\Volta\\bin\\installer.log"
+  ${NSD_CreateLabel} 0 132u 100% 42u ""
   Pop $0
   SetCtlColors $0 0x007FA9C7 0x00060912
+
+  ${NSD_CreateLabel} 2% 136u 96% 34u ""
+  Pop $SummaryLabel
+  SetCtlColors $SummaryLabel 0x007FA9C7 0x00060912
+
+  Call UpdateInstallSummary
 
   nsDialogs::Show
 FunctionEnd
 
 Function OptionsPageLeave
+  ${NSD_GetText} $InstallPathInput $0
+  ${If} $0 == ""
+    MessageBox MB_ICONEXCLAMATION "Install location cannot be empty."
+    Abort
+  ${EndIf}
+
+  StrCpy $INSTDIR "$0"
   ${NSD_GetState} $CheckboxPath $OptionAddToPath
   ${NSD_GetState} $CheckboxDoctor $OptionRunDoctor
+FunctionEnd
+
+Function OnBrowseInstallDir
+  nsDialogs::SelectFolderDialog "Choose Volta install directory" "$INSTDIR"
+  Pop $0
+
+  ${If} $0 != "error"
+    StrCpy $INSTDIR "$0"
+    ${NSD_SetText} $InstallPathInput "$INSTDIR"
+    Call UpdateInstallSummary
+  ${EndIf}
+FunctionEnd
+
+Function UpdateInstallSummary
+  ${NSD_SetText} $SummaryLabel "Install target: $INSTDIR$\r$\nNo admin rights are required.$\r$\nLogs: $INSTDIR\\installer.log"
 FunctionEnd
 
 Function AddUserPath
@@ -170,18 +232,6 @@ Function AddUserPath
     ${EndIf}
 
     WriteRegExpandStr HKCU "Environment" "Path" "$4"
-    SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
-  ${EndIf}
-FunctionEnd
-
-Function RemoveUserPath
-  ReadRegStr $0 HKCU "Environment" "Path"
-
-  ${If} $0 != ""
-    ${StrRep} $0 $0 "$INSTDIR;" ""
-    ${StrRep} $0 $0 ";$INSTDIR" ""
-    ${StrRep} $0 $0 "$INSTDIR" ""
-    WriteRegExpandStr HKCU "Environment" "Path" "$0"
     SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
   ${EndIf}
 FunctionEnd

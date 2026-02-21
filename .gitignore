@@ -14,3 +14,4 @@ benchmarks/baselines/*.json
 
 /dist/
 packaging/windows/assets/generated/
+packaging/design/

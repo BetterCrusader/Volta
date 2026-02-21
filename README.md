@@ -1,7 +1,7 @@
 # Volta: Deterministic ML Runtime You Can Actually Trust
 
 If the same model input can produce different outcomes, production is roulette.
-Volta is built to remove that roulette: **same inputs, same graph, same policy, same result**.
+Volta removes that roulette: **same inputs, same graph, same policy, same result**.
 
 Volta is a compiler-first ML runtime in Rust with deterministic execution as a product feature, not an afterthought.
 
@@ -23,11 +23,12 @@ This is the engine for teams that want ML systems that are inspectable, replayab
 - Run deterministic CPU and CUDA validation lanes
 - Import ONNX Wave 1 and Wave 2 contracts under governance
 - Ship with hard CI gates instead of guesswork
+- Install with release-grade installers on Windows/macOS/Linux
 
 ## Project Status
 
 - current stable release channel: `release-v1.0.0` (Volta V1)
-- historical milestone tags (pre-v1): `v0.1.0-core`, `v0.2.0-*`
+- historical milestones (pre-v1): `v0.1.0-core`, `v0.2.0-*`
 - governance hardening under **Quality Fortress**
 - CUDA inference MVP in Wave 3 hardening track
 - CUDA training hardening in Wave 4 hardening track
@@ -132,25 +133,25 @@ cargo test --release
 ### Windows
 
 ```powershell
-pwsh ./scripts/installer/build-windows-installer.ps1 -Version "v1.0.0"
+pwsh ./scripts/installer/build-windows-installer.ps1 -Version "release-v1.0.0"
 ```
 
 ### macOS
 
 ```bash
-bash packaging/macos/build-pkg.sh v1.0.0
+bash packaging/macos/build-pkg.sh release-v1.0.0
 ```
 
 ### Linux tarball
 
 ```bash
-bash packaging/linux/build-tarball.sh v1.0.0 x86_64-unknown-linux-gnu
+bash packaging/linux/build-tarball.sh release-v1.0.0 x86_64-unknown-linux-gnu
 ```
 
 ### Linux deb (optional)
 
 ```bash
-bash packaging/linux/build-deb.sh v1.0.0
+bash packaging/linux/build-deb.sh release-v1.0.0
 ```
 
 ### Assemble release layout + checksums

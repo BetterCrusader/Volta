@@ -17,9 +17,10 @@ This document captures how the Windows installer maps the Figma `Custom Installe
 ## Practical NSIS Mapping
 
 NSIS does not support full custom React-like animation scenes out of the box.
-The shipped implementation prioritizes reliability while preserving visual intent:
+The shipped implementation prioritizes reliable installation flow while preserving visual intent:
 
-- branded title and subtitle on custom options page
+- custom dark hero block (title, subtitle, release stripe, brand corner)
+- install-path picker (`Browse...`) on the options page
 - generated brand bitmaps from `packaging/windows/design-tokens.json`
 - high-contrast deterministic copy
 - optional PATH + optional strict doctor verification
@@ -31,9 +32,12 @@ The shipped implementation prioritizes reliability while preserving visual inten
 - NSIS is battle-tested for executable install/uninstall and environment setup.
 - We keep installation logic in NSIS (stable) and reserve animation-rich surfaces for launcher/onboarding UI in v2.
 
-## V2 UI Upgrade Path
+## Current Build Flow
 
-- export Figma assets (header/welcome bitmaps, icons) into `packaging/windows/assets/`
-- keep color/text source of truth in `packaging/windows/design-tokens.json`
-- wire branded assets into NSIS `MUI_HEADERIMAGE` / welcome page visuals
-- optional native custom installer shell (WinUI/WPF) that delegates install operations to the same verified core commands
+```powershell
+pwsh ./scripts/installer/build-windows-installer.ps1 -Version "release-v1.0.0"
+```
+
+This compiles `target/release/volta.exe`, regenerates branded bitmap assets, and emits:
+
+`dist/release/release-v1.0.0/windows/VoltaSetup-release-v1.0.0.exe`
