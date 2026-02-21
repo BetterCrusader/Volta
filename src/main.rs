@@ -10,13 +10,14 @@ use volta::lexer::Lexer;
 use volta::parser::Parser;
 use volta::semantic::SemanticAnalyzer;
 
-const USAGE: &str = "Usage:\n  volta run <file.vt>\n  volta check <file.vt>\n  volta info <file.vt>\n  volta version\n  volta help";
+const USAGE: &str = "Usage:\n  volta run <file.vt>\n  volta check <file.vt>\n  volta info <file.vt>\n  volta doctor\n  volta version\n  volta help";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CommandKind {
     Run,
     Check,
     Info,
+    Doctor,
     Version,
     Help,
     LegacyBenchInfer,
@@ -63,6 +64,10 @@ fn main() -> ExitCode {
         }
         CommandKind::Version => {
             println!("volta {}", env!("CARGO_PKG_VERSION"));
+            ExitCode::SUCCESS
+        }
+        CommandKind::Doctor => {
+            print_doctor();
             ExitCode::SUCCESS
         }
         CommandKind::LegacyBenchInfer => {
@@ -199,6 +204,15 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
         "run" => parse_file_command(CommandKind::Run, args),
         "check" => parse_file_command(CommandKind::Check, args),
         "info" => parse_file_command(CommandKind::Info, args),
+        "doctor" => {
+            if args.len() != 1 {
+                return Err("'doctor' does not accept positional arguments".to_string());
+            }
+            Ok(CommandSpec {
+                kind: CommandKind::Doctor,
+                path: None,
+            })
+        }
         "version" | "-v" | "--version" => {
             if args.len() != 1 {
                 return Err("'version' does not accept positional arguments".to_string());
@@ -251,6 +265,34 @@ fn parse_file_command(kind: CommandKind, args: &[String]) -> Result<CommandSpec,
 fn read_source(path: &str) -> Result<String, String> {
     let p = Path::new(path);
     fs::read_to_string(p).map_err(|err| format!("Failed to read '{}': {}", p.display(), err))
+}
+
+fn print_doctor() {
+    let cpu_threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
+    let gpu_available = std::env::var("VOLTA_GPU_AVAILABLE")
+        .ok()
+        .is_some_and(|value| value == "1" || value.eq_ignore_ascii_case("true"));
+    let onnx_import_enabled = cfg!(feature = "onnx-import");
+
+    println!("Volta doctor");
+    println!("  version: {}", env!("CARGO_PKG_VERSION"));
+    println!("  os: {}", std::env::consts::OS);
+    println!("  arch: {}", std::env::consts::ARCH);
+    println!("  cpu_threads: {cpu_threads}");
+    println!(
+        "  gpu_available: {} (from VOLTA_GPU_AVAILABLE)",
+        if gpu_available { "yes" } else { "no" }
+    );
+    println!(
+        "  feature_onnx_import: {}",
+        if onnx_import_enabled {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    );
 }
 
 fn print_info(path: &str, program: &Program, warning_count: usize) {
@@ -360,6 +402,14 @@ mod tests {
         let args = vec![];
         let command = parse_command(&args).expect("command should parse");
         assert_eq!(command.kind, CommandKind::Help);
+        assert!(command.path.is_none());
+    }
+
+    #[test]
+    fn parse_command_accepts_doctor_without_path() {
+        let args = vec!["doctor".to_string()];
+        let command = parse_command(&args).expect("doctor should parse");
+        assert_eq!(command.kind, CommandKind::Doctor);
         assert!(command.path.is_none());
     }
 

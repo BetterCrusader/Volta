@@ -107,3 +107,15 @@ fn legacy_bench_and_tune_flags_exit_successfully() {
     let tune = run_volta(&["--tune-matmul", "--dim", "64", "--runs", "1"]);
     assert!(tune.status.success(), "legacy tune-matmul should succeed");
 }
+
+#[test]
+fn doctor_command_reports_environment() {
+    let output = run_volta(&["doctor"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success(), "doctor should pass: {stdout}");
+    assert!(stdout.contains("Volta doctor"));
+    assert!(stdout.contains("cpu_threads:"));
+    assert!(stdout.contains("gpu_available:"));
+    assert!(stdout.contains("feature_onnx_import:"));
+}
