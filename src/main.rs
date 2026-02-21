@@ -74,10 +74,10 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         CommandKind::Run | CommandKind::Check | CommandKind::Info => {
-            let path = command
-                .path
-                .as_deref()
-                .expect("path required for file commands");
+            let Some(path) = command.path.as_deref() else {
+                eprintln!("Internal CLI error: missing file path for file command");
+                return ExitCode::from(2);
+            };
             let source = match read_source(path) {
                 Ok(source) => source,
                 Err(message) => {
@@ -235,9 +235,16 @@ fn parse_file_command(kind: CommandKind, args: &[String]) -> Result<CommandSpec,
             args[0]
         ));
     }
+    let path = args[1].trim();
+    if path.is_empty() {
+        return Err(format!(
+            "Command '{}' expects a non-empty file path",
+            args[0]
+        ));
+    }
     Ok(CommandSpec {
         kind,
-        path: Some(args[1].clone()),
+        path: Some(path.to_string()),
     })
 }
 
@@ -339,6 +346,13 @@ mod tests {
         let args = vec!["check".to_string()];
         let err = parse_command(&args).expect_err("command should fail");
         assert!(err.contains("expects exactly one file path"));
+    }
+
+    #[test]
+    fn parse_command_rejects_empty_file_path() {
+        let args = vec!["run".to_string(), String::new()];
+        let err = parse_command(&args).expect_err("empty path must fail");
+        assert!(err.contains("non-empty file path"));
     }
 
     #[test]

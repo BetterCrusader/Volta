@@ -70,6 +70,18 @@ fn invalid_syntax_returns_nonzero() {
 }
 
 #[test]
+fn file_commands_reject_empty_path() {
+    let output = run_volta(&["run", ""]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        !output.status.success(),
+        "empty path should return non-zero exit code"
+    );
+    assert!(stderr.contains("non-empty file path"));
+}
+
+#[test]
 fn bare_file_argument_runs_for_backward_compatibility() {
     let path = unique_temp_file("run_compat", "x 1\nprint x\n");
     let output = run_volta(&[path.to_str().expect("utf8 path")]);
