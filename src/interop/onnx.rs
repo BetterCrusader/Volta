@@ -251,7 +251,7 @@ fn first_non_empty(items: &[String]) -> Option<&str> {
         .map(|item| item.as_str())
 }
 
-fn require_input<'a>(node: &'a pb::NodeProto, index: usize) -> Result<&'a str, InteropError> {
+fn require_input(node: &pb::NodeProto, index: usize) -> Result<&str, InteropError> {
     node.input
         .get(index)
         .map(String::as_str)
@@ -335,8 +335,8 @@ fn tensor_spec_from_value_info(value: &pb::ValueInfoProto) -> Result<IrTensorSpe
         .r#type
         .as_ref()
         .and_then(|kind| kind.value.as_ref())
-        .and_then(|kind| match kind {
-            pb::type_proto::Value::TensorType(tensor) => Some(tensor),
+        .map(|kind| match kind {
+            pb::type_proto::Value::TensorType(tensor) => tensor,
         })
         .ok_or_else(|| {
             InteropError::new(format!(
@@ -442,7 +442,7 @@ fn parse_raw_tensor_data_as_f32(
     };
     match dtype {
         pb::tensor_proto::DataType::Float => {
-            if bytes.len() % 4 != 0 {
+            if !bytes.len().is_multiple_of(4) {
                 return Err(parse_err("float raw bytes are not multiple of 4"));
             }
             Ok(bytes
@@ -451,7 +451,7 @@ fn parse_raw_tensor_data_as_f32(
                 .collect())
         }
         pb::tensor_proto::DataType::Double => {
-            if bytes.len() % 8 != 0 {
+            if !bytes.len().is_multiple_of(8) {
                 return Err(parse_err("double raw bytes are not multiple of 8"));
             }
             Ok(bytes
@@ -465,7 +465,7 @@ fn parse_raw_tensor_data_as_f32(
                 .collect())
         }
         pb::tensor_proto::DataType::Int64 => {
-            if bytes.len() % 8 != 0 {
+            if !bytes.len().is_multiple_of(8) {
                 return Err(parse_err("int64 raw bytes are not multiple of 8"));
             }
             Ok(bytes
@@ -479,7 +479,7 @@ fn parse_raw_tensor_data_as_f32(
                 .collect())
         }
         pb::tensor_proto::DataType::Int32 => {
-            if bytes.len() % 4 != 0 {
+            if !bytes.len().is_multiple_of(4) {
                 return Err(parse_err("int32 raw bytes are not multiple of 4"));
             }
             Ok(bytes
