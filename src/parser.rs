@@ -1,4 +1,5 @@
 use crate::ast::{BinaryOp, Expr, Program, Property, Span, Stmt};
+use crate::diagnostics::best_suggestion;
 use crate::lexer::{Token, TokenKind};
 
 #[derive(Debug, Clone)]
@@ -6,6 +7,7 @@ pub struct ParseError {
     pub message: String,
     pub line: usize,
     pub column: usize,
+    pub hint: Option<String>,
 }
 
 pub struct Parser {
@@ -58,16 +60,40 @@ impl Parser {
             TokenKind::If => self.parse_if(),
             TokenKind::Precision => self.parse_keyword_var_decl("precision"),
             TokenKind::Memory => self.parse_keyword_var_decl("memory"),
-            TokenKind::Elif | TokenKind::Else => {
-                Err(self.error_here("Unexpected keyword in this position"))
-            }
+            TokenKind::Elif | TokenKind::Else => Err(self.error_here_with_hint(
+                "Unexpected keyword in this position",
+                "Use 'elif' or 'else' only directly after an 'if' block at the same indentation level.",
+            )),
             TokenKind::Error(msg) => Err(self.error_here(&format!("Lexical error: {msg}"))),
-            _ => Err(self.error_here("Unexpected token at start of statement")),
+            _ => Err(self.error_here_with_hint(
+                "Unexpected token at start of statement",
+                "Start a statement with an identifier, or a keyword such as model, dataset, train, if, loop, fn, print, save, load.",
+            )),
         }
     }
 
     fn parse_var_decl(&mut self) -> Result<Stmt, ParseError> {
         let (name, name_span) = self.expect_ident("Missing identifier for declaration")?;
+        if self.is_stmt_end() {
+            if let Some(suggestion) = suggest_top_level_keyword(&name) {
+                return Err(self.error_at_with_hint(
+                    &format!("Unknown keyword '{name}'"),
+                    name_span.line,
+                    name_span.column,
+                    Some(format!(
+                        "Did you mean '{suggestion}'? If you intended a variable, provide a value: '{name} <expression>'."
+                    )),
+                ));
+            }
+
+            return Err(self.error_at_with_hint(
+                &format!("Missing value for declaration '{name}'"),
+                name_span.line,
+                name_span.column,
+                Some("Use '<name> <expression>', for example: lr 0.001".to_string()),
+            ));
+        }
+
         let value = self.parse_expression()?;
         self.require_stmt_terminator()?;
         Ok(Stmt::VarDecl {
@@ -116,7 +142,10 @@ impl Parser {
         let (model, model_span) = self.expect_ident("Missing model name in train statement")?;
 
         if !self.match_kind(&TokenKind::On) {
-            return Err(self.error_here("Invalid train syntax: expected 'on'"));
+            return Err(self.error_here_with_hint(
+                "Invalid train syntax: expected 'on'",
+                "Use: train <model_name> on <dataset_name>",
+            ));
         }
 
         let (data, data_span) = self.expect_ident("Missing dataset name in train statement")?;
@@ -138,7 +167,10 @@ impl Parser {
         let (model, model_span) = self.expect_ident("Missing model name in save statement")?;
 
         if !self.match_kind(&TokenKind::As) {
-            return Err(self.error_here("Invalid save syntax: expected 'as'"));
+            return Err(self.error_here_with_hint(
+                "Invalid save syntax: expected 'as'",
+                "Use: save <model_name> as \"path.vt\"",
+            ));
         }
 
         let (path, path_span) = self.expect_string("Missing string path in save statement")?;
@@ -500,6 +532,10 @@ impl Parser {
                 message: "Expected expression".to_string(),
                 line: token.line,
                 column: token.column,
+                hint: Some(
+                    "Expressions can be numbers, strings, booleans, identifiers, function calls, or binary operations."
+                        .to_string(),
+                ),
             }),
         }
         .and_then(|expr| self.finish_call(expr))
@@ -556,6 +592,7 @@ impl Parser {
                             message: "Invalid property value; integer underflow".to_string(),
                             line: next.line,
                             column: next.column,
+                            hint: None,
                         }),
                     }
                 }
@@ -570,6 +607,7 @@ impl Parser {
                     message: "Invalid property value; '-' must be followed by number".to_string(),
                     line: next.line,
                     column: next.column,
+                    hint: Some("Use numeric values such as -1 or -0.5".to_string()),
                 }),
             };
         }
@@ -587,6 +625,10 @@ impl Parser {
                 message: "Invalid property value; expected literal or identifier".to_string(),
                 line: token.line,
                 column: token.column,
+                hint: Some(
+                    "Property values must be identifier, string, integer, float, true, false, or a negative numeric literal."
+                        .to_string(),
+                ),
             }),
         }
     }
@@ -621,12 +663,13 @@ impl Parser {
         } else {
             Err(ParseError {
                 message: format!(
-                    "Expected {:?}, found {:?}",
-                    expected,
-                    self.current().kind.clone()
+                    "Expected {}, found {}",
+                    token_kind_label(&expected),
+                    token_kind_label(&self.current().kind)
                 ),
                 line: self.current().line,
                 column: self.current().column,
+                hint: expected_token_hint(&expected).map(str::to_string),
             })
         }
     }
@@ -657,14 +700,21 @@ impl Parser {
                 Ok((name.clone(), token_span(&token)))
             }
             kind if is_keyword_token(&kind) => Err(ParseError {
-                message: "Unexpected keyword where identifier was expected".to_string(),
+                message: format!(
+                    "Unexpected keyword '{}' where identifier was expected",
+                    keyword_name(&kind).unwrap_or("keyword")
+                ),
                 line: token.line,
                 column: token.column,
+                hint: Some(
+                    "Keywords cannot be used as variable, function, or model names.".to_string(),
+                ),
             }),
             _ => Err(ParseError {
                 message: msg.to_string(),
                 line: token.line,
                 column: token.column,
+                hint: None,
             }),
         }
     }
@@ -681,6 +731,7 @@ impl Parser {
                 message: msg.to_string(),
                 line: token.line,
                 column: token.column,
+                hint: Some("Use a quoted string literal, for example: \"model.vt\"".to_string()),
             }),
         }
     }
@@ -710,6 +761,10 @@ impl Parser {
                 message: normalized,
                 line: self.current().line,
                 column: self.current().column,
+                hint: Some(
+                    "Fix the lexical issue first. Common causes: tabs, unclosed strings, or unsupported characters."
+                        .to_string(),
+                ),
             });
         }
         Ok(())
@@ -729,15 +784,38 @@ impl Parser {
         if self.check(&TokenKind::Dedent) || self.check(&TokenKind::Eof) {
             Ok(())
         } else {
-            Err(self.error_here("Unexpected token after statement"))
+            Err(self.error_here_with_hint(
+                "Unexpected token after statement",
+                "A statement ends at newline. Split chained expressions into separate lines.",
+            ))
         }
     }
 
     fn error_here(&self, message: &str) -> ParseError {
+        self.error_at_with_hint(message, self.current().line, self.current().column, None)
+    }
+
+    fn error_here_with_hint(&self, message: &str, hint: impl Into<String>) -> ParseError {
+        self.error_at_with_hint(
+            message,
+            self.current().line,
+            self.current().column,
+            Some(hint.into()),
+        )
+    }
+
+    fn error_at_with_hint(
+        &self,
+        message: &str,
+        line: usize,
+        column: usize,
+        hint: Option<String>,
+    ) -> ParseError {
         ParseError {
             message: message.to_string(),
-            line: self.current().line,
-            column: self.current().column,
+            line,
+            column,
+            hint,
         }
     }
 }
@@ -756,6 +834,100 @@ fn end_span(primary_end: Span, fallback_end: Span) -> Span {
 
 fn same_kind(left: &TokenKind, right: &TokenKind) -> bool {
     std::mem::discriminant(left) == std::mem::discriminant(right)
+}
+
+fn suggest_top_level_keyword(candidate: &str) -> Option<&'static str> {
+    best_suggestion(
+        candidate,
+        &[
+            "model", "dataset", "train", "save", "load", "print", "fn", "return", "if", "elif",
+            "else", "loop", "on", "as",
+        ],
+    )
+}
+
+fn token_kind_label(kind: &TokenKind) -> String {
+    match kind {
+        TokenKind::Model => "'model' keyword".to_string(),
+        TokenKind::Dataset => "'dataset' keyword".to_string(),
+        TokenKind::Train => "'train' keyword".to_string(),
+        TokenKind::Save => "'save' keyword".to_string(),
+        TokenKind::Load => "'load' keyword".to_string(),
+        TokenKind::Print => "'print' keyword".to_string(),
+        TokenKind::Fn => "'fn' keyword".to_string(),
+        TokenKind::Return => "'return' keyword".to_string(),
+        TokenKind::If => "'if' keyword".to_string(),
+        TokenKind::Elif => "'elif' keyword".to_string(),
+        TokenKind::Else => "'else' keyword".to_string(),
+        TokenKind::Loop => "'loop' keyword".to_string(),
+        TokenKind::Precision => "'precision' keyword".to_string(),
+        TokenKind::Memory => "'memory' keyword".to_string(),
+        TokenKind::On => "'on' keyword".to_string(),
+        TokenKind::As => "'as' keyword".to_string(),
+        TokenKind::True => "boolean true".to_string(),
+        TokenKind::False => "boolean false".to_string(),
+        TokenKind::Int(_) => "integer literal".to_string(),
+        TokenKind::Float(_) => "float literal".to_string(),
+        TokenKind::Str(_) => "string literal".to_string(),
+        TokenKind::Ident(name) => format!("identifier '{name}'"),
+        TokenKind::Greater => "'>'".to_string(),
+        TokenKind::Less => "'<'".to_string(),
+        TokenKind::GreaterEq => "'>='".to_string(),
+        TokenKind::LessEq => "'<='".to_string(),
+        TokenKind::EqualEqual => "'=='".to_string(),
+        TokenKind::NotEqual => "'!='".to_string(),
+        TokenKind::Plus => "'+'".to_string(),
+        TokenKind::Minus => "'-'".to_string(),
+        TokenKind::Star => "'*'".to_string(),
+        TokenKind::Slash => "'/'".to_string(),
+        TokenKind::Assign => "'='".to_string(),
+        TokenKind::Arrow => "'->'".to_string(),
+        TokenKind::LParen => "'('".to_string(),
+        TokenKind::RParen => "')'".to_string(),
+        TokenKind::Comma => "','".to_string(),
+        TokenKind::Newline => "newline".to_string(),
+        TokenKind::Indent => "indent".to_string(),
+        TokenKind::Dedent => "dedent".to_string(),
+        TokenKind::Eof => "end of file".to_string(),
+        TokenKind::Error(msg) => format!("lexer error '{msg}'"),
+    }
+}
+
+fn expected_token_hint(kind: &TokenKind) -> Option<&'static str> {
+    match kind {
+        TokenKind::Indent => Some("Blocks use 4 spaces for indentation."),
+        TokenKind::Dedent => Some("Close the current block by reducing indentation."),
+        TokenKind::Newline => Some("Terminate this statement and continue on the next line."),
+        TokenKind::On => Some("Train syntax is: train <model_name> on <dataset_name>."),
+        TokenKind::As => Some("Save syntax is: save <model_name> as \"path.vt\"."),
+        TokenKind::Str(_) => Some("Use a quoted string literal."),
+        TokenKind::Ident(_) => Some("Use a valid identifier name."),
+        _ => None,
+    }
+}
+
+fn keyword_name(kind: &TokenKind) -> Option<&'static str> {
+    match kind {
+        TokenKind::Model => Some("model"),
+        TokenKind::Dataset => Some("dataset"),
+        TokenKind::Train => Some("train"),
+        TokenKind::Save => Some("save"),
+        TokenKind::Load => Some("load"),
+        TokenKind::Print => Some("print"),
+        TokenKind::Fn => Some("fn"),
+        TokenKind::Return => Some("return"),
+        TokenKind::If => Some("if"),
+        TokenKind::Elif => Some("elif"),
+        TokenKind::Else => Some("else"),
+        TokenKind::Loop => Some("loop"),
+        TokenKind::Precision => Some("precision"),
+        TokenKind::Memory => Some("memory"),
+        TokenKind::On => Some("on"),
+        TokenKind::As => Some("as"),
+        TokenKind::True => Some("true"),
+        TokenKind::False => Some("false"),
+        _ => None,
+    }
 }
 
 fn is_keyword_token(kind: &TokenKind) -> bool {

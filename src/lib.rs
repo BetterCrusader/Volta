@@ -1,5 +1,6 @@
 pub mod ast;
 pub mod autopilot;
+pub mod diagnostics;
 pub mod executor;
 pub mod interop;
 pub mod ir;

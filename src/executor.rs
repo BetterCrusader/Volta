@@ -12,6 +12,7 @@ use crate::autopilot::{
     AutopilotContext, AutopilotEngine, DatasetAutopilotInput, ModelAutopilotInput,
     TrainAutopilotInput,
 };
+use crate::diagnostics::best_suggestion;
 use crate::rules::{
     ACTIVATIONS, AUTOPILOT_DEFAULT_ACTIVATION, DEVICES, FLOAT_EPSILON, MAX_SAFE_INT_F64, OPTIMIZERS,
 };
@@ -46,6 +47,7 @@ pub struct DatasetState {
 pub struct RuntimeError {
     pub message: String,
     pub span: Span,
+    pub hint: Option<String>,
 }
 
 struct Runtime {
@@ -253,7 +255,13 @@ impl Executor {
                 span,
             } => {
                 if !self.runtime.datasets.contains_key(data) {
-                    return Err(Self::error(format!("Undefined dataset: '{data}'"), *span));
+                    return Err(Self::error_with_hint(
+                        format!("Undefined dataset: '{data}'"),
+                        *span,
+                        format!(
+                            "Declare dataset '{data}' before training, for example:\ndataset {data}\n    batch 32"
+                        ),
+                    ));
                 }
 
                 let explicit_train = self.parse_train_props(props, *span)?;
@@ -269,7 +277,15 @@ impl Executor {
                     .runtime
                     .models
                     .get_mut(model)
-                    .ok_or_else(|| Self::error(format!("Undefined model: '{model}'"), *span))?;
+                    .ok_or_else(|| {
+                        Self::error_with_hint(
+                            format!("Undefined model: '{model}'"),
+                            *span,
+                            format!(
+                                "Declare model '{model}' before training, for example:\nmodel {model}\n    layers 4 3 2"
+                            ),
+                        )
+                    })?;
 
                 let autopilot = AutopilotEngine::new();
                 let resolved = autopilot.resolve(&AutopilotContext {
@@ -322,13 +338,21 @@ impl Executor {
             }
             Stmt::Save { model, path, span } => {
                 if !self.runtime.models.contains_key(model) {
-                    return Err(Self::error(format!("Undefined model: '{model}'"), *span));
+                    return Err(Self::error_with_hint(
+                        format!("Undefined model: '{model}'"),
+                        *span,
+                        "Define the model before saving it in this run.".to_string(),
+                    ));
                 }
                 println!("Saving model '{}' to {}", model, path);
             }
             Stmt::Load { model, path, span } => {
                 if !self.runtime.models.contains_key(model) {
-                    return Err(Self::error(format!("Undefined model: '{model}'"), *span));
+                    return Err(Self::error_with_hint(
+                        format!("Undefined model: '{model}'"),
+                        *span,
+                        "Declare the model name first, then load weights into it.".to_string(),
+                    ));
                 }
                 println!("Loading model '{}' from {}", model, path);
             }
@@ -610,9 +634,13 @@ impl Executor {
             Expr::Bool { value, .. } => Ok(Value::Bool(*value)),
             Expr::Str { value, .. } => Ok(Value::Str(value.clone())),
             Expr::Call { callee, args, span } => self.invoke_function(callee, args, *span),
-            Expr::Ident { name, span } => self
-                .get_var(name)
-                .ok_or_else(|| Self::error(format!("Undefined variable: '{name}'"), *span)),
+            Expr::Ident { name, span } => self.get_var(name).ok_or_else(|| {
+                Self::error_with_hint(
+                    format!("Undefined variable: '{name}'"),
+                    *span,
+                    format!("Declare '{name}' before using it in expressions."),
+                )
+            }),
             Expr::Binary {
                 left,
                 op,
@@ -693,7 +721,11 @@ impl Executor {
         let numerator = self.to_f64(&left, span)?;
         let denominator = self.to_f64(&right, span)?;
         if denominator == 0.0 {
-            return Err(Self::error("Division by zero".to_string(), span));
+            return Err(Self::error_with_hint(
+                "Division by zero".to_string(),
+                span,
+                "Guard the divisor with a non-zero check before division.".to_string(),
+            ));
         }
         let result = numerator / denominator;
         self.finite_float(result, "Math overflow: float division overflow", span)
@@ -762,9 +794,10 @@ impl Executor {
     fn as_bool(&self, value: &Value, span: Span) -> Result<bool, RuntimeError> {
         match value {
             Value::Bool(v) => Ok(*v),
-            _ => Err(Self::error(
+            _ => Err(Self::error_with_hint(
                 "Invalid operation: condition must evaluate to boolean".to_string(),
                 span,
+                "Use a comparison such as `x > 0` or `flag == true`.".to_string(),
             )),
         }
     }
@@ -772,9 +805,10 @@ impl Executor {
     fn as_int(&self, value: &Value, span: Span) -> Result<i64, RuntimeError> {
         match value {
             Value::Int(v) => Ok(*v),
-            _ => Err(Self::error(
+            _ => Err(Self::error_with_hint(
                 "Invalid operation: loop count must evaluate to integer".to_string(),
                 span,
+                "Loop counts must be integer literals or integer variables.".to_string(),
             )),
         }
     }
@@ -885,7 +919,15 @@ impl Executor {
         if allowed.contains(&value) {
             Ok(())
         } else {
-            Err(Self::error(
+            let suggestion = best_suggestion(value, allowed);
+            let hint = match suggestion {
+                Some(candidate) => format!(
+                    "Did you mean '{candidate}'? Allowed values: {}",
+                    allowed.join(", ")
+                ),
+                None => format!("Allowed values: {}", allowed.join(", ")),
+            };
+            Err(Self::error_with_hint(
                 format!(
                     "Invalid property: {} has invalid value '{}'; allowed: {}",
                     label,
@@ -893,6 +935,7 @@ impl Executor {
                     allowed.join(", ")
                 ),
                 span,
+                hint,
             ))
         }
     }
@@ -916,12 +959,13 @@ impl Executor {
         args: &[Expr],
         span: Span,
     ) -> Result<Value, RuntimeError> {
-        let function = self
-            .runtime
-            .functions
-            .get(callee)
-            .cloned()
-            .ok_or_else(|| Self::error(format!("Undefined function: '{callee}'"), span))?;
+        let function = self.runtime.functions.get(callee).cloned().ok_or_else(|| {
+            Self::error_with_hint(
+                format!("Undefined function: '{callee}'"),
+                span,
+                format!("Declare `fn {callee}(...)` before calling it."),
+            )
+        })?;
 
         if args.len() != function.params.len() {
             return Err(Self::error(
@@ -1024,7 +1068,11 @@ impl Executor {
             }
         }
 
-        Err(Self::error(format!("Undefined variable: '{name}'"), span))
+        Err(Self::error_with_hint(
+            format!("Undefined variable: '{name}'"),
+            span,
+            format!("Declare '{name}' before assigning to it."),
+        ))
     }
 
     fn get_var(&self, name: &str) -> Option<Value> {
@@ -1037,7 +1085,19 @@ impl Executor {
     }
 
     fn error(message: String, span: Span) -> RuntimeError {
-        RuntimeError { message, span }
+        RuntimeError {
+            message,
+            span,
+            hint: None,
+        }
+    }
+
+    fn error_with_hint(message: String, span: Span, hint: String) -> RuntimeError {
+        RuntimeError {
+            message,
+            span,
+            hint: Some(hint),
+        }
     }
 }
 

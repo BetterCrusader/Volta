@@ -1,3 +1,4 @@
+use volta::diagnostics::{render_diagnostic, render_span_diagnostic};
 use volta::executor::Executor;
 use volta::lexer::Lexer;
 use volta::parser::Parser;
@@ -42,8 +43,14 @@ else
                 Ok(()) => {
                     for warning in analyzer.warnings() {
                         eprintln!(
-                            "Warning at {}:{}: {}",
-                            warning.span.line, warning.span.column, warning.message
+                            "{}",
+                            render_span_diagnostic(
+                                "Warning",
+                                &warning.message,
+                                warning.span,
+                                source,
+                                None,
+                            )
                         );
                     }
 
@@ -54,24 +61,43 @@ else
                         }
                         Err(err) => {
                             eprintln!(
-                                "Runtime error at {}:{}: {}",
-                                err.span.line, err.span.column, err.message
+                                "{}",
+                                render_span_diagnostic(
+                                    "Runtime error",
+                                    &err.message,
+                                    err.span,
+                                    source,
+                                    err.hint.as_deref(),
+                                )
                             );
                         }
                     }
                 }
                 Err(err) => {
                     eprintln!(
-                        "Semantic error at {}:{}: {}",
-                        err.span.line, err.span.column, err.message
+                        "{}",
+                        render_span_diagnostic(
+                            "Semantic error",
+                            &err.message,
+                            err.span,
+                            source,
+                            err.hint.as_deref(),
+                        )
                     );
                 }
             }
         }
         Err(err) => {
             eprintln!(
-                "Parse error at {}:{}: {}",
-                err.line, err.column, err.message
+                "{}",
+                render_diagnostic(
+                    "Parse error",
+                    &err.message,
+                    err.line,
+                    err.column,
+                    source,
+                    err.hint.as_deref(),
+                )
             );
         }
     }
