@@ -28,6 +28,7 @@ enum CommandKind {
 struct CommandSpec {
     kind: CommandKind,
     path: Option<String>,
+    doctor_json: bool,
 }
 
 #[derive(Debug, Default)]
@@ -67,7 +68,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         CommandKind::Doctor => {
-            print_doctor();
+            print_doctor(command.doctor_json);
             ExitCode::SUCCESS
         }
         CommandKind::LegacyBenchInfer => {
@@ -183,6 +184,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
         return Ok(CommandSpec {
             kind: CommandKind::Help,
             path: None,
+            doctor_json: false,
         });
     }
 
@@ -191,12 +193,14 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
         return Ok(CommandSpec {
             kind: CommandKind::LegacyBenchInfer,
             path: None,
+            doctor_json: false,
         });
     }
     if cmd == "--tune-matmul" {
         return Ok(CommandSpec {
             kind: CommandKind::LegacyTuneMatmul,
             path: None,
+            doctor_json: false,
         });
     }
 
@@ -205,13 +209,21 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
         "check" => parse_file_command(CommandKind::Check, args),
         "info" => parse_file_command(CommandKind::Info, args),
         "doctor" => {
-            if args.len() != 1 {
-                return Err("'doctor' does not accept positional arguments".to_string());
+            if args.len() == 1 {
+                return Ok(CommandSpec {
+                    kind: CommandKind::Doctor,
+                    path: None,
+                    doctor_json: false,
+                });
             }
-            Ok(CommandSpec {
-                kind: CommandKind::Doctor,
-                path: None,
-            })
+            if args.len() == 2 && args[1] == "--json" {
+                return Ok(CommandSpec {
+                    kind: CommandKind::Doctor,
+                    path: None,
+                    doctor_json: true,
+                });
+            }
+            Err("'doctor' accepts only optional '--json'".to_string())
         }
         "version" | "-v" | "--version" => {
             if args.len() != 1 {
@@ -220,6 +232,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
             Ok(CommandSpec {
                 kind: CommandKind::Version,
                 path: None,
+                doctor_json: false,
             })
         }
         "help" | "-h" | "--help" => {
@@ -229,11 +242,13 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
             Ok(CommandSpec {
                 kind: CommandKind::Help,
                 path: None,
+                doctor_json: false,
             })
         }
         _ if args.len() == 1 && !cmd.starts_with('-') => Ok(CommandSpec {
             kind: CommandKind::Run,
             path: Some(args[0].clone()),
+            doctor_json: false,
         }),
         _ => Err(format!(
             "Unknown command '{}'. Expected run/check/info/version/help",
@@ -259,6 +274,7 @@ fn parse_file_command(kind: CommandKind, args: &[String]) -> Result<CommandSpec,
     Ok(CommandSpec {
         kind,
         path: Some(path.to_string()),
+        doctor_json: false,
     })
 }
 
@@ -267,7 +283,7 @@ fn read_source(path: &str) -> Result<String, String> {
     fs::read_to_string(p).map_err(|err| format!("Failed to read '{}': {}", p.display(), err))
 }
 
-fn print_doctor() {
+fn print_doctor(json: bool) {
     let cpu_threads = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1);
@@ -275,6 +291,19 @@ fn print_doctor() {
         .ok()
         .is_some_and(|value| value == "1" || value.eq_ignore_ascii_case("true"));
     let onnx_import_enabled = cfg!(feature = "onnx-import");
+
+    if json {
+        println!(
+            "{{\"tool\":\"volta-doctor\",\"version\":\"{}\",\"os\":\"{}\",\"arch\":\"{}\",\"cpu_threads\":{},\"gpu_available\":{},\"feature_onnx_import\":{}}}",
+            env!("CARGO_PKG_VERSION"),
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+            cpu_threads,
+            gpu_available,
+            onnx_import_enabled
+        );
+        return;
+    }
 
     println!("Volta doctor");
     println!("  version: {}", env!("CARGO_PKG_VERSION"));
@@ -411,6 +440,23 @@ mod tests {
         let command = parse_command(&args).expect("doctor should parse");
         assert_eq!(command.kind, CommandKind::Doctor);
         assert!(command.path.is_none());
+        assert!(!command.doctor_json);
+    }
+
+    #[test]
+    fn parse_command_accepts_doctor_json_mode() {
+        let args = vec!["doctor".to_string(), "--json".to_string()];
+        let command = parse_command(&args).expect("doctor json should parse");
+        assert_eq!(command.kind, CommandKind::Doctor);
+        assert!(command.path.is_none());
+        assert!(command.doctor_json);
+    }
+
+    #[test]
+    fn parse_command_rejects_doctor_unknown_flag() {
+        let args = vec!["doctor".to_string(), "--yaml".to_string()];
+        let err = parse_command(&args).expect_err("doctor unknown flag must fail");
+        assert!(err.contains("accepts only optional '--json'"));
     }
 
     #[test]

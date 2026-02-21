@@ -119,3 +119,15 @@ fn doctor_command_reports_environment() {
     assert!(stdout.contains("gpu_available:"));
     assert!(stdout.contains("feature_onnx_import:"));
 }
+
+#[test]
+fn doctor_command_supports_json_mode() {
+    let output = run_volta(&["doctor", "--json"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success(), "doctor --json should pass: {stdout}");
+    assert!(stdout.trim_start().starts_with('{'));
+    assert!(stdout.contains("\"tool\":\"volta-doctor\""));
+    assert!(stdout.contains("\"cpu_threads\":"));
+    assert!(stdout.contains("\"gpu_available\":"));
+}
