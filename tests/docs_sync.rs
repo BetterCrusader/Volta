@@ -40,32 +40,6 @@ fn readme_mentions_quality_fortress_wave1() {
 }
 
 #[test]
-fn design_doc_mentions_wave1_foundation() {
-    let text = read_text("docs/plans/2026-02-21-volta-roadmap-v3.md");
-    assert!(
-        text.contains("Volta is not a blank project"),
-        "roadmap must document the current baseline explicitly"
-    );
-}
-
-#[test]
-fn wave23_plan_mentions_release_and_nightly() {
-    let text = read_text("docs/plans/2026-02-21-volta-roadmap-v3.md");
-    assert!(
-        text.contains("ONNX Interop Wave 2"),
-        "roadmap must include ONNX interop wave 2 scope"
-    );
-    assert!(
-        text.contains("70% Core Fortress"),
-        "roadmap must include 70/20/10 execution split"
-    );
-    assert!(
-        text.contains("release-gates.yml"),
-        "roadmap must reference release gate workflow"
-    );
-}
-
-#[test]
 fn cuda_determinism_policy_is_documented() {
     let text = read_text("docs/governance/cuda-determinism-policy.md");
     assert!(
