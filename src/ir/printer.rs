@@ -29,6 +29,32 @@ fn format_op(op: &Op) -> String {
                 .join("->");
             format!("elementwise_chain {} [{}]", fmt_value(*input), chain)
         }
+        Op::Reshape { input, shape } => format!("reshape {} {:?}", fmt_value(*input), shape),
+        Op::Concat { inputs, axis } => {
+            let formatted = inputs
+                .iter()
+                .map(|id| fmt_value(*id))
+                .collect::<Vec<_>>()
+                .join(" ");
+            format!("concat axis={} {}", axis, formatted)
+        }
+        Op::Gather {
+            input,
+            indices,
+            axis,
+        } => format!("gather axis={} {} {:?}", axis, fmt_value(*input), indices),
+        Op::Slice {
+            input,
+            starts,
+            ends,
+            axes,
+        } => format!(
+            "slice {} starts={:?} ends={:?} axes={:?}",
+            fmt_value(*input),
+            starts,
+            ends,
+            axes
+        ),
         Op::Transpose(value) => format!("transpose {}", fmt_value(*value)),
         Op::MatMul(left, right) => format!("matmul {} {}", fmt_value(*left), fmt_value(*right)),
         Op::Relu(value) => format!("relu {}", fmt_value(*value)),

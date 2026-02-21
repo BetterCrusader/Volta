@@ -275,6 +275,18 @@ fn evaluate_node_cuda(
                 })?;
             Ok(RuntimeValue::Tensor { shape, data: out })
         }
+        Op::Reshape { .. } => Err(CudaExecutionError {
+            message: "CUDA Reshape execution is not implemented".to_string(),
+        }),
+        Op::Concat { .. } => Err(CudaExecutionError {
+            message: "CUDA Concat execution is not implemented".to_string(),
+        }),
+        Op::Gather { .. } => Err(CudaExecutionError {
+            message: "CUDA Gather execution is not implemented".to_string(),
+        }),
+        Op::Slice { .. } => Err(CudaExecutionError {
+            message: "CUDA Slice execution is not implemented".to_string(),
+        }),
         Op::Conv2D(_, _) => Err(CudaExecutionError {
             message: "CUDA Conv2D execution is not implemented".to_string(),
         }),

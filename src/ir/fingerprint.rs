@@ -47,6 +47,36 @@ fn hash_op(op: &Op, hasher: &mut DefaultHasher) {
             input.0.hash(hasher);
             ops.hash(hasher);
         }
+        Op::Reshape { input, shape } => {
+            input.0.hash(hasher);
+            shape.hash(hasher);
+        }
+        Op::Concat { inputs, axis } => {
+            axis.hash(hasher);
+            for input in inputs {
+                input.0.hash(hasher);
+            }
+        }
+        Op::Gather {
+            input,
+            indices,
+            axis,
+        } => {
+            input.0.hash(hasher);
+            indices.hash(hasher);
+            axis.hash(hasher);
+        }
+        Op::Slice {
+            input,
+            starts,
+            ends,
+            axes,
+        } => {
+            input.0.hash(hasher);
+            starts.hash(hasher);
+            ends.hash(hasher);
+            axes.hash(hasher);
+        }
         Op::Parameter(name) | Op::Input(name) => name.hash(hasher),
         Op::Phi(values) => values.iter().for_each(|v| v.0.hash(hasher)),
         Op::Removed => {}

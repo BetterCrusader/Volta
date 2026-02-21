@@ -363,25 +363,72 @@ impl IrGraphContract {
                         .map_err(|err| InteropError::new(err.message))?;
                     value
                 }
-                IrOpContract::Reshape { .. } => {
-                    return Err(InteropError::new(
-                        "IR contract op 'Reshape' is parsed but not lowered to runtime yet",
-                    ));
+                IrOpContract::Reshape { input, shape } => {
+                    let input = resolve_value(&ids, input)?;
+                    let (_, value) = graph
+                        .add_op(
+                            block,
+                            Op::Reshape {
+                                input,
+                                shape: shape.clone(),
+                            },
+                        )
+                        .map_err(|err| InteropError::new(err.message))?;
+                    value
                 }
-                IrOpContract::Concat { .. } => {
-                    return Err(InteropError::new(
-                        "IR contract op 'Concat' is parsed but not lowered to runtime yet",
-                    ));
+                IrOpContract::Concat { inputs, axis } => {
+                    let mut resolved = Vec::with_capacity(inputs.len());
+                    for input in inputs {
+                        resolved.push(resolve_value(&ids, input)?);
+                    }
+                    let (_, value) = graph
+                        .add_op(
+                            block,
+                            Op::Concat {
+                                inputs: resolved,
+                                axis: *axis,
+                            },
+                        )
+                        .map_err(|err| InteropError::new(err.message))?;
+                    value
                 }
-                IrOpContract::Gather { .. } => {
-                    return Err(InteropError::new(
-                        "IR contract op 'Gather' is parsed but not lowered to runtime yet",
-                    ));
+                IrOpContract::Gather {
+                    input,
+                    indices,
+                    axis,
+                } => {
+                    let input = resolve_value(&ids, input)?;
+                    let (_, value) = graph
+                        .add_op(
+                            block,
+                            Op::Gather {
+                                input,
+                                indices: indices.clone(),
+                                axis: *axis,
+                            },
+                        )
+                        .map_err(|err| InteropError::new(err.message))?;
+                    value
                 }
-                IrOpContract::Slice { .. } => {
-                    return Err(InteropError::new(
-                        "IR contract op 'Slice' is parsed but not lowered to runtime yet",
-                    ));
+                IrOpContract::Slice {
+                    input,
+                    starts,
+                    ends,
+                    axes,
+                } => {
+                    let input = resolve_value(&ids, input)?;
+                    let (_, value) = graph
+                        .add_op(
+                            block,
+                            Op::Slice {
+                                input,
+                                starts: starts.clone(),
+                                ends: ends.clone(),
+                                axes: axes.clone(),
+                            },
+                        )
+                        .map_err(|err| InteropError::new(err.message))?;
+                    value
                 }
                 IrOpContract::Output { value } => {
                     let value_id = resolve_value(&ids, value)?;

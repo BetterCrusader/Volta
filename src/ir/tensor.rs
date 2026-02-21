@@ -200,6 +200,246 @@ impl Tensor {
         let denom = self.data.len() as f32;
         Ok(Self::scalar(sum / denom))
     }
+
+    pub fn reshape(&self, shape: Vec<usize>) -> Result<Self, TensorError> {
+        let expected = element_count(&shape).ok_or_else(|| TensorError {
+            message: "Invalid tensor shape: overflow while computing element count".to_string(),
+        })?;
+        if expected != self.data.len() {
+            return Err(TensorError {
+                message: format!(
+                    "Shape mismatch in reshape: {:?} ({} elements) cannot reshape to {:?} ({} elements)",
+                    self.shape,
+                    self.data.len(),
+                    shape,
+                    expected
+                ),
+            });
+        }
+        Self::new(shape, self.data.clone())
+    }
+
+    pub fn concat(tensors: &[Self], axis: usize) -> Result<Self, TensorError> {
+        if tensors.is_empty() {
+            return Err(TensorError {
+                message: "concat expects at least one tensor".to_string(),
+            });
+        }
+        let rank = tensors[0].shape.len();
+        if axis >= rank {
+            return Err(TensorError {
+                message: format!(
+                    "concat axis {} out of bounds for rank {} tensor",
+                    axis, rank
+                ),
+            });
+        }
+
+        let mut out_shape = tensors[0].shape.clone();
+        let mut axis_sum = 0usize;
+        for tensor in tensors {
+            if tensor.shape.len() != rank {
+                return Err(TensorError {
+                    message: format!(
+                        "concat rank mismatch: expected rank {}, got shape {:?}",
+                        rank, tensor.shape
+                    ),
+                });
+            }
+            for (dim_idx, (lhs, rhs)) in out_shape.iter().zip(tensor.shape.iter()).enumerate() {
+                if dim_idx != axis && lhs != rhs {
+                    return Err(TensorError {
+                        message: format!(
+                            "concat shape mismatch at dim {}: expected {}, got {}",
+                            dim_idx, lhs, rhs
+                        ),
+                    });
+                }
+            }
+            axis_sum = axis_sum
+                .checked_add(tensor.shape[axis])
+                .ok_or_else(|| TensorError {
+                    message: "concat axis size overflow".to_string(),
+                })?;
+        }
+        out_shape[axis] = axis_sum;
+
+        let outer = product_prefix(&out_shape, axis)?;
+        let inner = product_suffix(&out_shape, axis + 1)?;
+        let mut out = Vec::with_capacity(element_count(&out_shape).ok_or_else(|| TensorError {
+            message: "Invalid tensor shape: overflow while computing element count".to_string(),
+        })?);
+
+        for outer_idx in 0..outer {
+            for tensor in tensors {
+                let axis_dim = tensor.shape[axis];
+                let start = outer_idx
+                    .checked_mul(axis_dim)
+                    .and_then(|v| v.checked_mul(inner))
+                    .ok_or_else(|| TensorError {
+                        message: "concat index overflow".to_string(),
+                    })?;
+                let end = start
+                    .checked_add(axis_dim.checked_mul(inner).ok_or_else(|| TensorError {
+                        message: "concat block size overflow".to_string(),
+                    })?)
+                    .ok_or_else(|| TensorError {
+                        message: "concat index overflow".to_string(),
+                    })?;
+                out.extend_from_slice(&tensor.data[start..end]);
+            }
+        }
+
+        Self::new(out_shape, out)
+    }
+
+    pub fn gather(&self, indices: &[usize], axis: usize) -> Result<Self, TensorError> {
+        let rank = self.shape.len();
+        if axis >= rank {
+            return Err(TensorError {
+                message: format!(
+                    "gather axis {} out of bounds for rank {} tensor",
+                    axis, rank
+                ),
+            });
+        }
+        let axis_dim = self.shape[axis];
+        for index in indices {
+            if *index >= axis_dim {
+                return Err(TensorError {
+                    message: format!(
+                        "gather index {} out of bounds for axis {} with size {}",
+                        index, axis, axis_dim
+                    ),
+                });
+            }
+        }
+
+        let mut out_shape = self.shape.clone();
+        out_shape[axis] = indices.len();
+        let outer = product_prefix(&self.shape, axis)?;
+        let inner = product_suffix(&self.shape, axis + 1)?;
+        let mut out = Vec::with_capacity(element_count(&out_shape).ok_or_else(|| TensorError {
+            message: "Invalid tensor shape: overflow while computing element count".to_string(),
+        })?);
+
+        for outer_idx in 0..outer {
+            for index in indices {
+                let start = outer_idx
+                    .checked_mul(axis_dim)
+                    .and_then(|v| v.checked_mul(inner))
+                    .and_then(|v| v.checked_add(index.checked_mul(inner)?))
+                    .ok_or_else(|| TensorError {
+                        message: "gather index overflow".to_string(),
+                    })?;
+                let end = start.checked_add(inner).ok_or_else(|| TensorError {
+                    message: "gather index overflow".to_string(),
+                })?;
+                out.extend_from_slice(&self.data[start..end]);
+            }
+        }
+
+        Self::new(out_shape, out)
+    }
+
+    pub fn slice(
+        &self,
+        starts: &[usize],
+        ends: &[usize],
+        axes: &[usize],
+    ) -> Result<Self, TensorError> {
+        if starts.is_empty() || ends.is_empty() || axes.is_empty() {
+            return Err(TensorError {
+                message: "slice starts/ends/axes must be non-empty".to_string(),
+            });
+        }
+        if starts.len() != ends.len() || starts.len() != axes.len() {
+            return Err(TensorError {
+                message: "slice starts/ends/axes lengths must match".to_string(),
+            });
+        }
+
+        let rank = self.shape.len();
+        let mut out_shape = self.shape.clone();
+        let mut axis_seen = std::collections::HashSet::new();
+        for idx in 0..axes.len() {
+            let axis = axes[idx];
+            if axis >= rank {
+                return Err(TensorError {
+                    message: format!("slice axis {} out of bounds for rank {} tensor", axis, rank),
+                });
+            }
+            if !axis_seen.insert(axis) {
+                return Err(TensorError {
+                    message: format!("slice axis {} specified more than once", axis),
+                });
+            }
+            let start = starts[idx];
+            let end = ends[idx];
+            let dim = self.shape[axis];
+            if start >= end {
+                return Err(TensorError {
+                    message: format!(
+                        "slice requires start < end per axis, got start={} end={} at axis {}",
+                        start, end, axis
+                    ),
+                });
+            }
+            if end > dim {
+                return Err(TensorError {
+                    message: format!(
+                        "slice end {} out of bounds for axis {} with size {}",
+                        end, axis, dim
+                    ),
+                });
+            }
+            out_shape[axis] = end - start;
+        }
+
+        let out_count = element_count(&out_shape).ok_or_else(|| TensorError {
+            message: "Invalid tensor shape: overflow while computing element count".to_string(),
+        })?;
+        let out_strides = strides(&out_shape).ok_or_else(|| TensorError {
+            message: "slice output stride overflow".to_string(),
+        })?;
+        let in_strides = strides(&self.shape).ok_or_else(|| TensorError {
+            message: "slice input stride overflow".to_string(),
+        })?;
+
+        let mut out = vec![0.0_f32; out_count];
+        for (linear, out_value) in out.iter_mut().enumerate().take(out_count) {
+            let mut rem = linear;
+            let mut in_offset = 0usize;
+            for dim_idx in 0..out_shape.len() {
+                let stride = out_strides[dim_idx];
+                let coord = if stride == 0 { 0 } else { rem / stride };
+                if stride != 0 {
+                    rem %= stride;
+                }
+
+                let start_shift = axes
+                    .iter()
+                    .position(|axis| *axis == dim_idx)
+                    .map(|idx| starts[idx])
+                    .unwrap_or(0);
+                in_offset = in_offset
+                    .checked_add(
+                        coord
+                            .checked_add(start_shift)
+                            .and_then(|v| v.checked_mul(in_strides[dim_idx]))
+                            .ok_or_else(|| TensorError {
+                                message: "slice index overflow".to_string(),
+                            })?,
+                    )
+                    .ok_or_else(|| TensorError {
+                        message: "slice index overflow".to_string(),
+                    })?;
+            }
+            *out_value = self.data[in_offset];
+        }
+
+        Self::new(out_shape, out)
+    }
 }
 
 fn element_count(shape: &[usize]) -> Option<usize> {
@@ -208,6 +448,36 @@ fn element_count(shape: &[usize]) -> Option<usize> {
         count = count.checked_mul(*dim)?;
     }
     Some(count)
+}
+
+fn product_prefix(shape: &[usize], end: usize) -> Result<usize, TensorError> {
+    shape
+        .iter()
+        .take(end)
+        .try_fold(1usize, |acc, dim| acc.checked_mul(*dim))
+        .ok_or_else(|| TensorError {
+            message: "tensor shape overflow while computing prefix product".to_string(),
+        })
+}
+
+fn product_suffix(shape: &[usize], start: usize) -> Result<usize, TensorError> {
+    shape
+        .iter()
+        .skip(start)
+        .try_fold(1usize, |acc, dim| acc.checked_mul(*dim))
+        .ok_or_else(|| TensorError {
+            message: "tensor shape overflow while computing suffix product".to_string(),
+        })
+}
+
+fn strides(shape: &[usize]) -> Option<Vec<usize>> {
+    let mut out = vec![0usize; shape.len()];
+    let mut stride = 1usize;
+    for idx in (0..shape.len()).rev() {
+        out[idx] = stride;
+        stride = stride.checked_mul(shape[idx])?;
+    }
+    Some(out)
 }
 
 #[cfg(test)]

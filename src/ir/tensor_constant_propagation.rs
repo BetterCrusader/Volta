@@ -89,6 +89,34 @@ fn fold_tensor_op(op: &Op, known_tensors: &[Option<Tensor>]) -> Option<Op> {
             }
             const_tensor_op(tensor)
         }
+        Op::Reshape { input, shape } => {
+            let input = known_tensors.get(input.0).and_then(|v| v.as_ref())?;
+            const_tensor_op(input.reshape(shape.clone()).ok()?)
+        }
+        Op::Concat { inputs, axis } => {
+            let tensors = inputs
+                .iter()
+                .map(|id| known_tensors.get(id.0).and_then(|v| v.clone()))
+                .collect::<Option<Vec<_>>>()?;
+            const_tensor_op(Tensor::concat(&tensors, *axis).ok()?)
+        }
+        Op::Gather {
+            input,
+            indices,
+            axis,
+        } => {
+            let input = known_tensors.get(input.0).and_then(|v| v.as_ref())?;
+            const_tensor_op(input.gather(indices, *axis).ok()?)
+        }
+        Op::Slice {
+            input,
+            starts,
+            ends,
+            axes,
+        } => {
+            let input = known_tensors.get(input.0).and_then(|v| v.as_ref())?;
+            const_tensor_op(input.slice(starts, ends, axes).ok()?)
+        }
         Op::ConstInt(_)
         | Op::ConstFloat(_)
         | Op::ConstTensor { .. }

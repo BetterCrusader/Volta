@@ -1,94 +1,91 @@
 #![cfg(feature = "onnx-import")]
 
 use volta::interop::{OnnxGraphStub, OnnxNodeStub, OnnxOpStub, import_onnx_stub_graph};
+use volta::ir::{ExecutionContext, RuntimeValue, execute_value_with_context};
 
 #[test]
-fn wave2_stub_graphs_fail_with_explicit_runtime_todo_messages() {
-    let scenarios = vec![
-        (
-            "reshape",
-            OnnxOpStub::Reshape {
-                input: "x".to_string(),
-                shape: vec![2, 2],
-            },
-            "Reshape",
-        ),
-        (
-            "concat",
-            OnnxOpStub::Concat {
-                inputs: vec!["x".to_string(), "x2".to_string()],
-                axis: 1,
-            },
-            "Concat",
-        ),
-        (
-            "gather",
-            OnnxOpStub::Gather {
-                input: "x".to_string(),
-                indices: vec![0, 2],
-                axis: 0,
-            },
-            "Gather",
-        ),
-        (
-            "slice",
-            OnnxOpStub::Slice {
-                input: "x".to_string(),
-                starts: vec![1],
-                ends: vec![3],
-                axes: vec![1],
-            },
-            "Slice",
-        ),
-    ];
-
-    for (name, op, expected) in scenarios {
-        let mut nodes = vec![
+fn wave2_stub_graph_executes_for_reshape_concat_gather_slice() {
+    let graph = OnnxGraphStub {
+        name: "wave2_e2e".to_string(),
+        nodes: vec![
             OnnxNodeStub {
-                id: "x".to_string(),
+                id: "x1".to_string(),
                 op: OnnxOpStub::Input {
-                    name: "x".to_string(),
-                    shape: vec![1, 4],
+                    name: "x1".to_string(),
+                    shape: vec![1, 2],
                 },
             },
             OnnxNodeStub {
                 id: "x2".to_string(),
                 op: OnnxOpStub::Input {
                     name: "x2".to_string(),
-                    shape: vec![1, 4],
+                    shape: vec![1, 2],
                 },
             },
             OnnxNodeStub {
-                id: "wave2".to_string(),
-                op,
+                id: "cat".to_string(),
+                op: OnnxOpStub::Concat {
+                    inputs: vec!["x1".to_string(), "x2".to_string()],
+                    axis: 1,
+                },
+            },
+            OnnxNodeStub {
+                id: "reshape".to_string(),
+                op: OnnxOpStub::Reshape {
+                    input: "cat".to_string(),
+                    shape: vec![2, 2],
+                },
+            },
+            OnnxNodeStub {
+                id: "gather".to_string(),
+                op: OnnxOpStub::Gather {
+                    input: "reshape".to_string(),
+                    indices: vec![1],
+                    axis: 0,
+                },
+            },
+            OnnxNodeStub {
+                id: "slice".to_string(),
+                op: OnnxOpStub::Slice {
+                    input: "gather".to_string(),
+                    starts: vec![0],
+                    ends: vec![1],
+                    axes: vec![1],
+                },
             },
             OnnxNodeStub {
                 id: "out".to_string(),
                 op: OnnxOpStub::Output {
-                    value: "wave2".to_string(),
+                    value: "slice".to_string(),
                 },
             },
-        ];
+        ],
+    };
 
-        if name == "reshape" || name == "gather" || name == "slice" {
-            nodes.remove(1);
+    let program = import_onnx_stub_graph(&graph).expect("stub import should succeed");
+    let mut context = ExecutionContext::default();
+    context.inputs.insert(
+        "x1".to_string(),
+        RuntimeValue::Tensor {
+            shape: vec![1, 2],
+            data: vec![1.0, 2.0],
+        },
+    );
+    context.inputs.insert(
+        "x2".to_string(),
+        RuntimeValue::Tensor {
+            shape: vec![1, 2],
+            data: vec![3.0, 4.0],
+        },
+    );
+
+    let value = execute_value_with_context(&program.graph, program.output, &context)
+        .expect("wave2 runtime execution should succeed");
+    assert_eq!(
+        value,
+        RuntimeValue::Tensor {
+            shape: vec![1, 1],
+            data: vec![3.0],
         }
-
-        let graph = OnnxGraphStub {
-            name: format!("wave2_{name}"),
-            nodes,
-        };
-
-        let err = import_onnx_stub_graph(&graph).expect_err("Wave2 op must fail loudly for now");
-        assert!(
-            err.message.contains(expected),
-            "unexpected message: {}",
-            err.message
-        );
-        assert!(
-            err.message.contains("not lowered"),
-            "unexpected message: {}",
-            err.message
-        );
-    }
+    );
 }

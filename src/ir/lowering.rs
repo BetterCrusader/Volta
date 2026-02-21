@@ -141,7 +141,7 @@ mod tests {
         for (index, node) in graph.nodes.iter().enumerate() {
             assert_eq!(node.id.0, index);
             assert_eq!(node.output.0, index);
-            match node.op {
+            match &node.op {
                 Op::Add(left, right)
                 | Op::Sub(left, right)
                 | Op::Mul(left, right)
@@ -151,6 +151,14 @@ mod tests {
                 }
                 Op::ElementwiseChain { input, .. } => {
                     assert!(input.0 < node.output.0);
+                }
+                Op::Reshape { input, .. } | Op::Gather { input, .. } | Op::Slice { input, .. } => {
+                    assert!(input.0 < node.output.0);
+                }
+                Op::Concat { inputs, .. } => {
+                    for input in inputs {
+                        assert!(input.0 < node.output.0);
+                    }
                 }
                 Op::ConstInt(_)
                 | Op::ConstFloat(_)

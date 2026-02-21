@@ -3,9 +3,10 @@
 use prost::Message;
 use tract_onnx::pb;
 use volta::interop::import_onnx_bytes;
+use volta::ir::{ExecutionContext, RuntimeValue, execute_value_with_context};
 
 #[test]
-fn parses_reshape_and_fails_with_lowering_todo() {
+fn parses_reshape_and_executes() {
     let model = pb::ModelProto {
         ir_version: 8,
         graph: Some(pb::GraphProto {
@@ -32,121 +33,118 @@ fn parses_reshape_and_fails_with_lowering_todo() {
         ..Default::default()
     };
 
-    let err = import_onnx_bytes(&model.encode_to_vec()).expect_err("reshape must fail loudly");
-    assert!(err.message.contains("Reshape"));
-    assert!(err.message.contains("not lowered"));
+    let program = import_onnx_bytes(&model.encode_to_vec()).expect("reshape import should work");
+    let mut context = ExecutionContext::default();
+    context.inputs.insert(
+        "x".to_string(),
+        RuntimeValue::Tensor {
+            shape: vec![1, 4],
+            data: vec![1.0, 2.0, 3.0, 4.0],
+        },
+    );
+    let value = execute_value_with_context(&program.graph, program.output, &context)
+        .expect("reshape execute should work");
+    assert_eq!(
+        value,
+        RuntimeValue::Tensor {
+            shape: vec![2, 2],
+            data: vec![1.0, 2.0, 3.0, 4.0],
+        }
+    );
 }
 
 #[test]
-fn parses_concat_and_fails_with_lowering_todo() {
+fn parses_concat_gather_slice_and_executes() {
     let model = pb::ModelProto {
         ir_version: 8,
         graph: Some(pb::GraphProto {
-            name: "concat_wave2".to_string(),
+            name: "concat_gather_slice_wave2".to_string(),
             input: vec![
                 tensor_value_info("x1", &[1, 2], pb::tensor_proto::DataType::Float),
                 tensor_value_info("x2", &[1, 2], pb::tensor_proto::DataType::Float),
             ],
             output: vec![tensor_value_info(
                 "y",
-                &[1, 4],
-                pb::tensor_proto::DataType::Float,
-            )],
-            node: vec![pb::NodeProto {
-                op_type: "Concat".to_string(),
-                input: vec!["x1".to_string(), "x2".to_string()],
-                output: vec!["y".to_string()],
-                attribute: vec![pb::AttributeProto {
-                    name: "axis".to_string(),
-                    i: 1,
-                    r#type: pb::attribute_proto::AttributeType::Int as i32,
-                    ..Default::default()
-                }],
-                ..Default::default()
-            }],
-            ..Default::default()
-        }),
-        ..Default::default()
-    };
-
-    let err = import_onnx_bytes(&model.encode_to_vec()).expect_err("concat must fail loudly");
-    assert!(err.message.contains("Concat"));
-    assert!(err.message.contains("not lowered"));
-}
-
-#[test]
-fn parses_gather_and_fails_with_lowering_todo() {
-    let model = pb::ModelProto {
-        ir_version: 8,
-        graph: Some(pb::GraphProto {
-            name: "gather_wave2".to_string(),
-            input: vec![tensor_value_info(
-                "x",
-                &[4],
-                pb::tensor_proto::DataType::Float,
-            )],
-            output: vec![tensor_value_info(
-                "y",
-                &[2],
-                pb::tensor_proto::DataType::Float,
-            )],
-            initializer: vec![int64_tensor("idx", &[2], &[0, 2])],
-            node: vec![pb::NodeProto {
-                op_type: "Gather".to_string(),
-                input: vec!["x".to_string(), "idx".to_string()],
-                output: vec!["y".to_string()],
-                ..Default::default()
-            }],
-            ..Default::default()
-        }),
-        ..Default::default()
-    };
-
-    let err = import_onnx_bytes(&model.encode_to_vec()).expect_err("gather must fail loudly");
-    assert!(err.message.contains("Gather"));
-    assert!(err.message.contains("not lowered"));
-}
-
-#[test]
-fn parses_slice_and_fails_with_lowering_todo() {
-    let model = pb::ModelProto {
-        ir_version: 8,
-        graph: Some(pb::GraphProto {
-            name: "slice_wave2".to_string(),
-            input: vec![tensor_value_info(
-                "x",
-                &[1, 8],
-                pb::tensor_proto::DataType::Float,
-            )],
-            output: vec![tensor_value_info(
-                "y",
-                &[1, 4],
+                &[1, 1],
                 pb::tensor_proto::DataType::Float,
             )],
             initializer: vec![
-                int64_tensor("starts", &[1], &[2]),
-                int64_tensor("ends", &[1], &[6]),
+                int64_tensor("idx", &[1], &[1]),
+                int64_tensor("starts", &[1], &[0]),
+                int64_tensor("ends", &[1], &[1]),
                 int64_tensor("axes", &[1], &[1]),
             ],
-            node: vec![pb::NodeProto {
-                op_type: "Slice".to_string(),
-                input: vec![
-                    "x".to_string(),
-                    "starts".to_string(),
-                    "ends".to_string(),
-                    "axes".to_string(),
-                ],
-                output: vec!["y".to_string()],
-                ..Default::default()
-            }],
+            node: vec![
+                pb::NodeProto {
+                    name: "concat_node".to_string(),
+                    op_type: "Concat".to_string(),
+                    input: vec!["x1".to_string(), "x2".to_string()],
+                    output: vec!["concat_out".to_string()],
+                    attribute: vec![pb::AttributeProto {
+                        name: "axis".to_string(),
+                        i: 1,
+                        r#type: pb::attribute_proto::AttributeType::Int as i32,
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                pb::NodeProto {
+                    name: "gather_node".to_string(),
+                    op_type: "Gather".to_string(),
+                    input: vec!["concat_out".to_string(), "idx".to_string()],
+                    output: vec!["gather_out".to_string()],
+                    attribute: vec![pb::AttributeProto {
+                        name: "axis".to_string(),
+                        i: 1,
+                        r#type: pb::attribute_proto::AttributeType::Int as i32,
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                pb::NodeProto {
+                    name: "slice_node".to_string(),
+                    op_type: "Slice".to_string(),
+                    input: vec![
+                        "gather_out".to_string(),
+                        "starts".to_string(),
+                        "ends".to_string(),
+                        "axes".to_string(),
+                    ],
+                    output: vec!["y".to_string()],
+                    ..Default::default()
+                },
+            ],
             ..Default::default()
         }),
         ..Default::default()
     };
 
-    let err = import_onnx_bytes(&model.encode_to_vec()).expect_err("slice must fail loudly");
-    assert!(err.message.contains("Slice"));
-    assert!(err.message.contains("not lowered"));
+    let program =
+        import_onnx_bytes(&model.encode_to_vec()).expect("concat/gather/slice import should work");
+    let mut context = ExecutionContext::default();
+    context.inputs.insert(
+        "x1".to_string(),
+        RuntimeValue::Tensor {
+            shape: vec![1, 2],
+            data: vec![1.0, 2.0],
+        },
+    );
+    context.inputs.insert(
+        "x2".to_string(),
+        RuntimeValue::Tensor {
+            shape: vec![1, 2],
+            data: vec![3.0, 4.0],
+        },
+    );
+    let value = execute_value_with_context(&program.graph, program.output, &context)
+        .expect("concat/gather/slice execute should work");
+    assert_eq!(
+        value,
+        RuntimeValue::Tensor {
+            shape: vec![1, 1],
+            data: vec![2.0],
+        }
+    );
 }
 
 fn tensor_value_info(

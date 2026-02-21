@@ -51,6 +51,19 @@ fn infer_shape_for_op(
         | Op::Div(left, right) => infer_elementwise(*left, *right, shapes),
         Op::Neg(value) => Ok(shape_of(*value, shapes)),
         Op::ElementwiseChain { input, .. } => infer_tensor_unary(*input, shapes),
+        Op::Reshape { input, shape } => infer_reshape(*input, shape, shapes),
+        Op::Concat { inputs, axis } => infer_concat(inputs, *axis, shapes),
+        Op::Gather {
+            input,
+            indices,
+            axis,
+        } => infer_gather(*input, indices, *axis, shapes),
+        Op::Slice {
+            input,
+            starts,
+            ends,
+            axes,
+        } => infer_slice(*input, starts, ends, axes, shapes),
         Op::Transpose(value) => match shape_of(*value, shapes) {
             ShapeFact::Tensor(shape) => {
                 if shape.len() != 2 {
@@ -201,6 +214,180 @@ fn infer_conv2d(
             Err("Conv2D expects tensor inputs".to_string())
         }
     }
+}
+
+fn infer_reshape(
+    input: ValueId,
+    target_shape: &[usize],
+    shapes: &HashMap<ValueId, ShapeFact>,
+) -> Result<ShapeFact, String> {
+    if target_shape.is_empty() {
+        return Err("reshape target must be non-empty".to_string());
+    }
+    if target_shape.contains(&0) {
+        return Err("reshape target cannot contain zero dimension".to_string());
+    }
+    let source = shape_of(input, shapes);
+    match source {
+        ShapeFact::Tensor(current_shape) => {
+            let src_count = element_count(&current_shape)
+                .ok_or_else(|| "reshape source shape overflow".to_string())?;
+            let dst_count = element_count(target_shape)
+                .ok_or_else(|| "reshape target shape overflow".to_string())?;
+            if src_count != dst_count {
+                return Err(format!(
+                    "reshape element mismatch: source {:?} ({} elements) to {:?} ({} elements)",
+                    current_shape, src_count, target_shape, dst_count
+                ));
+            }
+            Ok(ShapeFact::Tensor(target_shape.to_vec()))
+        }
+        ShapeFact::Unknown => Ok(ShapeFact::Tensor(target_shape.to_vec())),
+        ShapeFact::NonTensor => Err("reshape expects tensor input".to_string()),
+    }
+}
+
+fn infer_concat(
+    inputs: &[ValueId],
+    axis: usize,
+    shapes: &HashMap<ValueId, ShapeFact>,
+) -> Result<ShapeFact, String> {
+    if inputs.len() < 2 {
+        return Err("concat requires at least 2 inputs".to_string());
+    }
+    let mut resolved = Vec::with_capacity(inputs.len());
+    for value in inputs {
+        match shape_of(*value, shapes) {
+            ShapeFact::Tensor(shape) => resolved.push(shape),
+            ShapeFact::Unknown => return Ok(ShapeFact::Unknown),
+            ShapeFact::NonTensor => return Err("concat expects tensor inputs".to_string()),
+        }
+    }
+    let rank = resolved[0].len();
+    if axis >= rank {
+        return Err(format!(
+            "concat axis {} out of bounds for rank {} tensor",
+            axis, rank
+        ));
+    }
+
+    let mut output = resolved[0].clone();
+    let mut axis_sum = 0usize;
+    for shape in resolved {
+        if shape.len() != rank {
+            return Err(format!(
+                "concat rank mismatch: expected rank {}, got {:?}",
+                rank, shape
+            ));
+        }
+        for (dim, (expected, actual)) in output.iter().zip(shape.iter()).enumerate() {
+            if dim != axis && expected != actual {
+                return Err(format!(
+                    "concat shape mismatch at dim {}: expected {}, got {}",
+                    dim, expected, actual
+                ));
+            }
+        }
+        axis_sum = axis_sum
+            .checked_add(shape[axis])
+            .ok_or_else(|| "concat axis size overflow".to_string())?;
+    }
+    output[axis] = axis_sum;
+    Ok(ShapeFact::Tensor(output))
+}
+
+fn infer_gather(
+    input: ValueId,
+    indices: &[usize],
+    axis: usize,
+    shapes: &HashMap<ValueId, ShapeFact>,
+) -> Result<ShapeFact, String> {
+    if indices.is_empty() {
+        return Err("gather requires at least one index".to_string());
+    }
+    match shape_of(input, shapes) {
+        ShapeFact::Tensor(mut shape) => {
+            if axis >= shape.len() {
+                return Err(format!(
+                    "gather axis {} out of bounds for rank {} tensor",
+                    axis,
+                    shape.len()
+                ));
+            }
+            let axis_dim = shape[axis];
+            for index in indices {
+                if *index >= axis_dim {
+                    return Err(format!(
+                        "gather index {} out of bounds for axis {} with size {}",
+                        index, axis, axis_dim
+                    ));
+                }
+            }
+            shape[axis] = indices.len();
+            Ok(ShapeFact::Tensor(shape))
+        }
+        ShapeFact::Unknown => Ok(ShapeFact::Unknown),
+        ShapeFact::NonTensor => Err("gather expects tensor input".to_string()),
+    }
+}
+
+fn infer_slice(
+    input: ValueId,
+    starts: &[usize],
+    ends: &[usize],
+    axes: &[usize],
+    shapes: &HashMap<ValueId, ShapeFact>,
+) -> Result<ShapeFact, String> {
+    if starts.is_empty() || ends.is_empty() || axes.is_empty() {
+        return Err("slice starts/ends/axes must be non-empty".to_string());
+    }
+    if starts.len() != ends.len() || starts.len() != axes.len() {
+        return Err("slice starts/ends/axes lengths must match".to_string());
+    }
+    match shape_of(input, shapes) {
+        ShapeFact::Tensor(mut shape) => {
+            let rank = shape.len();
+            let mut seen_axes = std::collections::HashSet::new();
+            for idx in 0..axes.len() {
+                let axis = axes[idx];
+                if axis >= rank {
+                    return Err(format!(
+                        "slice axis {} out of bounds for rank {} tensor",
+                        axis, rank
+                    ));
+                }
+                if !seen_axes.insert(axis) {
+                    return Err(format!("slice axis {} specified more than once", axis));
+                }
+                let start = starts[idx];
+                let end = ends[idx];
+                if start >= end {
+                    return Err(format!(
+                        "slice requires start < end for each axis, got {} >= {}",
+                        start, end
+                    ));
+                }
+                if end > shape[axis] {
+                    return Err(format!(
+                        "slice end {} out of bounds for axis {} with size {}",
+                        end, axis, shape[axis]
+                    ));
+                }
+                shape[axis] = end - start;
+            }
+            Ok(ShapeFact::Tensor(shape))
+        }
+        ShapeFact::Unknown => Ok(ShapeFact::Unknown),
+        ShapeFact::NonTensor => Err("slice expects tensor input".to_string()),
+    }
+}
+
+fn element_count(shape: &[usize]) -> Option<usize> {
+    let mut count = 1usize;
+    for dim in shape {
+        count = count.checked_mul(*dim)?;
+    }
+    Some(count)
 }
 
 fn infer_phi(

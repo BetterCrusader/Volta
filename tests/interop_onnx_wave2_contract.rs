@@ -3,9 +3,10 @@
 use volta::interop::{
     IrContractVersion, IrDataType, IrGraphContract, IrNodeContract, IrOpContract, IrTensorSpec,
 };
+use volta::ir::{ExecutionContext, RuntimeValue, execute_value_with_context};
 
 #[test]
-fn wave2_contract_reshape_is_parsed_but_not_lowered_yet() {
+fn wave2_contract_reshape_compiles_and_executes() {
     let contract = IrGraphContract {
         version: IrContractVersion::V1,
         name: "reshape_contract".to_string(),
@@ -38,11 +39,24 @@ fn wave2_contract_reshape_is_parsed_but_not_lowered_yet() {
         ],
     };
 
-    let err = contract
-        .compile()
-        .expect_err("reshape lowering is not implemented");
-    assert!(err.message.contains("Reshape"));
-    assert!(err.message.contains("not lowered"));
+    let program = contract.compile().expect("reshape lowering should compile");
+    let mut context = ExecutionContext::default();
+    context.inputs.insert(
+        "x".to_string(),
+        RuntimeValue::Tensor {
+            shape: vec![1, 4],
+            data: vec![1.0, 2.0, 3.0, 4.0],
+        },
+    );
+    let value = execute_value_with_context(&program.graph, program.output, &context)
+        .expect("reshape should execute");
+    assert_eq!(
+        value,
+        RuntimeValue::Tensor {
+            shape: vec![2, 2],
+            data: vec![1.0, 2.0, 3.0, 4.0],
+        }
+    );
 }
 
 #[test]
