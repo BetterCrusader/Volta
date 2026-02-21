@@ -5,7 +5,7 @@
 - Freeze feature scope for `v1.0.0`.
 - Confirm supported interop scope for Wave 1:
   - ONNX import subset: `Add`, `Sub`, `Mul`, `Div`, `Neg`, `MatMul`, `Transpose`, `Relu`, `Softmax`
-  - Wave 2 parser/contract guard paths: `Reshape`, `Concat`, `Gather`, `Slice` fail loudly until runtime lowering lands
+  - Wave 2 ONNX ops (`Reshape`, `Concat`, `Gather`, `Slice`) execute through runtime lowering with strict validation
   - static shape tensors only
   - deterministic runtime policy unchanged
 

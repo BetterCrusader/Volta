@@ -164,6 +164,18 @@ fn infer_type_for_op(
             let ty = type_of(*input, value_types);
             require_tensor_or_unknown(ty, node_id, "elementwise_chain")
         }
+        Op::Reshape { input, .. } | Op::Gather { input, .. } | Op::Slice { input, .. } => {
+            let ty = type_of(*input, value_types);
+            require_tensor_or_unknown(ty, node_id, "tensor unary transform")
+        }
+        Op::Concat { inputs, .. } => {
+            let mut current = ValueType::Unknown;
+            for value in inputs {
+                let next = type_of(*value, value_types);
+                current = unify_types(current, next, node_id, "concat")?;
+            }
+            require_tensor_or_unknown(current, node_id, "concat")
+        }
         Op::Transpose(value) | Op::Relu(value) | Op::Softmax(value) => {
             let ty = type_of(*value, value_types);
             require_tensor_or_unknown(ty, node_id, "tensor unary op")
@@ -199,6 +211,34 @@ fn validate_arity(op: &Op, node_id: usize) -> Result<(), VerifyError> {
             if ops.is_empty() {
                 return Err(err(format!(
                     "Invalid arity at node {node_id}: elementwise chain requires at least one op"
+                )));
+            }
+        }
+        Op::Concat { inputs, .. } => {
+            if inputs.len() < 2 {
+                return Err(err(format!(
+                    "Invalid arity at node {node_id}: concat requires at least two inputs"
+                )));
+            }
+        }
+        Op::Gather { indices, .. } => {
+            if indices.is_empty() {
+                return Err(err(format!(
+                    "Invalid arity at node {node_id}: gather requires at least one index"
+                )));
+            }
+        }
+        Op::Slice {
+            starts, ends, axes, ..
+        } => {
+            if starts.is_empty() || ends.is_empty() || axes.is_empty() {
+                return Err(err(format!(
+                    "Invalid arity at node {node_id}: slice starts/ends/axes must be non-empty"
+                )));
+            }
+            if starts.len() != ends.len() || starts.len() != axes.len() {
+                return Err(err(format!(
+                    "Invalid arity at node {node_id}: slice starts/ends/axes lengths must match"
                 )));
             }
         }

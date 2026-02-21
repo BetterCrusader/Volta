@@ -23,6 +23,25 @@ pub enum Op {
         input: ValueId,
         ops: Vec<ElementwiseUnaryOp>,
     },
+    Reshape {
+        input: ValueId,
+        shape: Vec<usize>,
+    },
+    Concat {
+        inputs: Vec<ValueId>,
+        axis: usize,
+    },
+    Gather {
+        input: ValueId,
+        indices: Vec<usize>,
+        axis: usize,
+    },
+    Slice {
+        input: ValueId,
+        starts: Vec<usize>,
+        ends: Vec<usize>,
+        axes: Vec<usize>,
+    },
     Transpose(ValueId),
     MatMul(ValueId, ValueId),
     Relu(ValueId),
@@ -49,6 +68,10 @@ impl Op {
             Op::Relu(value) | Op::Softmax(value) | Op::Output(value) => vec![*value],
             Op::Neg(value) | Op::Transpose(value) => vec![*value],
             Op::ElementwiseChain { input, .. } => vec![*input],
+            Op::Reshape { input, .. } | Op::Gather { input, .. } | Op::Slice { input, .. } => {
+                vec![*input]
+            }
+            Op::Concat { inputs, .. } => inputs.clone(),
             Op::Phi(values) => values.clone(),
             Op::ConstInt(_)
             | Op::ConstFloat(_)
@@ -80,6 +103,14 @@ impl Op {
             }
             Op::ElementwiseChain { input, .. } => {
                 *input = remap(*input);
+            }
+            Op::Reshape { input, .. } | Op::Gather { input, .. } | Op::Slice { input, .. } => {
+                *input = remap(*input);
+            }
+            Op::Concat { inputs, .. } => {
+                for input in inputs {
+                    *input = remap(*input);
+                }
             }
             Op::Phi(values) => {
                 for value in values {

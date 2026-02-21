@@ -73,6 +73,10 @@ fn simplify_op(op: &Op, known: &[Option<NumericConst>]) -> Option<Op> {
         | Op::ConstTensor { .. }
         | Op::Neg(_)
         | Op::ElementwiseChain { .. }
+        | Op::Reshape { .. }
+        | Op::Concat { .. }
+        | Op::Gather { .. }
+        | Op::Slice { .. }
         | Op::Transpose(_)
         | Op::MatMul(_, _)
         | Op::Relu(_)

@@ -182,6 +182,51 @@ fn evaluate_op(
             let out = apply_elementwise_chain(input_tensor, ops, node_id)?;
             Ok(runtime_from_tensor(out))
         }
+        Op::Reshape { input, shape } => {
+            let input_tensor = read_tensor(values, *input, node_id)?;
+            let out = input_tensor
+                .reshape(shape.clone())
+                .map_err(|err| error(err.message, Some(node_id)))?;
+            Ok(runtime_from_tensor(out))
+        }
+        Op::Concat { inputs, axis } => {
+            if inputs.len() < 2 {
+                return Err(error(
+                    "concat requires at least two inputs".to_string(),
+                    Some(node_id),
+                ));
+            }
+            let mut tensors = Vec::with_capacity(inputs.len());
+            for input in inputs {
+                tensors.push(read_tensor(values, *input, node_id)?);
+            }
+            let out =
+                Tensor::concat(&tensors, *axis).map_err(|err| error(err.message, Some(node_id)))?;
+            Ok(runtime_from_tensor(out))
+        }
+        Op::Gather {
+            input,
+            indices,
+            axis,
+        } => {
+            let input_tensor = read_tensor(values, *input, node_id)?;
+            let out = input_tensor
+                .gather(indices, *axis)
+                .map_err(|err| error(err.message, Some(node_id)))?;
+            Ok(runtime_from_tensor(out))
+        }
+        Op::Slice {
+            input,
+            starts,
+            ends,
+            axes,
+        } => {
+            let input_tensor = read_tensor(values, *input, node_id)?;
+            let out = input_tensor
+                .slice(starts, ends, axes)
+                .map_err(|err| error(err.message, Some(node_id)))?;
+            Ok(runtime_from_tensor(out))
+        }
         Op::Transpose(value) => {
             let value = read_tensor(values, *value, node_id)?;
             let transposed = value

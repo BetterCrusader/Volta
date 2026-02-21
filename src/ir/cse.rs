@@ -19,6 +19,25 @@ enum CseKey {
         input: ValueId,
         ops: Vec<crate::ir::ElementwiseUnaryOp>,
     },
+    Reshape {
+        input: ValueId,
+        shape: Vec<usize>,
+    },
+    Concat {
+        inputs: Vec<ValueId>,
+        axis: usize,
+    },
+    Gather {
+        input: ValueId,
+        indices: Vec<usize>,
+        axis: usize,
+    },
+    Slice {
+        input: ValueId,
+        starts: Vec<usize>,
+        ends: Vec<usize>,
+        axes: Vec<usize>,
+    },
     Transpose(ValueId),
     MatMul(ValueId, ValueId),
     Relu(ValueId),
@@ -94,6 +113,34 @@ fn key_of(op: &Op) -> Option<CseKey> {
         Op::ElementwiseChain { input, ops } => Some(CseKey::ElementwiseChain {
             input: *input,
             ops: ops.clone(),
+        }),
+        Op::Reshape { input, shape } => Some(CseKey::Reshape {
+            input: *input,
+            shape: shape.clone(),
+        }),
+        Op::Concat { inputs, axis } => Some(CseKey::Concat {
+            inputs: inputs.clone(),
+            axis: *axis,
+        }),
+        Op::Gather {
+            input,
+            indices,
+            axis,
+        } => Some(CseKey::Gather {
+            input: *input,
+            indices: indices.clone(),
+            axis: *axis,
+        }),
+        Op::Slice {
+            input,
+            starts,
+            ends,
+            axes,
+        } => Some(CseKey::Slice {
+            input: *input,
+            starts: starts.clone(),
+            ends: ends.clone(),
+            axes: axes.clone(),
         }),
         Op::Transpose(value) => Some(CseKey::Transpose(*value)),
         Op::MatMul(left, right) => Some(CseKey::MatMul(*left, *right)),
