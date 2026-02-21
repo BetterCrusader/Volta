@@ -71,7 +71,7 @@ fn main() -> ExitCode {
         CommandKind::Doctor => {
             let doctor = collect_doctor_report();
             print_doctor(&doctor, command.doctor_json);
-            if command.doctor_strict && doctor.gpu_env.parse_warning.is_some() {
+            if command.doctor_strict && !doctor.warnings.is_empty() {
                 return ExitCode::from(1);
             }
             ExitCode::SUCCESS
@@ -304,6 +304,7 @@ struct DoctorReport {
     cpu_threads: usize,
     onnx_import_enabled: bool,
     gpu_env: GpuEnvStatus,
+    warnings: Vec<String>,
 }
 
 fn collect_doctor_report() -> DoctorReport {
@@ -312,10 +313,15 @@ fn collect_doctor_report() -> DoctorReport {
         .unwrap_or(1);
     let gpu_env = parse_gpu_env_status();
     let onnx_import_enabled = cfg!(feature = "onnx-import");
+    let mut warnings = Vec::new();
+    if let Some(warning) = &gpu_env.parse_warning {
+        warnings.push(warning.clone());
+    }
     DoctorReport {
         cpu_threads,
         onnx_import_enabled,
         gpu_env,
+        warnings,
     }
 }
 
@@ -323,7 +329,7 @@ fn print_doctor(report: &DoctorReport, json: bool) {
     if json {
         let raw = report.gpu_env.raw.clone().unwrap_or_default();
         println!(
-            "{{\"tool\":\"volta-doctor\",\"version\":\"{}\",\"os\":\"{}\",\"arch\":\"{}\",\"cpu_threads\":{},\"gpu_available\":{},\"gpu_env_raw\":\"{}\",\"gpu_env_valid\":{},\"feature_onnx_import\":{}}}",
+            "{{\"tool\":\"volta-doctor\",\"version\":\"{}\",\"os\":\"{}\",\"arch\":\"{}\",\"cpu_threads\":{},\"gpu_available\":{},\"gpu_env_raw\":\"{}\",\"gpu_env_valid\":{},\"feature_onnx_import\":{},\"warning_count\":{},\"warnings\":[{}]}}",
             env!("CARGO_PKG_VERSION"),
             std::env::consts::OS,
             std::env::consts::ARCH,
@@ -331,7 +337,14 @@ fn print_doctor(report: &DoctorReport, json: bool) {
             report.gpu_env.available,
             json_escape(&raw),
             report.gpu_env.parse_warning.is_none(),
-            report.onnx_import_enabled
+            report.onnx_import_enabled,
+            report.warnings.len(),
+            report
+                .warnings
+                .iter()
+                .map(|w| format!("\"{}\"", json_escape(w)))
+                .collect::<Vec<_>>()
+                .join(",")
         );
         return;
     }
@@ -352,8 +365,13 @@ fn print_doctor(report: &DoctorReport, json: bool) {
     if let Some(raw) = &report.gpu_env.raw {
         println!("  gpu_env_raw: {raw}");
     }
-    if let Some(warning) = &report.gpu_env.parse_warning {
-        println!("  warning: {warning}");
+    if report.warnings.is_empty() {
+        println!("  warning_count: 0");
+    } else {
+        println!("  warning_count: {}", report.warnings.len());
+        for warning in &report.warnings {
+            println!("  warning: {warning}");
+        }
     }
     println!(
         "  feature_onnx_import: {}",
