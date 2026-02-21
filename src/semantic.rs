@@ -8,6 +8,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::{BinaryOp, Expr, Program, Property, Span, Stmt};
+use crate::diagnostics::best_suggestion;
 use crate::rules::{
     ACTIVATIONS, DATASET_KNOWN_PROPERTIES, DEVICES, MODEL_KNOWN_PROPERTIES,
     MODEL_REQUIRED_PROPERTIES, OPTIMIZERS, TRAIN_KNOWN_PROPERTIES, TRAIN_REQUIRED_PROPERTIES,
@@ -17,6 +18,7 @@ use crate::rules::{
 pub struct SemanticError {
     pub message: String,
     pub span: Span,
+    pub hint: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -193,7 +195,13 @@ impl SemanticAnalyzer {
             }
             Stmt::Assign { name, value, span } => {
                 let target_type = self.lookup_variable(name).ok_or_else(|| {
-                    Self::error(format!("Assignment to undefined variable: '{name}'"), *span)
+                    Self::error_with_hint(
+                        format!("Assignment to undefined variable: '{name}'"),
+                        *span,
+                        format!(
+                            "Declare '{name}' before assigning to it, e.g. `{name} 0` then `{name} = ...`."
+                        ),
+                    )
                 })?;
 
                 let value_type = self.infer_expr_type(value)?;
@@ -262,15 +270,21 @@ impl SemanticAnalyzer {
                 span,
             } => {
                 if !self.models.contains(model) {
-                    return Err(Self::error(
+                    return Err(Self::error_with_hint(
                         format!("Undefined model in train: '{model}'"),
                         *span,
+                        format!(
+                            "Declare model '{model}' before training, for example:\nmodel {model}\n    layers 2 1"
+                        ),
                     ));
                 }
                 if !self.datasets.contains(data) {
-                    return Err(Self::error(
+                    return Err(Self::error_with_hint(
                         format!("Undefined dataset in train: '{data}'"),
                         *span,
+                        format!(
+                            "Declare dataset '{data}' before training, for example:\ndataset {data}\n    batch 32"
+                        ),
                     ));
                 }
 
@@ -278,17 +292,19 @@ impl SemanticAnalyzer {
             }
             Stmt::Save { model, span, .. } => {
                 if !self.models.contains(model) {
-                    return Err(Self::error(
+                    return Err(Self::error_with_hint(
                         format!("Undefined model in save: '{model}'"),
                         *span,
+                        "Define the model before saving it in this script run.".to_string(),
                     ));
                 }
             }
             Stmt::Load { model, span, .. } => {
                 if !self.models.contains(model) {
-                    return Err(Self::error(
+                    return Err(Self::error_with_hint(
                         format!("Undefined model in load: '{model}'"),
                         *span,
+                        "Declare the model name first, then load weights into it.".to_string(),
                     ));
                 }
             }
@@ -394,8 +410,15 @@ impl SemanticAnalyzer {
         let known = known_property_names(context);
         for prop in props {
             if !known.contains(&prop.key.as_str()) {
+                let suggestion = best_suggestion(&prop.key, known);
                 self.warnings.push(SemanticWarning {
-                    message: format!("Unknown property '{}' in {context} block", prop.key),
+                    message: match suggestion {
+                        Some(candidate) => format!(
+                            "Unknown property '{}' in {context} block. Did you mean '{}'?",
+                            prop.key, candidate
+                        ),
+                        None => format!("Unknown property '{}' in {context} block", prop.key),
+                    },
                     span: prop.span,
                 });
             }
@@ -434,9 +457,13 @@ impl SemanticAnalyzer {
         let present: HashSet<&str> = props.iter().map(|p| p.key.as_str()).collect();
         for key in required {
             if !present.contains(key) {
-                return Err(Self::error(
+                return Err(Self::error_with_hint(
                     format!("Missing required property '{key}' in {context} block"),
                     props.first().map(|p| p.span).unwrap_or(Span::unknown()),
+                    format!(
+                        "Add `{key} ...` to the {context} block. Required set: {}",
+                        required.join(", ")
+                    ),
                 ));
             }
         }
@@ -651,12 +678,21 @@ impl SemanticAnalyzer {
         if allowed.contains(&symbol.as_str()) {
             Ok(())
         } else {
-            Err(Self::error(
+            let suggestion = best_suggestion(&symbol, allowed);
+            let hint = match suggestion {
+                Some(candidate) => format!(
+                    "Did you mean '{candidate}'? Allowed values: {}",
+                    allowed.join(", ")
+                ),
+                None => format!("Allowed values: {}", allowed.join(", ")),
+            };
+            Err(Self::error_with_hint(
                 format!(
                     "Invalid value '{}' for property '{}' in {context} block",
                     symbol, key
                 ),
                 value.span(),
+                hint,
             ))
         }
     }
@@ -852,7 +888,19 @@ impl SemanticAnalyzer {
     }
 
     fn error(message: String, span: Span) -> SemanticError {
-        SemanticError { message, span }
+        SemanticError {
+            message,
+            span,
+            hint: None,
+        }
+    }
+
+    fn error_with_hint(message: String, span: Span, hint: String) -> SemanticError {
+        SemanticError {
+            message,
+            span,
+            hint: Some(hint),
+        }
     }
 }
 
