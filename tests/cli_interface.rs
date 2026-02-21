@@ -1,0 +1,70 @@
+use std::env;
+use std::fs;
+use std::path::PathBuf;
+use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+fn unique_temp_file(name: &str, content: &str) -> PathBuf {
+    let mut path = env::temp_dir();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be valid")
+        .as_nanos();
+    path.push(format!("volta_cli_{name}_{nanos}.vt"));
+    fs::write(&path, content).expect("temp script should be writable");
+    path
+}
+
+fn run_volta(args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_volta"))
+        .args(args)
+        .output()
+        .expect("volta binary should execute")
+}
+
+#[test]
+fn check_command_passes_for_valid_script() {
+    let path = unique_temp_file("check_ok", "x 1\nprint x\n");
+
+    let output = run_volta(&["check", path.to_str().expect("utf8 path")]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success(), "check should pass: {stdout}");
+    assert!(stdout.contains("Check passed"));
+}
+
+#[test]
+fn run_command_executes_program() {
+    let path = unique_temp_file("run_ok", "x 1\nprint x\n");
+
+    let output = run_volta(&["run", path.to_str().expect("utf8 path")]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success(), "run should pass: {stdout}");
+    assert!(stdout.contains("1"));
+    assert!(stdout.contains("Run completed"));
+}
+
+#[test]
+fn info_command_prints_summary() {
+    let path = unique_temp_file("info_ok", "x 1\nloop 2\n    print x\n");
+
+    let output = run_volta(&["info", path.to_str().expect("utf8 path")]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success(), "info should pass: {stdout}");
+    assert!(stdout.contains("Top-level statements: 2"));
+    assert!(stdout.contains("loop: 1"));
+    assert!(stdout.contains("print: 1"));
+}
+
+#[test]
+fn invalid_syntax_returns_nonzero() {
+    let path = unique_temp_file("parse_fail", "x =\n");
+
+    let output = run_volta(&["check", path.to_str().expect("utf8 path")]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success(), "expected failure for parse error");
+    assert!(stderr.contains("Parse error"));
+}

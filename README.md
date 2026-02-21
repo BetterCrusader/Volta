@@ -21,6 +21,22 @@ This repository focuses on compiler discipline first:
 
 Volta is currently at **v0.1.0-core**: experimental, but with a stable core contract.
 
+## Quick CLI
+
+Volta now provides a file-based CLI entrypoint:
+
+```bash
+volta run path/to/script.vt
+volta check path/to/script.vt
+volta info path/to/script.vt
+volta version
+volta help
+```
+
+- `run`: parse + semantic + execute
+- `check`: parse + semantic validation (no execution)
+- `info`: structural summary (statement kinds and totals)
+
 ## Why Volta?
 
 Most ML stacks are eager-first and optimize compiler behavior later.
