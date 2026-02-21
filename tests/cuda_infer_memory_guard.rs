@@ -24,6 +24,9 @@ struct MemoryBaseline {
 
 #[test]
 fn cuda_memory_guard_enforces_baseline_and_contracts() {
+    if !cuda_runtime_available() {
+        return;
+    }
     let strict_runs = (0..5)
         .map(|_| profile_for_level("strict"))
         .collect::<Vec<_>>();
@@ -105,6 +108,9 @@ fn cuda_memory_guard_enforces_baseline_and_contracts() {
 
 #[test]
 fn cuda_memory_guard_rejects_placement_mapping_drift() {
+    if !cuda_runtime_available() {
+        return;
+    }
     let model = build_memory_fixture_model();
     let plan = build_execution_plan(&model.graph, &std::collections::HashSet::new())
         .expect("plan should build");
@@ -307,6 +313,15 @@ fn with_determinism<T>(level: &str, run: impl FnOnce() -> T) -> T {
     };
     let _restore = EnvVarRestore::set("VOLTA_DETERMINISM", level);
     run()
+}
+
+fn cuda_runtime_available() -> bool {
+    let result = std::panic::catch_unwind(|| volta::ir::cuda::device::CudaDevice::new(0));
+    match result {
+        Ok(Ok(_)) => true,
+        Ok(Err(_)) => false,
+        Err(_) => false,
+    }
 }
 
 fn env_lock() -> &'static Mutex<()> {

@@ -22,6 +22,9 @@ struct ParityBaseline {
 
 #[test]
 fn cuda_infer_parity_stays_within_strict_budget() {
+    if !cuda_runtime_available() {
+        return;
+    }
     with_determinism("strict", || {
         let baseline = load_parity_baseline(PARITY_BASELINE_PATH).unwrap_or_else(|message| {
             panic!("{message}");
@@ -97,6 +100,9 @@ fn cuda_infer_parity_stays_within_strict_budget() {
 
 #[test]
 fn cuda_infer_path_has_no_silent_cpu_fallback() {
+    if !cuda_runtime_available() {
+        return;
+    }
     with_determinism("strict", || {
         let mut graph = Graph::new();
         let block = graph.create_block();
@@ -328,6 +334,15 @@ fn with_determinism(level: &str, run: impl FnOnce()) {
     };
     let _restore = EnvVarRestore::set("VOLTA_DETERMINISM", level);
     run();
+}
+
+fn cuda_runtime_available() -> bool {
+    let result = std::panic::catch_unwind(|| volta::ir::cuda::device::CudaDevice::new(0));
+    match result {
+        Ok(Ok(_)) => true,
+        Ok(Err(_)) => false,
+        Err(_) => false,
+    }
 }
 
 fn env_lock() -> &'static Mutex<()> {
