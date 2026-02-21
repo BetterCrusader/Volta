@@ -4,25 +4,78 @@ use crate::interop::contract::{
 };
 use crate::interop::{InteropError, PluginRegistry};
 use prost::Message;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use tract_onnx::pb;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum OnnxOpStub {
-    Input { name: String, shape: Vec<usize> },
-    Parameter { name: String, shape: Vec<usize> },
-    ConstTensor { shape: Vec<usize>, data: Vec<f32> },
-    Add { lhs: String, rhs: String },
-    Sub { lhs: String, rhs: String },
-    Mul { lhs: String, rhs: String },
-    Div { lhs: String, rhs: String },
-    Neg { input: String },
-    MatMul { lhs: String, rhs: String },
-    Transpose { input: String },
-    Relu { input: String },
-    Softmax { input: String },
-    Output { value: String },
+    Input {
+        name: String,
+        shape: Vec<usize>,
+    },
+    Parameter {
+        name: String,
+        shape: Vec<usize>,
+    },
+    ConstTensor {
+        shape: Vec<usize>,
+        data: Vec<f32>,
+    },
+    Add {
+        lhs: String,
+        rhs: String,
+    },
+    Sub {
+        lhs: String,
+        rhs: String,
+    },
+    Mul {
+        lhs: String,
+        rhs: String,
+    },
+    Div {
+        lhs: String,
+        rhs: String,
+    },
+    Neg {
+        input: String,
+    },
+    MatMul {
+        lhs: String,
+        rhs: String,
+    },
+    Transpose {
+        input: String,
+    },
+    Relu {
+        input: String,
+    },
+    Softmax {
+        input: String,
+    },
+    Reshape {
+        input: String,
+        shape: Vec<usize>,
+    },
+    Concat {
+        inputs: Vec<String>,
+        axis: usize,
+    },
+    Gather {
+        input: String,
+        indices: Vec<usize>,
+        axis: usize,
+    },
+    Slice {
+        input: String,
+        starts: Vec<usize>,
+        ends: Vec<usize>,
+        axes: Vec<usize>,
+    },
+    Output {
+        value: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -108,6 +161,34 @@ impl OnnxImporter {
                 OnnxOpStub::Softmax { input } => IrOpContract::Softmax {
                     input: input.clone(),
                 },
+                OnnxOpStub::Reshape { input, shape } => IrOpContract::Reshape {
+                    input: input.clone(),
+                    shape: shape.clone(),
+                },
+                OnnxOpStub::Concat { inputs, axis } => IrOpContract::Concat {
+                    inputs: inputs.clone(),
+                    axis: *axis,
+                },
+                OnnxOpStub::Gather {
+                    input,
+                    indices,
+                    axis,
+                } => IrOpContract::Gather {
+                    input: input.clone(),
+                    indices: indices.clone(),
+                    axis: *axis,
+                },
+                OnnxOpStub::Slice {
+                    input,
+                    starts,
+                    ends,
+                    axes,
+                } => IrOpContract::Slice {
+                    input: input.clone(),
+                    starts: starts.clone(),
+                    ends: ends.clone(),
+                    axes: axes.clone(),
+                },
                 OnnxOpStub::Output { value } => IrOpContract::Output {
                     value: value.clone(),
                 },
@@ -158,6 +239,11 @@ impl OnnxImporter {
             .iter()
             .map(|tensor| tensor.name.as_str())
             .collect();
+        let initializer_lookup = graph
+            .initializer
+            .iter()
+            .map(|tensor| (tensor.name.as_str(), tensor))
+            .collect::<HashMap<_, _>>();
 
         for value in &graph.input {
             if initializer_names.contains(value.name.as_str()) {
@@ -191,7 +277,7 @@ impl OnnxImporter {
                 ))
             })?;
 
-            let op = map_proto_op(proto_node)?;
+            let op = map_proto_op(proto_node, &initializer_lookup)?;
             let node = IrNodeContract {
                 id: id.to_string(),
                 op,
@@ -264,7 +350,53 @@ fn require_input(node: &pb::NodeProto, index: usize) -> Result<&str, InteropErro
         })
 }
 
-fn map_proto_op(node: &pb::NodeProto) -> Result<IrOpContract, InteropError> {
+fn require_initializer_input<'a>(
+    node: &pb::NodeProto,
+    index: usize,
+    initializers: &HashMap<&'a str, &'a pb::TensorProto>,
+) -> Result<&'a pb::TensorProto, InteropError> {
+    let name = require_input(node, index)?;
+    initializers.get(name).copied().ok_or_else(|| {
+        InteropError::new(format!(
+            "node '{}' input '{}' must be initializer for Wave 2 static import",
+            node.op_type, name
+        ))
+    })
+}
+
+fn attribute_i64(node: &pb::NodeProto, key: &str) -> Option<i64> {
+    node.attribute
+        .iter()
+        .find(|attr| attr.name == key)
+        .map(|attr| attr.i)
+}
+
+fn parse_usize_list(tensor: &pb::TensorProto, label: &str) -> Result<Vec<usize>, InteropError> {
+    let dims = parse_tensor_data_as_i64(tensor)?;
+    if dims.is_empty() {
+        return Err(InteropError::new(format!(
+            "initializer '{}' for {} must be non-empty",
+            tensor.name, label
+        )));
+    }
+    dims.into_iter()
+        .map(|dim| {
+            if dim < 0 {
+                Err(InteropError::new(format!(
+                    "initializer '{}' for {} contains negative dimension/index {}",
+                    tensor.name, label, dim
+                )))
+            } else {
+                Ok(dim as usize)
+            }
+        })
+        .collect()
+}
+
+fn map_proto_op(
+    node: &pb::NodeProto,
+    initializers: &HashMap<&str, &pb::TensorProto>,
+) -> Result<IrOpContract, InteropError> {
     let op = node.op_type.as_str();
     Ok(match op {
         "Add" => IrOpContract::Add {
@@ -299,9 +431,102 @@ fn map_proto_op(node: &pb::NodeProto) -> Result<IrOpContract, InteropError> {
         "Softmax" => IrOpContract::Softmax {
             input: require_input(node, 0)?.to_string(),
         },
+        "Reshape" => {
+            let input = require_input(node, 0)?.to_string();
+            let shape_tensor = require_initializer_input(node, 1, initializers)?;
+            let shape = parse_usize_list(shape_tensor, "reshape target shape")?;
+            IrOpContract::Reshape { input, shape }
+        }
+        "Concat" => {
+            let inputs = node
+                .input
+                .iter()
+                .filter(|name| !name.is_empty())
+                .cloned()
+                .collect::<Vec<_>>();
+            if inputs.len() < 2 {
+                return Err(InteropError::new(format!(
+                    "node '{}' concat requires at least 2 inputs",
+                    node.name
+                )));
+            }
+            let axis = attribute_i64(node, "axis").unwrap_or(0);
+            if axis < 0 {
+                return Err(InteropError::new(format!(
+                    "node '{}' concat axis must be non-negative for static import",
+                    node.name
+                )));
+            }
+            IrOpContract::Concat {
+                inputs,
+                axis: axis as usize,
+            }
+        }
+        "Gather" => {
+            let input = require_input(node, 0)?.to_string();
+            let indices_tensor = require_initializer_input(node, 1, initializers)?;
+            let indices = parse_usize_list(indices_tensor, "gather indices")?;
+            let axis = attribute_i64(node, "axis").unwrap_or(0);
+            if axis < 0 {
+                return Err(InteropError::new(format!(
+                    "node '{}' gather axis must be non-negative for static import",
+                    node.name
+                )));
+            }
+            IrOpContract::Gather {
+                input,
+                indices,
+                axis: axis as usize,
+            }
+        }
+        "Slice" => {
+            let input = require_input(node, 0)?.to_string();
+            let starts = parse_usize_list(
+                require_initializer_input(node, 1, initializers)?,
+                "slice starts",
+            )?;
+            let ends = parse_usize_list(
+                require_initializer_input(node, 2, initializers)?,
+                "slice ends",
+            )?;
+            let axes = if let Some(axis_name) = node.input.get(3).filter(|name| !name.is_empty()) {
+                let axis_tensor = initializers.get(axis_name.as_str()).copied().ok_or_else(|| {
+                    InteropError::new(format!(
+                        "node '{}' slice axes input '{}' must be initializer for Wave 2 static import",
+                        node.op_type, axis_name
+                    ))
+                })?;
+                parse_usize_list(axis_tensor, "slice axes")?
+            } else {
+                (0..starts.len()).collect()
+            };
+
+            if let Some(step_name) = node.input.get(4).filter(|name| !name.is_empty()) {
+                let step_tensor = initializers.get(step_name.as_str()).copied().ok_or_else(|| {
+                    InteropError::new(format!(
+                        "node '{}' slice steps input '{}' must be initializer for Wave 2 static import",
+                        node.op_type, step_name
+                    ))
+                })?;
+                let steps = parse_usize_list(step_tensor, "slice steps")?;
+                if steps.iter().any(|step| *step != 1) {
+                    return Err(InteropError::new(format!(
+                        "node '{}' slice only supports step=1 in Wave 2 static import",
+                        node.name
+                    )));
+                }
+            }
+
+            IrOpContract::Slice {
+                input,
+                starts,
+                ends,
+                axes,
+            }
+        }
         unsupported => {
             return Err(InteropError::new(format!(
-                "unsupported ONNX op '{unsupported}' in Wave 1 importer"
+                "unsupported ONNX op '{unsupported}' in Wave 2 importer"
             )));
         }
     })
@@ -398,6 +623,129 @@ fn map_onnx_dtype(dtype: i32) -> Result<IrDataType, InteropError> {
         }
         unsupported => Err(InteropError::new(format!(
             "unsupported ONNX dtype {:?} in Wave 1 importer",
+            unsupported
+        ))),
+    }
+}
+
+fn parse_tensor_data_as_i64(tensor: &pb::TensorProto) -> Result<Vec<i64>, InteropError> {
+    let dtype = pb::tensor_proto::DataType::from_i32(tensor.data_type)
+        .ok_or_else(|| InteropError::new(format!("unknown ONNX dtype {}", tensor.data_type)))?;
+
+    if !tensor.raw_data.is_empty() {
+        return parse_raw_tensor_data_as_i64(tensor, dtype);
+    }
+
+    match dtype {
+        pb::tensor_proto::DataType::Int64 => Ok(tensor.int64_data.clone()),
+        pb::tensor_proto::DataType::Int32 => {
+            Ok(tensor.int32_data.iter().map(|v| i64::from(*v)).collect())
+        }
+        pb::tensor_proto::DataType::Float => tensor
+            .float_data
+            .iter()
+            .map(|value| {
+                if value.fract() == 0.0 {
+                    Ok(*value as i64)
+                } else {
+                    Err(InteropError::new(format!(
+                        "initializer '{}' contains non-integer float {} where integer is required",
+                        tensor.name, value
+                    )))
+                }
+            })
+            .collect(),
+        pb::tensor_proto::DataType::Double => tensor
+            .double_data
+            .iter()
+            .map(|value| {
+                if value.fract() == 0.0 {
+                    Ok(*value as i64)
+                } else {
+                    Err(InteropError::new(format!(
+                        "initializer '{}' contains non-integer double {} where integer is required",
+                        tensor.name, value
+                    )))
+                }
+            })
+            .collect(),
+        unsupported => Err(InteropError::new(format!(
+            "unsupported ONNX initializer dtype {:?} for integer parsing",
+            unsupported
+        ))),
+    }
+}
+
+fn parse_raw_tensor_data_as_i64(
+    tensor: &pb::TensorProto,
+    dtype: pb::tensor_proto::DataType,
+) -> Result<Vec<i64>, InteropError> {
+    let bytes = tensor.raw_data.as_slice();
+    let parse_err = |msg: &str| {
+        InteropError::new(format!(
+            "initializer '{}' has invalid raw_data: {}",
+            tensor.name, msg
+        ))
+    };
+
+    match dtype {
+        pb::tensor_proto::DataType::Int64 => {
+            if !bytes.len().is_multiple_of(8) {
+                return Err(parse_err("int64 raw bytes are not multiple of 8"));
+            }
+            Ok(bytes
+                .chunks_exact(8)
+                .map(|chunk| {
+                    i64::from_le_bytes([
+                        chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6],
+                        chunk[7],
+                    ])
+                })
+                .collect())
+        }
+        pb::tensor_proto::DataType::Int32 => {
+            if !bytes.len().is_multiple_of(4) {
+                return Err(parse_err("int32 raw bytes are not multiple of 4"));
+            }
+            Ok(bytes
+                .chunks_exact(4)
+                .map(|chunk| {
+                    i64::from(i32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+                })
+                .collect())
+        }
+        pb::tensor_proto::DataType::Float => {
+            if !bytes.len().is_multiple_of(4) {
+                return Err(parse_err("float raw bytes are not multiple of 4"));
+            }
+            let mut out = Vec::with_capacity(bytes.len() / 4);
+            for chunk in bytes.chunks_exact(4) {
+                let value = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                if value.fract() != 0.0 {
+                    return Err(parse_err("float raw_data contains non-integer value"));
+                }
+                out.push(value as i64);
+            }
+            Ok(out)
+        }
+        pb::tensor_proto::DataType::Double => {
+            if !bytes.len().is_multiple_of(8) {
+                return Err(parse_err("double raw bytes are not multiple of 8"));
+            }
+            let mut out = Vec::with_capacity(bytes.len() / 8);
+            for chunk in bytes.chunks_exact(8) {
+                let value = f64::from_le_bytes([
+                    chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7],
+                ]);
+                if value.fract() != 0.0 {
+                    return Err(parse_err("double raw_data contains non-integer value"));
+                }
+                out.push(value as i64);
+            }
+            Ok(out)
+        }
+        unsupported => Err(InteropError::new(format!(
+            "unsupported ONNX raw_data dtype {:?} for integer parsing",
             unsupported
         ))),
     }
@@ -508,6 +856,10 @@ fn op_kind(op: &OnnxOpStub) -> &'static str {
         OnnxOpStub::Transpose { .. } => "Transpose",
         OnnxOpStub::Relu { .. } => "Relu",
         OnnxOpStub::Softmax { .. } => "Softmax",
+        OnnxOpStub::Reshape { .. } => "Reshape",
+        OnnxOpStub::Concat { .. } => "Concat",
+        OnnxOpStub::Gather { .. } => "Gather",
+        OnnxOpStub::Slice { .. } => "Slice",
         OnnxOpStub::Output { .. } => "Output",
     }
 }
@@ -526,6 +878,10 @@ fn op_kind_from_contract(op: &IrOpContract) -> &'static str {
         IrOpContract::Transpose { .. } => "Transpose",
         IrOpContract::Relu { .. } => "Relu",
         IrOpContract::Softmax { .. } => "Softmax",
+        IrOpContract::Reshape { .. } => "Reshape",
+        IrOpContract::Concat { .. } => "Concat",
+        IrOpContract::Gather { .. } => "Gather",
+        IrOpContract::Slice { .. } => "Slice",
         IrOpContract::Output { .. } => "Output",
     }
 }

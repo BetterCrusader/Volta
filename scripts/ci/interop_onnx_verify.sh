@@ -9,3 +9,6 @@ cargo test --features onnx-import --test interop_onnx_linear
 cargo test --features onnx-import --test interop_onnx_mlp
 cargo test --features onnx-import --test interop_onnx_parser
 cargo test --features onnx-import --test interop_roundtrip_parity
+cargo test --features onnx-import --test interop_onnx_wave2_contract
+cargo test --features onnx-import --test interop_onnx_wave2_parser
+cargo test --features onnx-import --test interop_onnx_wave2_e2e

@@ -287,6 +287,7 @@ This interop verify script enforces:
 - stable IR contract validation
 - real ONNX protobuf import for supported Wave 1 op-set
 - imported/native runtime parity for acceptance fixtures
+- Wave 2 parser/contract guards (`Reshape`, `Concat`, `Gather`, `Slice`) with explicit "not lowered yet" failures
 
 ### Phase 3 XL + performance checks
 
@@ -313,6 +314,12 @@ V1 release checklist and cut script:
 
 - `docs/release/v1-release-checklist.md`
 - `scripts/release/cut_v1.sh`
+- `scripts/release/cut_v1.ps1` (Windows-native flow, no WSL required)
+
+Contributor onboarding:
+
+- `CONTRIBUTING.md`
+- `docs/community/first-pr-guide.md`
 
 Run demo binary:
 
