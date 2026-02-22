@@ -79,7 +79,8 @@ fn infer_shape_for_op(
             ShapeFact::NonTensor => Err("transpose expects tensor input".to_string()),
         },
         Op::MatMul(left, right) => infer_matmul(*left, *right, shapes),
-        Op::Relu(value) | Op::Softmax(value) => infer_tensor_unary(*value, shapes),
+        Op::Relu(value) | Op::Softmax(value) | Op::Log(value) | Op::Exp(value) => infer_tensor_unary(*value, shapes),
+        Op::ReduceSum { input, axis } => infer_reduce_sum(*input, *axis, shapes),
         Op::ReluBackward(input, grad) => infer_same_tensor(*input, *grad, shapes, "relu_backward"),
         Op::Conv2D(input, weight) => infer_conv2d(*input, *weight, shapes),
         Op::Phi(values) => infer_phi(values, shapes),
@@ -379,6 +380,37 @@ fn infer_slice(
         }
         ShapeFact::Unknown => Ok(ShapeFact::Unknown),
         ShapeFact::NonTensor => Err("slice expects tensor input".to_string()),
+    }
+}
+
+fn infer_reduce_sum(
+    input: ValueId,
+    axis: Option<usize>,
+    shapes: &HashMap<ValueId, ShapeFact>,
+) -> Result<ShapeFact, String> {
+    match shape_of(input, shapes) {
+        ShapeFact::Tensor(shape) => {
+            match axis {
+                None => Ok(ShapeFact::Tensor(vec![1])),
+                Some(a) => {
+                    if a >= shape.len() {
+                        return Err(format!(
+                            "reduce_sum axis {} out of bounds for rank {} tensor",
+                            a,
+                            shape.len()
+                        ));
+                    }
+                    let mut out = shape;
+                    out.remove(a);
+                    if out.is_empty() {
+                        out.push(1);
+                    }
+                    Ok(ShapeFact::Tensor(out))
+                }
+            }
+        }
+        ShapeFact::Unknown => Ok(ShapeFact::Unknown),
+        ShapeFact::NonTensor => Err("reduce_sum expects tensor input".to_string()),
     }
 }
 

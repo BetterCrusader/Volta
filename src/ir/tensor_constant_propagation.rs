@@ -121,6 +121,9 @@ fn fold_tensor_op(op: &Op, known_tensors: &[Option<Tensor>]) -> Option<Op> {
         | Op::ConstFloat(_)
         | Op::ConstTensor { .. }
         | Op::Softmax(_)
+        | Op::Log(_)
+        | Op::Exp(_)
+        | Op::ReduceSum { .. }
         | Op::Conv2D(_, _)
         | Op::Parameter(_)
         | Op::Input(_)

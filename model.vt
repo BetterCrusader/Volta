@@ -1,0 +1,19 @@
+lr 0.001
+epochs 3
+
+model brain
+    layers 784 256 128 10
+    activation relu
+    optimizer adam
+
+dataset mnist
+    batch 32
+    shuffle true
+
+train brain on mnist
+    epochs epochs
+    device cpu
+    optimizer adam
+    lr lr
+
+print "training complete"

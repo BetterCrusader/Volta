@@ -1,6 +1,6 @@
 [package]
 name = "volta"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 
 [features]
@@ -14,3 +14,29 @@ prost = { version = "0.11.9", optional = true }
 
 [dev-dependencies]
 proptest = "1"
+
+# ── Build profiles ──────────────────────────────────────────────────────────────
+
+[profile.release]
+# Thin LTO: cross-crate inlining without the full-program link time cost.
+lto           = "thin"
+# Single codegen unit lets LLVM see the whole crate for better optimization.
+codegen-units = 1
+# No unwinding machinery in release builds — saves ~5-10% binary size and
+# lets the compiler elide cleanup paths.
+panic         = "abort"
+# Strip debug symbols from the final binary for smaller distributable.
+strip         = "symbols"
+opt-level     = 3
+
+[profile.bench]
+# Inherit release settings so benchmarks run under real production conditions.
+inherits  = "release"
+# Keep debug info so profilers (perf, samply, cargo-flamegraph) can symbolize.
+debug     = true
+strip     = "none"
+
+[profile.dev]
+# Overflow checks are on by default in dev — keep them.
+# Slightly higher opt level speeds up tests without losing debug info.
+opt-level = 1

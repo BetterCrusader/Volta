@@ -33,7 +33,7 @@ fn cuda_backward_lowering_includes_backward_kernels_without_mutating_forward_ir(
 }
 
 #[test]
-fn cuda_backward_lowering_maps_gradient_accumulation_to_reduction_kernel() {
+fn cuda_backward_lowering_maps_gradient_accumulation_to_add_kernel() {
     let (forward, loss, parameter) = build_accumulation_training_graph();
 
     let reverse = build_reverse_graph(&forward, loss, &[parameter]).expect("autograd should pass");
@@ -49,8 +49,8 @@ fn cuda_backward_lowering_maps_gradient_accumulation_to_reduction_kernel() {
         .collect::<Vec<_>>();
 
     assert!(
-        kernels.contains(&CudaKernel::Reduction),
-        "expected reduction kernel dispatch for gradient accumulation"
+        kernels.contains(&CudaKernel::Add),
+        "expected add kernel dispatch for gradient accumulation"
     );
 }
 

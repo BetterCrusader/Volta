@@ -43,6 +43,12 @@ enum CseKey {
     Relu(ValueId),
     ReluBackward(ValueId, ValueId),
     Softmax(ValueId),
+    Log(ValueId),
+    Exp(ValueId),
+    ReduceSum {
+        input: ValueId,
+        axis: Option<usize>,
+    },
     Conv2D(ValueId, ValueId),
 }
 
@@ -147,6 +153,12 @@ fn key_of(op: &Op) -> Option<CseKey> {
         Op::Relu(value) => Some(CseKey::Relu(*value)),
         Op::ReluBackward(input, grad) => Some(CseKey::ReluBackward(*input, *grad)),
         Op::Softmax(value) => Some(CseKey::Softmax(*value)),
+        Op::Log(value) => Some(CseKey::Log(*value)),
+        Op::Exp(value) => Some(CseKey::Exp(*value)),
+        Op::ReduceSum { input, axis } => Some(CseKey::ReduceSum {
+            input: *input,
+            axis: *axis,
+        }),
         Op::Conv2D(input, weight) => Some(CseKey::Conv2D(*input, *weight)),
         Op::Parameter(_) | Op::Input(_) | Op::Output(_) | Op::Phi(_) | Op::Removed => None,
     }

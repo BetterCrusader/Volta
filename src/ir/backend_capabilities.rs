@@ -2,9 +2,6 @@
 pub enum BackendKind {
     Cpu,
     Cuda,
-    Llvm,
-    Metal,
-    Rocm,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

@@ -62,6 +62,12 @@ fn format_op(op: &Op) -> String {
             format!("relu_backward {} {}", fmt_value(*input), fmt_value(*grad))
         }
         Op::Softmax(value) => format!("softmax {}", fmt_value(*value)),
+        Op::Log(value) => format!("log {}", fmt_value(*value)),
+        Op::Exp(value) => format!("exp {}", fmt_value(*value)),
+        Op::ReduceSum { input, axis } => match axis {
+            Some(a) => format!("reduce_sum axis={} {}", a, fmt_value(*input)),
+            None => format!("reduce_sum {}", fmt_value(*input)),
+        },
         Op::Conv2D(input, weight) => {
             format!("conv2d {} {}", fmt_value(*input), fmt_value(*weight))
         }

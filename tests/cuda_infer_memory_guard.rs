@@ -1,7 +1,9 @@
+#[path = "common/cuda.rs"]
+mod cuda_helpers;
+
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
 
 use volta::ir::cuda::{CudaMemoryClass, lower_plan, profile_memory};
 use volta::ir::{Backend, CpuBackend, CudaBackend, Op, Tensor, build_execution_plan};
@@ -24,7 +26,8 @@ struct MemoryBaseline {
 
 #[test]
 fn cuda_memory_guard_enforces_baseline_and_contracts() {
-    if !cuda_runtime_available() {
+    if !cuda_helpers::cuda_runtime_available() {
+        eprintln!("[SKIP] cuda_memory_guard_enforces_baseline_and_contracts — no CUDA device available");
         return;
     }
     let strict_runs = (0..5)
@@ -108,7 +111,8 @@ fn cuda_memory_guard_enforces_baseline_and_contracts() {
 
 #[test]
 fn cuda_memory_guard_rejects_placement_mapping_drift() {
-    if !cuda_runtime_available() {
+    if !cuda_helpers::cuda_runtime_available() {
+        eprintln!("[SKIP] cuda_memory_guard_rejects_placement_mapping_drift — no CUDA device available");
         return;
     }
     let model = build_memory_fixture_model();
@@ -307,52 +311,5 @@ fn get_bool(map: &HashMap<String, String>, key: &str) -> Result<bool, String> {
 }
 
 fn with_determinism<T>(level: &str, run: impl FnOnce() -> T) -> T {
-    let _guard = match env_lock().lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    let _restore = EnvVarRestore::set("VOLTA_DETERMINISM", level);
-    run()
-}
-
-fn cuda_runtime_available() -> bool {
-    let result = std::panic::catch_unwind(|| volta::ir::cuda::device::CudaDevice::new(0));
-    match result {
-        Ok(Ok(_)) => true,
-        Ok(Err(_)) => false,
-        Err(_) => false,
-    }
-}
-
-fn env_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
-
-struct EnvVarRestore {
-    key: &'static str,
-    previous: Option<String>,
-}
-
-impl EnvVarRestore {
-    fn set(key: &'static str, value: &str) -> Self {
-        let previous = std::env::var(key).ok();
-        unsafe {
-            std::env::set_var(key, value);
-        }
-        Self { key, previous }
-    }
-}
-
-impl Drop for EnvVarRestore {
-    fn drop(&mut self) {
-        match self.previous.take() {
-            Some(value) => unsafe {
-                std::env::set_var(self.key, value);
-            },
-            None => unsafe {
-                std::env::remove_var(self.key);
-            },
-        }
-    }
+    cuda_helpers::with_determinism_ret(level, run)
 }

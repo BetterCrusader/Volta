@@ -181,6 +181,24 @@ pub fn build_reverse_graph(
                     })?;
                 accumulate_grad(&mut backward, block, &mut grad_map, a_m, grad)?;
             }
+            Op::Log(a) => {
+                let a_m = mapped(&forward_to_backward, *a)?;
+                let (_, grad) = backward
+                    .add_op(block, Op::Div(upstream, a_m))
+                    .map_err(|err| AutogradError {
+                        message: format!("Failed to build log grad: {}", err.message),
+                    })?;
+                accumulate_grad(&mut backward, block, &mut grad_map, a_m, grad)?;
+            }
+            Op::Exp(a) => {
+                let a_m = mapped(&forward_to_backward, *a)?;
+                let (_, grad) = backward
+                    .add_op(block, Op::Mul(upstream, mapped_output))
+                    .map_err(|err| AutogradError {
+                        message: format!("Failed to build exp grad: {}", err.message),
+                    })?;
+                accumulate_grad(&mut backward, block, &mut grad_map, a_m, grad)?;
+            }
             Op::Reshape { input, .. } => {
                 let input_m = mapped(&forward_to_backward, *input)?;
                 let input_shape = tensor_shape_for(&shape_facts, *input)?;
@@ -389,6 +407,7 @@ pub fn build_reverse_graph(
             | Op::Transpose(_)
             | Op::ReluBackward(_, _)
             | Op::Softmax(_)
+            | Op::ReduceSum { .. }
             | Op::Conv2D(_, _)
             | Op::Parameter(_)
             | Op::Input(_)

@@ -82,6 +82,9 @@ fn simplify_op(op: &Op, known: &[Option<NumericConst>]) -> Option<Op> {
         | Op::Relu(_)
         | Op::ReluBackward(_, _)
         | Op::Softmax(_)
+        | Op::Log(_)
+        | Op::Exp(_)
+        | Op::ReduceSum { .. }
         | Op::Conv2D(_, _)
         | Op::Parameter(_)
         | Op::Input(_)

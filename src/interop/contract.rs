@@ -68,6 +68,16 @@ pub enum IrOpContract {
     Softmax {
         input: String,
     },
+    Log {
+        input: String,
+    },
+    Exp {
+        input: String,
+    },
+    ReduceSum {
+        input: String,
+        axis: Option<usize>,
+    },
     Reshape {
         input: String,
         shape: Vec<usize>,
@@ -363,6 +373,33 @@ impl IrGraphContract {
                         .map_err(|err| InteropError::new(err.message))?;
                     value
                 }
+                IrOpContract::Log { input } => {
+                    let input = resolve_value(&ids, input)?;
+                    let (_, value) = graph
+                        .add_op(block, Op::Log(input))
+                        .map_err(|err| InteropError::new(err.message))?;
+                    value
+                }
+                IrOpContract::Exp { input } => {
+                    let input = resolve_value(&ids, input)?;
+                    let (_, value) = graph
+                        .add_op(block, Op::Exp(input))
+                        .map_err(|err| InteropError::new(err.message))?;
+                    value
+                }
+                IrOpContract::ReduceSum { input, axis } => {
+                    let input = resolve_value(&ids, input)?;
+                    let (_, value) = graph
+                        .add_op(
+                            block,
+                            Op::ReduceSum {
+                                input,
+                                axis: *axis,
+                            },
+                        )
+                        .map_err(|err| InteropError::new(err.message))?;
+                    value
+                }
                 IrOpContract::Reshape { input, shape } => {
                     let input = resolve_value(&ids, input)?;
                     let (_, value) = graph
@@ -485,6 +522,9 @@ fn op_inputs(op: &IrOpContract) -> Vec<&str> {
         | IrOpContract::Transpose { input }
         | IrOpContract::Relu { input }
         | IrOpContract::Softmax { input }
+        | IrOpContract::Log { input }
+        | IrOpContract::Exp { input }
+        | IrOpContract::ReduceSum { input, .. }
         | IrOpContract::Reshape { input, .. }
         | IrOpContract::Gather { input, .. }
         | IrOpContract::Slice { input, .. }

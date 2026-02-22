@@ -261,6 +261,27 @@ fn evaluate_op(
             let tensor = read_tensor(values, *value, node_id)?;
             softmax(tensor, node_id)
         }
+        Op::Log(value) => {
+            let tensor = read_tensor(values, *value, node_id)?;
+            let out = tensor
+                .log_elementwise()
+                .map_err(|err| error(err.message, Some(node_id)))?;
+            Ok(runtime_from_tensor(out))
+        }
+        Op::Exp(value) => {
+            let tensor = read_tensor(values, *value, node_id)?;
+            let out = tensor
+                .exp_elementwise()
+                .map_err(|err| error(err.message, Some(node_id)))?;
+            Ok(runtime_from_tensor(out))
+        }
+        Op::ReduceSum { input, axis } => {
+            let tensor = read_tensor(values, *input, node_id)?;
+            let out = tensor
+                .reduce_sum(*axis)
+                .map_err(|err| error(err.message, Some(node_id)))?;
+            Ok(runtime_from_tensor(out))
+        }
         Op::Conv2D(input, weight) => {
             let input_tensor = read_tensor(values, *input, node_id)?;
             let weight_tensor = read_tensor(values, *weight, node_id)?;
@@ -326,10 +347,14 @@ fn softmax(tensor: Tensor, node: NodeId) -> Result<RuntimeValue, InterpreterErro
         ));
     }
 
-    let normalized = exps.into_iter().map(|v| v / sum).collect::<Vec<_>>();
+    // Normalize in-place — reuse the `exps` Vec instead of allocating a second
+    // one for the divided values.
+    for v in &mut exps {
+        *v /= sum;
+    }
     Ok(RuntimeValue::Tensor {
         shape: tensor.shape,
-        data: normalized,
+        data: exps,
     })
 }
 
@@ -605,12 +630,13 @@ fn neg_value(value: RuntimeValue, node: NodeId) -> Result<RuntimeValue, Interpre
             .map(RuntimeValue::Int)
             .ok_or_else(|| error("Integer overflow in neg".to_string(), Some(node))),
         RuntimeValue::Float(v) => finite_float(-v, "Float overflow in neg", node),
-        RuntimeValue::Tensor { shape, data } => {
-            let mut out = Vec::with_capacity(data.len());
-            for value in data {
-                out.push(-value);
+        RuntimeValue::Tensor { shape, mut data } => {
+            // Negate in-place: avoids a full heap allocation for just flipping
+            // the sign bit on every element.
+            for v in &mut data {
+                *v = -*v;
             }
-            Ok(RuntimeValue::Tensor { shape, data: out })
+            Ok(RuntimeValue::Tensor { shape, data })
         }
     }
 }

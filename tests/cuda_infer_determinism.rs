@@ -1,5 +1,7 @@
+#[path = "common/cuda.rs"]
+mod cuda_helpers;
+
 use std::collections::HashSet;
-use std::sync::{Mutex, OnceLock};
 
 use volta::ir::{
     CudaBackend, ExecutionContext, Graph, Op, RuntimeValue, build_execution_plan,
@@ -8,10 +10,11 @@ use volta::ir::{
 
 #[test]
 fn cuda_inference_is_repeatable_in_strict_mode() {
-    if !cuda_runtime_available() {
+    if !cuda_helpers::cuda_runtime_available() {
+        eprintln!("[SKIP] cuda_inference_is_repeatable_in_strict_mode — no CUDA device available");
         return;
     }
-    with_determinism("strict", || {
+    cuda_helpers::with_determinism("strict", || {
         let graph = build_repeatable_graph();
         let plan = build_execution_plan(&graph, &HashSet::new()).expect("plan should build");
         let context = repeatable_context();
@@ -40,10 +43,11 @@ fn cuda_inference_is_repeatable_in_strict_mode() {
 
 #[test]
 fn strict_mode_fails_fast_for_nondeterministic_softmax_grouping() {
-    if !cuda_runtime_available() {
+    if !cuda_helpers::cuda_runtime_available() {
+        eprintln!("[SKIP] strict_mode_fails_fast_for_nondeterministic_softmax_grouping — no CUDA device available");
         return;
     }
-    with_determinism("strict", || {
+    cuda_helpers::with_determinism("strict", || {
         let graph = build_multi_softmax_graph();
         let plan = build_execution_plan(&graph, &HashSet::new()).expect("plan should build");
         let context = multi_softmax_context();
@@ -184,40 +188,3 @@ fn multi_softmax_context() -> ExecutionContext {
     context
 }
 
-fn with_determinism(level: &str, run: impl FnOnce()) {
-    let guard = match env_lock().lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    let key = "VOLTA_DETERMINISM";
-    let previous = std::env::var(key).ok();
-
-    unsafe {
-        std::env::set_var(key, level);
-    }
-    run();
-    match previous {
-        Some(value) => unsafe {
-            std::env::set_var(key, value);
-        },
-        None => unsafe {
-            std::env::remove_var(key);
-        },
-    }
-
-    drop(guard);
-}
-
-fn cuda_runtime_available() -> bool {
-    let result = std::panic::catch_unwind(|| volta::ir::cuda::device::CudaDevice::new(0));
-    match result {
-        Ok(Ok(_)) => true,
-        Ok(Err(_)) => false,
-        Err(_) => false,
-    }
-}
-
-fn env_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}

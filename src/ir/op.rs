@@ -47,6 +47,12 @@ pub enum Op {
     Relu(ValueId),
     ReluBackward(ValueId, ValueId),
     Softmax(ValueId),
+    Log(ValueId),
+    Exp(ValueId),
+    ReduceSum {
+        input: ValueId,
+        axis: Option<usize>,
+    },
     Conv2D(ValueId, ValueId),
     Parameter(String),
     Input(String),
@@ -66,9 +72,9 @@ impl Op {
             | Op::ReluBackward(left, right)
             | Op::Conv2D(left, right) => vec![*left, *right],
             Op::Relu(value) | Op::Softmax(value) | Op::Output(value) => vec![*value],
-            Op::Neg(value) | Op::Transpose(value) => vec![*value],
+            Op::Neg(value) | Op::Transpose(value) | Op::Log(value) | Op::Exp(value) => vec![*value],
             Op::ElementwiseChain { input, .. } => vec![*input],
-            Op::Reshape { input, .. } | Op::Gather { input, .. } | Op::Slice { input, .. } => {
+            Op::Reshape { input, .. } | Op::Gather { input, .. } | Op::Slice { input, .. } | Op::ReduceSum { input, .. } => {
                 vec![*input]
             }
             Op::Concat { inputs, .. } => inputs.clone(),
@@ -98,13 +104,15 @@ impl Op {
             | Op::Softmax(value)
             | Op::Output(value)
             | Op::Neg(value)
-            | Op::Transpose(value) => {
+            | Op::Transpose(value)
+            | Op::Log(value)
+            | Op::Exp(value) => {
                 *value = remap(*value);
             }
             Op::ElementwiseChain { input, .. } => {
                 *input = remap(*input);
             }
-            Op::Reshape { input, .. } | Op::Gather { input, .. } | Op::Slice { input, .. } => {
+            Op::Reshape { input, .. } | Op::Gather { input, .. } | Op::Slice { input, .. } | Op::ReduceSum { input, .. } => {
                 *input = remap(*input);
             }
             Op::Concat { inputs, .. } => {

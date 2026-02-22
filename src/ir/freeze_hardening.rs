@@ -5,12 +5,12 @@ mod tests {
     use crate::ir::{
         AlgebraicSimplificationPass, ConstantFoldingPass, CsePass, DcePass,
         DeadTensorEliminationPass, ElementwiseFusionPass, GradientFusionPass, Graph,
-        LayoutAwareOptimizationPass, Op, OptimizerConfig, Tensor, TensorConstantPropagationPass,
+        Op, OptimizerConfig, Tensor, TensorConstantPropagationPass,
         TrainConfig, TrainSample, build_execution_plan, build_reverse_graph, graph_fingerprint,
         run_verified_pass, verify_graph,
     };
 
-    const PASS_COUNT: usize = 9;
+    const PASS_COUNT: usize = 8;
 
     #[test]
     fn fuzz_ssa_graphs_with_verifier_guards() {
@@ -304,10 +304,6 @@ mod tests {
                 }
                 7 => {
                     let mut pass = GradientFusionPass::new();
-                    run_verified_pass(&mut pass, graph).expect("pass should verify");
-                }
-                8 => {
-                    let mut pass = LayoutAwareOptimizationPass::new();
                     run_verified_pass(&mut pass, graph).expect("pass should verify");
                 }
                 _ => panic!("invalid pass id"),

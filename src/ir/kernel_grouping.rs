@@ -63,11 +63,14 @@ fn classify_op(op: &Op) -> KernelKind {
         | Op::Mul(_, _)
         | Op::Div(_, _)
         | Op::Neg(_)
+        | Op::Log(_)
+        | Op::Exp(_)
         | Op::ElementwiseChain { .. }
         | Op::Reshape { .. }
         | Op::Concat { .. }
         | Op::Gather { .. }
-        | Op::Slice { .. } => KernelKind::Elementwise,
+        | Op::Slice { .. }
+        | Op::ReduceSum { .. } => KernelKind::Elementwise,
         Op::MatMul(_, _) => KernelKind::MatMul,
         Op::Conv2D(_, _) => KernelKind::Conv2D,
         Op::ConstInt(_)

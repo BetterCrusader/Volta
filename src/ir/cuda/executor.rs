@@ -275,18 +275,185 @@ fn evaluate_node_cuda(
                 })?;
             Ok(RuntimeValue::Tensor { shape, data: out })
         }
-        Op::Reshape { .. } => Err(CudaExecutionError {
-            message: "CUDA Reshape execution is not implemented".to_string(),
-        }),
-        Op::Concat { .. } => Err(CudaExecutionError {
-            message: "CUDA Concat execution is not implemented".to_string(),
-        }),
+        Op::Log(value) => {
+            let (shape, data) = read_tensor(values, *value)?;
+            let mut out = Vec::with_capacity(data.len());
+            for v in &data {
+                if *v <= 0.0 {
+                    return Err(CudaExecutionError {
+                        message: format!("log of non-positive value: {}", v),
+                    });
+                }
+                out.push(v.ln());
+            }
+            Ok(RuntimeValue::Tensor { shape, data: out })
+        }
+        Op::Exp(value) => {
+            let (shape, data) = read_tensor(values, *value)?;
+            let mut out = Vec::with_capacity(data.len());
+            for v in &data {
+                let e = v.exp();
+                if !e.is_finite() {
+                    return Err(CudaExecutionError {
+                        message: format!("exp overflow for value: {}", v),
+                    });
+                }
+                out.push(e);
+            }
+            Ok(RuntimeValue::Tensor { shape, data: out })
+        }
+        Op::ReduceSum { input, axis } => {
+            let (shape, data) = read_tensor(values, *input)?;
+            if data.is_empty() {
+                return Err(CudaExecutionError {
+                    message: "reduce_sum expects non-empty tensor".to_string(),
+                });
+            }
+            match axis {
+                None => {
+                    let sum: f32 = data.iter().copied().sum();
+                    Ok(RuntimeValue::Tensor {
+                        shape: vec![1],
+                        data: vec![sum],
+                    })
+                }
+                Some(a) => {
+                    let rank = shape.len();
+                    if *a >= rank {
+                        return Err(CudaExecutionError {
+                            message: format!(
+                                "reduce_sum axis {} out of bounds for rank {} tensor",
+                                a, rank
+                            ),
+                        });
+                    }
+                    let outer: usize = shape[..*a].iter().product();
+                    let axis_dim = shape[*a];
+                    let inner: usize = shape[*a + 1..].iter().product();
+                    let mut out_shape = shape;
+                    out_shape.remove(*a);
+                    if out_shape.is_empty() {
+                        out_shape.push(1);
+                    }
+                    let mut out = vec![0.0_f32; outer * inner];
+                    for o in 0..outer {
+                        for i in 0..inner {
+                            let mut acc = 0.0_f32;
+                            for k in 0..axis_dim {
+                                acc += data[o * axis_dim * inner + k * inner + i];
+                            }
+                            out[o * inner + i] = acc;
+                        }
+                    }
+                    Ok(RuntimeValue::Tensor {
+                        shape: out_shape,
+                        data: out,
+                    })
+                }
+            }
+        }
+        Op::Reshape { input, shape } => {
+            let (_, data) = read_tensor(values, *input)?;
+            let element_count: usize = shape.iter().product();
+            if element_count != data.len() {
+                return Err(CudaExecutionError {
+                    message: format!(
+                        "Reshape element mismatch: {} vs {}",
+                        data.len(),
+                        element_count
+                    ),
+                });
+            }
+            Ok(RuntimeValue::Tensor {
+                shape: shape.clone(),
+                data,
+            })
+        }
+        Op::Concat { inputs, axis } => {
+            if inputs.len() < 2 {
+                return Err(CudaExecutionError {
+                    message: "Concat requires at least 2 inputs".to_string(),
+                });
+            }
+            let mut tensors: Vec<(Vec<usize>, Vec<f32>)> = Vec::with_capacity(inputs.len());
+            for id in inputs {
+                tensors.push(read_tensor(values, *id)?);
+            }
+            let rank = tensors[0].0.len();
+            if *axis >= rank {
+                return Err(CudaExecutionError {
+                    message: format!("Concat axis {} out of bounds for rank {}", axis, rank),
+                });
+            }
+            let mut out_shape = tensors[0].0.clone();
+            let mut axis_sum = 0usize;
+            for (shape, _) in &tensors {
+                if shape.len() != rank {
+                    return Err(CudaExecutionError {
+                        message: "Concat rank mismatch".to_string(),
+                    });
+                }
+                axis_sum += shape[*axis];
+            }
+            out_shape[*axis] = axis_sum;
+            let mut out = Vec::new();
+            let outer: usize = tensors[0].0[..*axis].iter().product();
+            let inner: usize = tensors[0].0[*axis + 1..].iter().product();
+            for o in 0..outer {
+                for (shape, data) in &tensors {
+                    let axis_dim = shape[*axis];
+                    let start = o * axis_dim * inner;
+                    let end = start + axis_dim * inner;
+                    out.extend_from_slice(&data[start..end]);
+                }
+            }
+            Ok(RuntimeValue::Tensor {
+                shape: out_shape,
+                data: out,
+            })
+        }
         Op::Gather { .. } => Err(CudaExecutionError {
             message: "CUDA Gather execution is not implemented".to_string(),
         }),
-        Op::Slice { .. } => Err(CudaExecutionError {
-            message: "CUDA Slice execution is not implemented".to_string(),
-        }),
+        Op::Slice { input, starts, ends, axes } => {
+            let (shape, data) = read_tensor(values, *input)?;
+            let rank = shape.len();
+            let mut out_shape = shape.clone();
+            for idx in 0..axes.len() {
+                let axis = axes[idx];
+                let start = starts[idx];
+                let end = ends[idx];
+                if axis >= rank || start >= end || end > shape[axis] {
+                    return Err(CudaExecutionError {
+                        message: format!("Slice bounds error at axis {}", axis),
+                    });
+                }
+                out_shape[axis] = end - start;
+            }
+            let out_count: usize = out_shape.iter().product();
+            let mut out = vec![0.0_f32; out_count];
+            for (linear, out_val) in out.iter_mut().enumerate().take(out_count) {
+                let mut rem = linear;
+                let mut in_offset = 0usize;
+                let mut stride = 1usize;
+                for dim_idx in (0..rank).rev() {
+                    let coord = rem % out_shape[dim_idx];
+                    rem /= out_shape[dim_idx];
+                    let start_shift = axes
+                        .iter()
+                        .position(|a| *a == dim_idx)
+                        .map(|i| starts[i])
+                        .unwrap_or(0);
+                    in_offset += (coord + start_shift) * stride;
+                    stride *= shape[dim_idx];
+                }
+                *out_val = data[in_offset];
+            }
+            Ok(RuntimeValue::Tensor {
+                shape: out_shape,
+                data: out,
+            })
+        }
         Op::Conv2D(_, _) => Err(CudaExecutionError {
             message: "CUDA Conv2D execution is not implemented".to_string(),
         }),

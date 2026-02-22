@@ -23,7 +23,8 @@ This is the engine for teams that want ML systems that are inspectable, replayab
 - Run deterministic CPU and CUDA validation lanes
 - Import ONNX Wave 1 and Wave 2 contracts under governance
 - Ship with hard CI gates instead of guesswork
-- Install with release-grade installers on Windows/macOS/Linux
+
+
 
 ## Project Status
 
@@ -32,21 +33,8 @@ This is the engine for teams that want ML systems that are inspectable, replayab
 - governance hardening under **Quality Fortress**
 - CUDA inference MVP in Wave 3 hardening track
 - CUDA training hardening in Wave 4 hardening track
-- active engineering focus: deterministic runtime, ONNX interop, installer/release reliability
+- active engineering focus: deterministic runtime, ONNX interop, release reliability
 
-## Installer Experience (Windows/macOS/Linux)
-
-Volta includes a production-oriented cross-platform installer stack:
-
-- Windows: custom NSIS setup (`VoltaSetup-<version>.exe`) with PATH integration, verification, and uninstall
-- macOS: `.pkg` + optional `.dmg`, plus no-admin user installer mode
-- Linux: tarball + install/uninstall scripts, optional `.deb`
-- Release pack assembly with `checksums.txt` and `release-notes.md`
-
-Installer implementation guide:
-
-- `docs/guides/installers.md`
-- `docs/guides/windows-installer-ui.md`
 ## Quick Start
 
 ```bash
@@ -126,42 +114,6 @@ cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 cargo test --release
-```
-
-## Installer Build Commands
-
-### Windows
-
-```powershell
-pwsh ./scripts/installer/build-windows-installer.ps1 -Version "release-v1.0.0"
-```
-
-### macOS
-
-```bash
-bash packaging/macos/build-pkg.sh release-v1.0.0
-```
-
-### Linux tarball
-
-```bash
-bash packaging/linux/build-tarball.sh release-v1.0.0 x86_64-unknown-linux-gnu
-```
-
-### Linux deb (optional)
-
-```bash
-bash packaging/linux/build-deb.sh release-v1.0.0
-```
-
-### Assemble release layout + checksums
-
-```powershell
-pwsh ./scripts/installer/assemble-release.ps1 -Version "release-v1.0.0"
-```
-
-```bash
-bash scripts/installer/assemble-release.sh release-v1.0.0
 ```
 
 ## Quality Fortress Gates

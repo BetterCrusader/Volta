@@ -43,17 +43,6 @@ pub fn enforce_policy(
     }
 
     for node in &plan.executable_nodes {
-        if node.kernel == CudaKernel::Reduction
-            && (node.nodes.len() != 1 || !policy.fixed_reduction_topology)
-        {
-            return Err(CudaDeterminismError {
-                message: format!(
-                    "strict mode requires fixed reduction topology for gradient accumulation (group size must be 1, got {})",
-                    node.nodes.len()
-                ),
-            });
-        }
-
         if node.kernel == CudaKernel::Softmax
             && (node.nodes.len() != 1 || !policy.fixed_reduction_topology)
         {

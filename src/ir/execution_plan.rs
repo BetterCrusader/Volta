@@ -3,7 +3,7 @@ use std::hash::{Hash, Hasher};
 
 use crate::ir::{
     AllocationPlan, Graph, KernelGroup, Schedule, StorageClass, ValueId, build_schedule,
-    graph_fingerprint, group_kernels, optimize_schedule, plan_allocation, verify_allocation,
+    graph_fingerprint, group_kernels, plan_allocation, verify_allocation,
     verify_graph, verify_schedule,
 };
 
@@ -52,13 +52,7 @@ pub fn build_execution_plan(
         message: err.message,
     })?;
 
-    let optimized = optimize_schedule(graph, &base_schedule).map_err(|err| ExecutionPlanError {
-        message: err.message,
-    })?;
-    let schedule = optimized.schedule;
-    verify_schedule(graph, &schedule).map_err(|err| ExecutionPlanError {
-        message: err.message,
-    })?;
+    let schedule = base_schedule;
 
     let allocation =
         plan_allocation(graph, &schedule, gradient_values).map_err(|err| ExecutionPlanError {

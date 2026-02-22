@@ -1,5 +1,5 @@
 use crate::ir::cuda::kernels::{BackendExecutableNode, CudaKernel, dispatch_group};
-use crate::ir::{CompilerFlags, DeterminismLevel, ExecutionPlan, PlacementClass, ValueId};
+use crate::ir::{ExecutionPlan, PlacementClass, ValueId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoweredCudaPlan {
@@ -36,29 +36,11 @@ pub struct CudaLoweringError {
 
 pub fn lower_plan(plan: &ExecutionPlan) -> Result<LoweredCudaPlan, CudaLoweringError> {
     let mut lowered = Vec::with_capacity(plan.kernel_groups.len());
-    let gradient_plan = plan
-        .placement_hints
-        .iter()
-        .any(|hint| hint.class == PlacementClass::Gradient);
-    let strict_mode = CompilerFlags::from_env().determinism == DeterminismLevel::Strict;
 
     for group in &plan.kernel_groups {
-        let mut executable = dispatch_group(group.kind.clone(), &group.nodes)
+        let executable = dispatch_group(group.kind.clone(), &group.nodes)
             .map_err(|message| CudaLoweringError { message })?;
 
-        if gradient_plan && executable.kernel == CudaKernel::Add {
-            executable.kernel = CudaKernel::Reduction;
-        }
-
-        if strict_mode && executable.kernel == CudaKernel::Reduction && executable.nodes.len() > 1 {
-            for node in &executable.nodes {
-                lowered.push(BackendExecutableNode {
-                    kernel: CudaKernel::Reduction,
-                    nodes: vec![*node],
-                });
-            }
-            continue;
-        }
         lowered.push(executable);
     }
 
@@ -74,7 +56,7 @@ pub fn lower_plan(plan: &ExecutionPlan) -> Result<LoweredCudaPlan, CudaLoweringE
     let mut workspace_buffers = Vec::new();
     let mut next_workspace_id = 0usize;
     for node in &lowered {
-        if !matches!(node.kernel, CudaKernel::Backward | CudaKernel::Reduction) {
+        if !matches!(node.kernel, CudaKernel::Backward) {
             continue;
         }
 

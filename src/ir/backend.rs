@@ -96,27 +96,6 @@ impl Backend for CpuBackend {
 }
 
 #[derive(Debug, Default, Clone, Copy)]
-pub struct LlvmBackend;
-
-impl Backend for LlvmBackend {
-    fn capabilities(&self) -> BackendCapabilities {
-        BackendCapabilities {
-            backend: BackendKind::Llvm,
-            supports_inference: false,
-            supports_training: false,
-            supports_strict_determinism: false,
-            default_determinism: DeterminismLevel::Balanced,
-        }
-    }
-
-    fn compile(&self, _plan: &ExecutionPlan) -> Result<CompiledProgram, BackendError> {
-        Err(BackendError {
-            message: "LLVM backend is not implemented yet".to_string(),
-        })
-    }
-}
-
-#[derive(Debug, Default, Clone, Copy)]
 pub struct CudaBackend;
 
 impl Backend for CudaBackend {

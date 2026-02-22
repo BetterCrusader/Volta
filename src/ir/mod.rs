@@ -18,7 +18,6 @@ pub mod gradient_fusion;
 pub mod graph;
 pub mod interpreter;
 pub mod kernel_grouping;
-pub mod layout_optimization;
 pub mod lowering;
 pub mod memory_planner;
 pub mod node;
@@ -30,7 +29,6 @@ pub mod plan_cache;
 pub mod printer;
 pub mod regression_harness;
 pub mod runtime;
-pub mod schedule_optimization;
 pub mod scheduler;
 pub mod shape_inference;
 pub mod static_memory_budget;
@@ -44,7 +42,7 @@ pub use allocation::{
     AllocationError, AllocationPlan, BufferId, StorageClass, plan_allocation, verify_allocation,
 };
 pub use autograd::{AutogradError, GradientGraph, build_reverse_graph};
-pub use backend::{Backend, BackendError, CompiledProgram, CpuBackend, CudaBackend, LlvmBackend};
+pub use backend::{Backend, BackendError, CompiledProgram, CpuBackend, CudaBackend};
 pub use backend_capabilities::{BackendCapabilities, BackendKind, DeterminismLevel};
 pub use block::{BasicBlock, BasicBlockId};
 pub use compiler_flags::CompilerFlags;
@@ -65,7 +63,6 @@ pub use interpreter::{
     execute_with_schedule_context,
 };
 pub use kernel_grouping::{KernelGroup, KernelGroupingError, KernelKind, group_kernels};
-pub use layout_optimization::LayoutAwareOptimizationPass;
 pub use lowering::{LoweringContext, lower_program};
 pub use memory_planner::{
     MemoryPlan, MemoryPlanError, ValueLiveness, plan_memory, render_lifetime_heatmap,
@@ -78,9 +75,6 @@ pub use pass_utils::run_with_verifier_guard;
 pub use plan_cache::{clear_plan_cache, compile_or_get_cached};
 pub use printer::print_graph;
 pub use runtime::{RuntimeGatewayError, execute_terminal_with_backend, execute_value_with_backend};
-pub use schedule_optimization::{
-    ScheduleOptimizationError, ScheduleOptimizationResult, optimize_schedule,
-};
 pub use scheduler::{Schedule, ScheduleError, build_schedule, schedule_hash, verify_schedule};
 pub use shape_inference::{ShapeError, ShapeFact, infer_shapes};
 pub use static_memory_budget::{

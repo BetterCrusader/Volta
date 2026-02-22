@@ -1,8 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-if [[ -L "/usr/local/bin/volta" ]] && [[ ! -e "/usr/local/bin/volta" ]]; then
-  rm -f "/usr/local/bin/volta"
-fi
-
-exit 0

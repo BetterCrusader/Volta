@@ -91,10 +91,9 @@ impl Tensor {
     }
 
     pub fn scale(&self, factor: f32) -> Result<Self, TensorError> {
-        let mut out = Vec::with_capacity(self.data.len());
-        for value in &self.data {
-            out.push(*value * factor);
-        }
+        // Use iterator map + collect: the compiler fuses this into a single
+        // streaming pass without intermediate push overhead.
+        let out: Vec<f32> = self.data.iter().map(|v| v * factor).collect();
         Self::new(self.shape.clone(), out)
     }
 
@@ -104,6 +103,13 @@ impl Tensor {
                 message: format!(
                     "Shape mismatch in add_inplace_scaled: {:?} vs {:?}",
                     self.shape, grad.shape
+                ),
+            });
+        }
+        if !scale.is_finite() {
+            return Err(TensorError {
+                message: format!(
+                    "add_inplace_scaled: scale must be finite, got {scale}"
                 ),
             });
         }
@@ -152,15 +158,45 @@ impl Tensor {
             });
         }
         let mut out = vec![0.0_f32; m * n];
-        for i in 0..m {
-            for j in 0..n {
-                let mut acc = 0.0_f32;
-                for t in 0..k {
-                    acc += self.data[i * k + t] * other.data[t * n + j];
+
+        // Cache-tiled matrix multiplication (TILE × TILE blocks).
+        //
+        // Naive i,j,k loop strides through `other` column-by-column. For an
+        // N×N matrix this means N² cache misses on every inner loop pass —
+        // every access to other[t*n+j] jumps n*4 bytes (a full row) forward,
+        // which evicts the previous cache line before it is reused.
+        //
+        // With tiling we keep a TILE×TILE sub-block of both operands hot in
+        // L1 cache. For TILE=32 that is 32*32*4 = 4 KiB per operand — well
+        // within the typical 32 KiB L1. Reuse factor goes from 1× to ~TILE×,
+        // making throughput memory-bandwidth instead of latency bound.
+        //
+        // Order (ii, kk, jj) puts the kk loop outside jj so the update to
+        // out[i][j] accumulates into a register across the k-tile, and both
+        // lhs[i][kk..kk+TILE] and rhs[kk..kk+TILE][j] stay in L1 for the
+        // full inner jj loop.
+        const TILE: usize = 32;
+        for ii in (0..m).step_by(TILE) {
+            for kk in (0..k).step_by(TILE) {
+                for jj in (0..n).step_by(TILE) {
+                    let i_end = (ii + TILE).min(m);
+                    let k_end = (kk + TILE).min(k);
+                    let j_end = (jj + TILE).min(n);
+                    for i in ii..i_end {
+                        let lhs_row = &self.data[i * k + kk..i * k + k_end];
+                        for (t_offset, &lhs_val) in lhs_row.iter().enumerate() {
+                            let t = kk + t_offset;
+                            let rhs_row = &other.data[t * n + jj..t * n + j_end];
+                            let out_row = &mut out[i * n + jj..i * n + j_end];
+                            for (o, r) in out_row.iter_mut().zip(rhs_row.iter()) {
+                                *o += lhs_val * r;
+                            }
+                        }
+                    }
                 }
-                out[i * n + j] = acc;
             }
         }
+
         Self::new(vec![m, n], out)
     }
 
@@ -188,6 +224,85 @@ impl Tensor {
             out.push(if *x > 0.0 { *g } else { 0.0 });
         }
         Self::new(self.shape.clone(), out)
+    }
+
+    pub fn log_elementwise(&self) -> Result<Self, TensorError> {
+        let mut out = Vec::with_capacity(self.data.len());
+        for value in &self.data {
+            if *value <= 0.0 {
+                return Err(TensorError {
+                    message: format!("log of non-positive value: {}", value),
+                });
+            }
+            out.push(value.ln());
+        }
+        Self::new(self.shape.clone(), out)
+    }
+
+    pub fn exp_elementwise(&self) -> Result<Self, TensorError> {
+        let mut out = Vec::with_capacity(self.data.len());
+        for value in &self.data {
+            let e = value.exp();
+            if !e.is_finite() {
+                return Err(TensorError {
+                    message: format!("exp overflow for value: {}", value),
+                });
+            }
+            out.push(e);
+        }
+        Self::new(self.shape.clone(), out)
+    }
+
+    pub fn reduce_sum(&self, axis: Option<usize>) -> Result<Self, TensorError> {
+        if self.data.is_empty() {
+            return Err(TensorError {
+                message: "reduce_sum expects non-empty tensor".to_string(),
+            });
+        }
+        match axis {
+            None => {
+                let sum = self.data.iter().copied().sum::<f32>();
+                Ok(Self::scalar(sum))
+            }
+            Some(a) => {
+                let rank = self.shape.len();
+                if a >= rank {
+                    return Err(TensorError {
+                        message: format!(
+                            "reduce_sum axis {} out of bounds for rank {} tensor",
+                            a, rank
+                        ),
+                    });
+                }
+                let outer = product_prefix(&self.shape, a)?;
+                let axis_dim = self.shape[a];
+                let inner = product_suffix(&self.shape, a + 1)?;
+
+                let mut out_shape = self.shape.clone();
+                out_shape.remove(a);
+                if out_shape.is_empty() {
+                    out_shape.push(1);
+                }
+
+                let out_count = outer.checked_mul(inner).ok_or_else(|| TensorError {
+                    message: "reduce_sum output size overflow".to_string(),
+                })?;
+                let mut out = vec![0.0_f32; out_count];
+
+                for o in 0..outer {
+                    for i in 0..inner {
+                        let mut acc = 0.0_f32;
+                        for k in 0..axis_dim {
+                            let idx = o * axis_dim * inner + k * inner + i;
+                            acc += self.data[idx];
+                        }
+                        out[o * inner + i] = acc;
+                    }
+                }
+
+                Self::new(out_shape, out)
+            }
+        }
     }
 
     pub fn mean(&self) -> Result<Self, TensorError> {

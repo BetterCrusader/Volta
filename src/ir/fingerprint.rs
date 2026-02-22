@@ -40,8 +40,12 @@ fn hash_op(op: &Op, hasher: &mut DefaultHasher) {
             a.0.hash(hasher);
             b.0.hash(hasher);
         }
-        Op::Neg(v) | Op::Transpose(v) | Op::Relu(v) | Op::Softmax(v) | Op::Output(v) => {
+        Op::Neg(v) | Op::Transpose(v) | Op::Relu(v) | Op::Softmax(v) | Op::Output(v) | Op::Log(v) | Op::Exp(v) => {
             v.0.hash(hasher)
+        }
+        Op::ReduceSum { input, axis } => {
+            input.0.hash(hasher);
+            axis.hash(hasher);
         }
         Op::ElementwiseChain { input, ops } => {
             input.0.hash(hasher);

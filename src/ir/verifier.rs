@@ -176,8 +176,13 @@ fn infer_type_for_op(
             }
             require_tensor_or_unknown(current, node_id, "concat")
         }
-        Op::Transpose(value) | Op::Relu(value) | Op::Softmax(value) => {
+        Op::Transpose(value) | Op::Relu(value) | Op::Softmax(value)
+        | Op::Log(value) | Op::Exp(value) => {
             let ty = type_of(*value, value_types);
+            require_tensor_or_unknown(ty, node_id, "tensor unary op")
+        }
+        Op::ReduceSum { input, .. } => {
+            let ty = type_of(*input, value_types);
             require_tensor_or_unknown(ty, node_id, "tensor unary op")
         }
         Op::ReluBackward(input, grad) | Op::MatMul(input, grad) | Op::Conv2D(input, grad) => {

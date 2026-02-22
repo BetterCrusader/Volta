@@ -379,7 +379,16 @@ impl Executor {
 
         let mut layers = Vec::with_capacity(layers_expr.len());
         for expr in layers_expr {
-            layers.push(self.expect_int_value(expr, "model.layers")?);
+            let v = self.expect_int_value(expr, "model.layers")?;
+            // BUG FIX: layer sizes of 0 or negative are meaningless and would
+            // silently produce degenerate models downstream.
+            if v <= 0 {
+                return Err(Self::error(
+                    format!("model.layers values must be > 0, found {v}"),
+                    expr.span(),
+                ));
+            }
+            layers.push(v);
         }
 
         let activation = self
@@ -959,6 +968,17 @@ impl Executor {
         args: &[Expr],
         span: Span,
     ) -> Result<Value, RuntimeError> {
+        // BUG FIX: unbounded recursion would cause a stack overflow. Cap at 128.
+        const MAX_CALL_DEPTH: usize = 128;
+        if self.in_function_depth >= MAX_CALL_DEPTH {
+            return Err(Self::error(
+                format!(
+                    "Call stack overflow: function '{callee}' exceeded maximum call depth of {MAX_CALL_DEPTH}"
+                ),
+                span,
+            ));
+        }
+
         let function = self.runtime.functions.get(callee).cloned().ok_or_else(|| {
             Self::error_with_hint(
                 format!("Undefined function: '{callee}'"),
@@ -982,18 +1002,25 @@ impl Executor {
         let _ = function.span;
         let previous_return = self.return_slot.take();
         self.push_scope();
+        // BUG FIX: use a scopeguard-style pattern so in_function_depth is
+        // decremented and scope is popped even when exec_block_no_scope errors.
         self.in_function_depth += 1;
 
-        for (param, arg_expr) in function.params.iter().zip(args.iter()) {
-            let arg_value = self.eval_expr(arg_expr)?;
-            if let Some(scope) = self.runtime.variables.last_mut() {
-                scope.insert(param.clone(), arg_value);
+        let exec_result = (|| {
+            for (param, arg_expr) in function.params.iter().zip(args.iter()) {
+                let arg_value = self.eval_expr(arg_expr)?;
+                if let Some(scope) = self.runtime.variables.last_mut() {
+                    scope.insert(param.clone(), arg_value);
+                }
             }
-        }
+            self.exec_block_no_scope(&function.body)
+        })();
 
-        self.exec_block_no_scope(&function.body)?;
+        // Always restore depth and pop scope regardless of success/failure.
         self.in_function_depth = self.in_function_depth.saturating_sub(1);
         self.pop_scope()?;
+
+        exec_result?;
 
         let ret = self.return_slot.take().unwrap_or(Value::Unit);
         self.return_slot = previous_return;
@@ -1354,5 +1381,96 @@ mod tests {
 
         let model = ex.runtime.models.get("m").expect("model exists");
         assert_eq!(model.trained_epochs, 2);
+    }
+
+    // ── Regression tests for bugs found in the production code audit ──────────
+
+    #[test]
+    fn model_layer_of_zero_is_rejected() {
+        // BUG FIX: model.layers values must be > 0.
+        // Before the fix, a layer size of 0 was silently accepted and propagated
+        // as a degenerate model to the autopilot and executor, causing silent
+        // incorrect behaviour downstream.
+        let src = "model m\n    layers 128 0 10\n";
+        let program = parse(src);
+        let mut ex = Executor::new();
+        let err = ex.execute(&program).expect_err("zero layer must be rejected");
+        assert!(
+            err.message.contains("must be > 0"),
+            "expected rejection of zero layer, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn model_layer_of_negative_is_rejected() {
+        let src = "model m\n    layers 128 -4 10\n";
+        let program = parse(src);
+        let mut ex = Executor::new();
+        let err = ex
+            .execute(&program)
+            .expect_err("negative layer must be rejected");
+        assert!(
+            err.message.contains("must be > 0"),
+            "expected rejection of negative layer, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn call_stack_overflow_is_caught_at_depth_128() {
+        // BUG FIX: before the fix, infinite self-recursion would cause an
+        // OS-level stack overflow. Now the runtime catches it at depth 128.
+        // We spawn a thread with a larger stack (8 MB) to give the test safe
+        // headroom while still validating the guard.
+        let src = "fn inf(n)\n    return inf(n + 1)\nresult inf(0)\n".to_string();
+        let handle = std::thread::Builder::new()
+            .stack_size(8 * 1024 * 1024)
+            .spawn(move || {
+                let program = parse(&src);
+                let mut ex = Executor::new();
+                ex.execute(&program).expect_err("must hit call-depth limit")
+            })
+            .expect("thread spawn failed");
+        let err = handle.join().expect("thread panicked");
+        assert!(
+            err.message.contains("Call stack overflow"),
+            "expected call stack error, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn execution_continues_correctly_after_error_inside_function() {
+        // BUG FIX: before the fix, a runtime error inside a function body left
+        // `in_function_depth` incremented. This caused subsequent `return`
+        // statements outside any function to be accepted silently.
+        //
+        // Strategy: register boom() and ok_fn() at top level, call boom() via a
+        // VarDecl (the only call-statement form the parser supports), confirm it
+        // errors, then call ok_fn() and verify it returns 42.
+        let src = concat!(
+            "fn boom()\n",
+            "    _x 1 / 0\n",   // division by zero inside boom
+            "fn ok_fn()\n",
+            "    return 42\n",
+        );
+        let program_setup = parse(src);
+        let mut ex = Executor::new();
+        ex.push_scope();
+        ex.exec_block_no_scope(&program_setup.statements)
+            .expect("function registration must not fail");
+
+        // Call boom() — it errors inside; depth must be restored afterwards.
+        // Wrap in VarDecl because the language has no bare call statement.
+        let boom_prog = parse("_e boom()\n");
+        let _ = ex.exec_block_no_scope(&boom_prog.statements); // ignore error
+
+        // ok_fn() must still work correctly after the error.
+        let ok_prog = parse("result ok_fn()\n");
+        ex.exec_block_no_scope(&ok_prog.statements)
+            .expect("ok_fn must succeed after boom() error recovery");
+
+        assert_eq!(ex.get_var("result"), Some(Value::Int(42)));
     }
 }
