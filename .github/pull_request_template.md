@@ -36,5 +36,5 @@
 
 ## Governance Links
 
-- RFC reference (required for policy/Tier A invariant changes):
+- RFC reference (required for policy/Tier A invariant changes): `Closes RFC: RFC-<id>`
 - Incident links (if regression/hotfix):
