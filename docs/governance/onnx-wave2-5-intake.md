@@ -25,6 +25,11 @@ Define exactly how new ONNX operators enter Volta 1.2.0 scope without breaking d
 | `AveragePool` | P0 | inference/static | fixed static subset only |
 | `LayerNorm` | P1 | inference/static | ship only if contract remains stable and testable |
 
+## Implementation Progress
+
+- 2026-02-23: `LeakyRelu` landed with ONNX importer support and deterministic lowering to primitive IR ops.
+- Verified by `interop_onnx_wave2_parser` and `interop_onnx_verify` suites.
+
 ## Acceptance Contract per Operator
 
 An operator is considered shipped only if all boxes are complete:

@@ -10,6 +10,7 @@ This document tracks the current ONNX importer coverage in Volta and reflects wh
 | `MatMul` | `Op::MatMul` | 2D tensor path. |
 | `Gemm` | `Op::Gemm` + optional `Op::Transpose` lowers | `alpha`, `beta`, `transA`, `transB`, optional bias. |
 | `Relu` | `Op::Relu` | - |
+| `LeakyRelu` | lowered to primitive `Relu`/`Sub`/`Mul`/`Add` ops | `alpha` supported (default `0.01`). |
 | `Softmax` | `Op::Softmax` | Numerically stable CPU implementation. |
 | `Log` / `Exp` / `Sigmoid` | `Op::Log` / `Op::Exp` / `Op::Sigmoid` | - |
 | `Gelu` | `Op::Gelu` / `Op::GeluExact` | `approximate=tanh` -> `Gelu`; `approximate=none` -> `GeluExact`. |

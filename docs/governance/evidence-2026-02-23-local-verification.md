@@ -46,6 +46,12 @@ This record captures local quality-gate verification run in the working copy on 
   - pass 1: passed, no perf regression over threshold
   - pass 2: passed, no perf regression over threshold
 
+### ONNX Wave 2.5 progress verification
+
+- `cargo test --features onnx-import --test interop_onnx_wave2_parser` -> pass (`12 passed`, includes LeakyRelu default/custom alpha)
+- `bash scripts/ci/interop_onnx_verify.sh` -> pass (contract + acceptance suites)
+- `cargo test --features onnx-import` -> pass (full suite)
+
 ### Rollback verification
 
 - `bash scripts/release/rollback.sh --verify-only` -> blocked in this working copy
