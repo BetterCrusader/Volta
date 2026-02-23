@@ -7,6 +7,37 @@ Branch policy: `main` remains releasable
 Planning horizon: 8 weeks
 Last updated: 2026-02-23
 
+## Execution Log (2026-02-23)
+
+Completed this cycle:
+
+- Milestone `1.2.0` created in GitHub.
+- Initial issue pack created: `#23`, `#24`, `#27`, `#32`, `#33`, `#34`, `#35`, `#36`, `#37`, `#38`.
+- `#24` completed: PR gates now include blocking `test-onnx-import` lane (`cargo test --features onnx-import`).
+- CI reliability governance docs landed:
+  - `docs/governance/ci-flaky-registry.md`
+  - `docs/governance/ci-weekly-health-template.md`
+  - `docs/governance/ci-stale-reference-sweep-2026-02-23.md`
+  - `docs/governance/ci-topology.md` updates
+- Determinism evidence tracking landed:
+  - `docs/governance/determinism-evidence-1.2.0.md`
+  - `docs/governance/evidence-2026-02-23-local-verification.md`
+- Docs-contract audit ledger started:
+  - `docs/governance/docs-contract-audit-1.2.0.md`
+- ONNX operator intake contract started:
+  - `docs/governance/onnx-wave2-5-intake.md`
+
+In progress:
+
+- `#33` determinism evidence completion (needs additional week-level stability artifacts).
+- `#38` CI reliability completion (needs one-week stable blocker-lane signal).
+- `#37` docs-contract final pass (pending ONNX/CUDA final evidence rows).
+- `#27` ONNX implementation batch work (intake contract done, operator implementation pending).
+
+Instruction mode:
+
+- Work is being accumulated without final merge in this phase.
+
 ## Table of Contents
 
 1. Program Charter
