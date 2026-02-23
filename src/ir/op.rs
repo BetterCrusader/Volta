@@ -115,8 +115,14 @@ impl Op {
             | Op::Exp(value)
             | Op::Sigmoid(value)
             | Op::Gelu(value)
-            | Op::GeluExact(value)
-            | Op::GemmBackward { lhs: value, .. } => vec![*value],
+            | Op::GeluExact(value) => vec![*value],
+            Op::GemmBackward { lhs, rhs, bias, .. } => {
+                let mut inputs = vec![*lhs, *rhs];
+                if let Some(b) = bias {
+                    inputs.push(*b);
+                }
+                inputs
+            }
             Op::ElementwiseChain { input, .. } => vec![*input],
             Op::Reshape { input, .. }
             | Op::Gather { input, .. }
@@ -212,5 +218,38 @@ impl Op {
             | Op::Input(_)
             | Op::Removed => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ir::node::ValueId;
+
+    use super::Op;
+
+    #[test]
+    fn gemm_backward_input_values_include_rhs_and_bias() {
+        let op = Op::GemmBackward {
+            lhs: ValueId(1),
+            rhs: ValueId(2),
+            bias: Some(ValueId(3)),
+            alpha: 1.0,
+            beta: 1.0,
+        };
+
+        assert_eq!(op.input_values(), vec![ValueId(1), ValueId(2), ValueId(3)]);
+    }
+
+    #[test]
+    fn gemm_backward_input_values_include_rhs_without_bias() {
+        let op = Op::GemmBackward {
+            lhs: ValueId(4),
+            rhs: ValueId(5),
+            bias: None,
+            alpha: 1.0,
+            beta: 1.0,
+        };
+
+        assert_eq!(op.input_values(), vec![ValueId(4), ValueId(5)]);
     }
 }

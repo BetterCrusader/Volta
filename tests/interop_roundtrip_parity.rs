@@ -104,7 +104,7 @@ fn build_native_graph() -> (Graph, volta::ir::ValueId) {
         .expect("add b");
     let (_, sum) = graph.add_op(block, Op::Add(mm, b)).expect("add sum");
     let (_, relu) = graph.add_op(block, Op::Relu(sum)).expect("add relu");
-    graph.add_op(block, Op::Output(relu)).expect("add output");
+    let (_, output) = graph.add_op(block, Op::Output(relu)).expect("add output");
     graph.bind_input_shape("x", vec![1, 2]);
-    (graph, relu)
+    (graph, output)
 }

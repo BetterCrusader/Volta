@@ -34,9 +34,11 @@ If you cannot explain your CI topology in one page, you do not control your rele
 - Flaky tests and lanes are tracked in `docs/governance/ci-flaky-registry.md`.
 - Every flaky item must have an explicit owner and triage issue.
 - Weekly CI health review updates status, ETA, and mitigation notes.
+- Weekly review format is defined in `docs/governance/ci-weekly-health-template.md`.
 - A release candidate requires one full week of stable blocker-lane signal or explicit owner-approved exception notes.
 
 ## Local Replication
 
 - `scripts/ci/wave1_local_verify.sh` reproduces Wave 1 checks.
 - `scripts/ci/wave23_local_verify.sh` reproduces Wave 2+3 checks including perf, soak, and rollback verify.
+- Stale command reference audit evidence is tracked in `docs/governance/ci-stale-reference-sweep-2026-02-23.md`.

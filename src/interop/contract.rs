@@ -65,6 +65,10 @@ pub enum IrOpContract {
     Relu {
         input: String,
     },
+    LeakyRelu {
+        input: String,
+        alpha: f32,
+    },
     Softmax {
         input: String,
     },
@@ -251,6 +255,14 @@ impl IrGraphContract {
                         )));
                     }
                 }
+                IrOpContract::LeakyRelu { alpha, .. } => {
+                    if !alpha.is_finite() {
+                        return Err(InteropError::new(format!(
+                            "node '{}' leaky relu alpha must be finite",
+                            node.id
+                        )));
+                    }
+                }
                 IrOpContract::Gather { indices, .. } => {
                     if indices.is_empty() {
                         return Err(InteropError::new(format!(
@@ -413,6 +425,31 @@ impl IrGraphContract {
                     let input = resolve_value(&ids, input)?;
                     let (_, value) = graph
                         .add_op(block, Op::Relu(input))
+                        .map_err(|err| InteropError::new(err.message))?;
+                    value
+                }
+                IrOpContract::LeakyRelu { input, alpha } => {
+                    let input = resolve_value(&ids, input)?;
+                    let (_, relu_output) = graph
+                        .add_op(block, Op::Relu(input))
+                        .map_err(|err| InteropError::new(err.message))?;
+                    let (_, negative_component) = graph
+                        .add_op(block, Op::Sub(input, relu_output))
+                        .map_err(|err| InteropError::new(err.message))?;
+                    let (_, alpha_value) = graph
+                        .add_op(
+                            block,
+                            Op::ConstTensor {
+                                shape: vec![1],
+                                data: vec![*alpha],
+                            },
+                        )
+                        .map_err(|err| InteropError::new(err.message))?;
+                    let (_, scaled_negative) = graph
+                        .add_op(block, Op::Mul(negative_component, alpha_value))
+                        .map_err(|err| InteropError::new(err.message))?;
+                    let (_, value) = graph
+                        .add_op(block, Op::Add(relu_output, scaled_negative))
                         .map_err(|err| InteropError::new(err.message))?;
                     value
                 }
@@ -684,6 +721,7 @@ fn op_inputs(op: &IrOpContract) -> Vec<&str> {
         IrOpContract::Neg { input }
         | IrOpContract::Transpose { input }
         | IrOpContract::Relu { input }
+        | IrOpContract::LeakyRelu { input, .. }
         | IrOpContract::Softmax { input }
         | IrOpContract::Log { input }
         | IrOpContract::Exp { input }

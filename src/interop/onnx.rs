@@ -51,6 +51,10 @@ pub enum OnnxOpStub {
     Relu {
         input: String,
     },
+    LeakyRelu {
+        input: String,
+        alpha: f32,
+    },
     Softmax {
         input: String,
     },
@@ -193,6 +197,10 @@ impl OnnxImporter {
                 },
                 OnnxOpStub::Relu { input } => IrOpContract::Relu {
                     input: input.clone(),
+                },
+                OnnxOpStub::LeakyRelu { input, alpha } => IrOpContract::LeakyRelu {
+                    input: input.clone(),
+                    alpha: *alpha,
                 },
                 OnnxOpStub::Softmax { input } => IrOpContract::Softmax {
                     input: input.clone(),
@@ -660,6 +668,19 @@ fn map_proto_op(
         "Relu" => IrOpContract::Relu {
             input: require_input(node, 0)?.to_string(),
         },
+        "LeakyRelu" => {
+            let alpha = attribute_f32(node, "alpha").unwrap_or(0.01_f32);
+            if !alpha.is_finite() {
+                return Err(InteropError::new(format!(
+                    "node '{}' leaky relu alpha must be finite",
+                    node.name
+                )));
+            }
+            IrOpContract::LeakyRelu {
+                input: require_input(node, 0)?.to_string(),
+                alpha,
+            }
+        }
         "Sigmoid" => IrOpContract::Sigmoid {
             input: require_input(node, 0)?.to_string(),
         },
@@ -1217,6 +1238,7 @@ fn op_kind(op: &OnnxOpStub) -> &'static str {
         OnnxOpStub::MatMul { .. } => "MatMul",
         OnnxOpStub::Transpose { .. } => "Transpose",
         OnnxOpStub::Relu { .. } => "Relu",
+        OnnxOpStub::LeakyRelu { .. } => "LeakyRelu",
         OnnxOpStub::Sigmoid { .. } => "Sigmoid",
         OnnxOpStub::Gelu { .. } => "Gelu",
         OnnxOpStub::ReduceSum { .. } => "ReduceSum",
@@ -1247,6 +1269,7 @@ fn op_kind_from_contract(op: &IrOpContract) -> &'static str {
         IrOpContract::MatMul { .. } => "MatMul",
         IrOpContract::Transpose { .. } => "Transpose",
         IrOpContract::Relu { .. } => "Relu",
+        IrOpContract::LeakyRelu { .. } => "LeakyRelu",
         IrOpContract::Softmax { .. } => "Softmax",
         IrOpContract::Log { .. } => "Log",
         IrOpContract::Exp { .. } => "Exp",
@@ -1277,6 +1300,7 @@ fn inferred_output_rank(op: &IrOpContract, value_ranks: &HashMap<String, usize>)
         | IrOpContract::Div { lhs, .. }
         | IrOpContract::Neg { input: lhs }
         | IrOpContract::Relu { input: lhs }
+        | IrOpContract::LeakyRelu { input: lhs, .. }
         | IrOpContract::Softmax { input: lhs }
         | IrOpContract::Log { input: lhs }
         | IrOpContract::Exp { input: lhs }

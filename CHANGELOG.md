@@ -5,6 +5,7 @@
 ### Added
 
 - ONNX Wave 2 expansion: Gemm attribute matrix (`alpha`, `beta`, `transA`, `transB`), reduction keepdims and negative-axis normalization, Gelu mode mapping (`tanh` and `none`).
+- ONNX `LeakyRelu` import support (`alpha` attribute, default `0.01`) lowered into deterministic primitive IR ops.
 - Exact GeLU runtime path (`GeluExact`) and ONNX import mapping.
 - Autograd integration roundtrip tests and expanded gradcheck coverage.
 - Determinism regressions over repeated/threaded schedule generation.

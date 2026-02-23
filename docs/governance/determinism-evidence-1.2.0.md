@@ -1,6 +1,6 @@
 # Determinism Evidence Pack (1.2.0)
 
-Status: In Progress
+Status: Active
 Related issue: #33
 
 ## Scope
@@ -22,11 +22,23 @@ cargo test --test pass_equivalence
 cargo test --all-targets --all-features
 ```
 
+## Recent Evidence (2026-02-23)
+
+- `cargo test --test determinism_regression` -> pass (`3 passed`, includes 100-run and threaded checks)
+- `cargo test --test pass_equivalence` -> pass (`11 passed`)
+- `cargo test --test governance_docs_content` -> pass (`6 passed`)
+- `cargo test --test governance_docs_presence` -> pass (`1 passed`)
+
 ## Artifact Log
 
 | Date | Command Set | Result | Artifact/Link | Notes |
 | --- | --- | --- | --- | --- |
-| 2026-02-23 | initial scaffold | pending | _TBD_ | evidence collection started |
+| 2026-02-23 | determinism_regression + pass_equivalence + governance docs checks | pass | `docs/governance/evidence-2026-02-23-local-verification.md` | local deterministic evidence captured |
+
+## Open Items
+
+- Attach one-week stability evidence from blocker lanes before release cut.
+- Link first-divergence investigation artifacts if any deterministic mismatch appears.
 
 ## Completion Criteria
 

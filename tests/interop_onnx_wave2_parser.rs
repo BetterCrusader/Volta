@@ -517,6 +517,96 @@ fn parses_gelu_with_none_approximation_as_exact_and_executes() {
 }
 
 #[test]
+fn parses_leakyrelu_default_alpha_and_executes() {
+    let model = pb::ModelProto {
+        ir_version: 8,
+        graph: Some(pb::GraphProto {
+            name: "leaky_relu_default".to_string(),
+            input: vec![tensor_value_info(
+                "x",
+                &[1, 4],
+                pb::tensor_proto::DataType::Float,
+            )],
+            output: vec![tensor_value_info(
+                "y",
+                &[1, 4],
+                pb::tensor_proto::DataType::Float,
+            )],
+            node: vec![pb::NodeProto {
+                name: "leaky_relu_node".to_string(),
+                op_type: "LeakyRelu".to_string(),
+                input: vec!["x".to_string()],
+                output: vec!["y".to_string()],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let program = import_onnx_bytes(&model.encode_to_vec()).expect("leaky relu import should work");
+    let mut context = ExecutionContext::default();
+    context.inputs.insert(
+        "x".to_string(),
+        RuntimeValue::Tensor(std::sync::Arc::new(
+            volta::ir::Tensor::new(vec![1, 4], vec![-100.0, -50.0, 0.0, 4.0]).unwrap(),
+        )),
+    );
+
+    let value = execute_value_with_context(&program.graph, program.output, &context)
+        .expect("leaky relu execute should work");
+    assert_tensor_close(value, &[1, 4], &[-1.0, -0.5, 0.0, 4.0], 1.0e-5);
+}
+
+#[test]
+fn parses_leakyrelu_custom_alpha_and_executes() {
+    let model = pb::ModelProto {
+        ir_version: 8,
+        graph: Some(pb::GraphProto {
+            name: "leaky_relu_custom_alpha".to_string(),
+            input: vec![tensor_value_info(
+                "x",
+                &[1, 4],
+                pb::tensor_proto::DataType::Float,
+            )],
+            output: vec![tensor_value_info(
+                "y",
+                &[1, 4],
+                pb::tensor_proto::DataType::Float,
+            )],
+            node: vec![pb::NodeProto {
+                name: "leaky_relu_node".to_string(),
+                op_type: "LeakyRelu".to_string(),
+                input: vec!["x".to_string()],
+                output: vec!["y".to_string()],
+                attribute: vec![pb::AttributeProto {
+                    name: "alpha".to_string(),
+                    f: 0.5,
+                    r#type: pb::attribute_proto::AttributeType::Float as i32,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let program = import_onnx_bytes(&model.encode_to_vec()).expect("leaky relu import should work");
+    let mut context = ExecutionContext::default();
+    context.inputs.insert(
+        "x".to_string(),
+        RuntimeValue::Tensor(std::sync::Arc::new(
+            volta::ir::Tensor::new(vec![1, 4], vec![-2.0, -1.0, 0.0, 3.0]).unwrap(),
+        )),
+    );
+
+    let value = execute_value_with_context(&program.graph, program.output, &context)
+        .expect("leaky relu execute should work");
+    assert_tensor_close(value, &[1, 4], &[-1.0, -0.5, 0.0, 3.0], 1.0e-6);
+}
+
+#[test]
 fn rejects_gelu_with_unknown_approximation_mode() {
     let model = pb::ModelProto {
         ir_version: 8,
@@ -587,5 +677,21 @@ fn int64_tensor(name: &str, dims: &[i64], values: &[i64]) -> pb::TensorProto {
         data_type: pb::tensor_proto::DataType::Int64 as i32,
         int64_data: values.to_vec(),
         ..Default::default()
+    }
+}
+
+fn assert_tensor_close(value: RuntimeValue, expected_shape: &[usize], expected: &[f32], tol: f32) {
+    let RuntimeValue::Tensor(tensor) = value else {
+        panic!("expected tensor runtime value");
+    };
+
+    assert_eq!(tensor.shape.as_slice(), expected_shape);
+    assert_eq!(tensor.data.len(), expected.len());
+
+    for (idx, (actual, expected_value)) in tensor.data.iter().zip(expected.iter()).enumerate() {
+        assert!(
+            (actual - expected_value).abs() <= tol,
+            "tensor mismatch at index {idx}: actual={actual}, expected={expected_value}, tol={tol}"
+        );
     }
 }
