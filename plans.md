@@ -26,6 +26,8 @@ Completed this cycle:
   - `docs/governance/docs-contract-audit-1.2.0.md`
 - ONNX operator intake contract started:
   - `docs/governance/onnx-wave2-5-intake.md`
+- ONNX implementation batch started:
+  - `LeakyRelu` support landed with deterministic lowering and parser tests
 
 In progress:
 
