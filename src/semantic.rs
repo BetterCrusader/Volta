@@ -14,19 +14,36 @@ use crate::rules::{
     MODEL_REQUIRED_PROPERTIES, OPTIMIZERS, TRAIN_KNOWN_PROPERTIES, TRAIN_REQUIRED_PROPERTIES,
 };
 
+/// A semantic analysis error, produced when the program text is
+/// structurally valid but violates semantic rules.
+///
+/// Carries the error `message`, the source `span` for precise
+/// line/column reporting, and an optional `hint` for the user.
 #[derive(Debug, Clone)]
 pub struct SemanticError {
+    /// Human-readable error description.
     pub message: String,
+    /// Source location where the violation was detected.
     pub span: Span,
+    /// Optional suggestion to fix the error.
     pub hint: Option<String>,
 }
 
+/// A non-fatal semantic warning, emitted for suspicious but legal constructs
+/// such as unused variables or dead loop bodies.
 #[derive(Debug, Clone)]
 pub struct SemanticWarning {
+    /// Human-readable warning message.
     pub message: String,
+    /// Source location associated with the warning.
     pub span: Span,
 }
 
+/// The Volta semantic analyzer.
+///
+/// Validates a parsed [`Program`] for name resolution, type consistency,
+/// and property contract compliance before execution.
+/// Use [`SemanticAnalyzer::analyze`] to run analysis.
 pub struct SemanticAnalyzer {
     scopes: Vec<HashMap<String, ValueType>>,
     models: HashSet<String>,
@@ -61,6 +78,7 @@ struct FunctionSig {
 }
 
 impl SemanticAnalyzer {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             scopes: Vec::new(),
@@ -74,6 +92,7 @@ impl SemanticAnalyzer {
         }
     }
 
+    #[must_use]
     pub fn warnings(&self) -> &[SemanticWarning] {
         &self.warnings
     }
@@ -208,8 +227,7 @@ impl SemanticAnalyzer {
                 if !is_assignable(target_type, value_type) {
                     return Err(Self::error(
                         format!(
-                            "Type mismatch in assignment to '{}': expected {:?}, found {:?}",
-                            name, target_type, value_type
+                            "Type mismatch in assignment to '{name}': expected {target_type:?}, found {value_type:?}"
                         ),
                         *span,
                     ));
@@ -459,7 +477,7 @@ impl SemanticAnalyzer {
             if !present.contains(key) {
                 return Err(Self::error_with_hint(
                     format!("Missing required property '{key}' in {context} block"),
-                    props.first().map(|p| p.span).unwrap_or(Span::unknown()),
+                    props.first().map_or(Span::unknown(), |p| p.span),
                     format!(
                         "Add `{key} ...` to the {context} block. Required set: {}",
                         required.join(", ")
@@ -519,7 +537,7 @@ impl SemanticAnalyzer {
                     }
                 }
             }
-            ("model", "precision") | ("model", "memory") => {
+            ("model", "precision" | "memory") => {
                 self.expect_exact_count(context, prop, 1)?;
                 self.expect_symbol(context, &prop.key, &prop.values[0])?;
             }
@@ -687,10 +705,7 @@ impl SemanticAnalyzer {
                 None => format!("Allowed values: {}", allowed.join(", ")),
             };
             Err(Self::error_with_hint(
-                format!(
-                    "Invalid value '{}' for property '{}' in {context} block",
-                    symbol, key
-                ),
+                format!("Invalid value '{symbol}' for property '{key}' in {context} block"),
                 value.span(),
                 hint,
             ))
@@ -708,8 +723,7 @@ impl SemanticAnalyzer {
         if value_type != expected {
             return Err(Self::error(
                 format!(
-                    "Property '{key}' in {context} block expects {:?}, found {:?}",
-                    expected, value_type
+                    "Property '{key}' in {context} block expects {expected:?}, found {value_type:?}"
                 ),
                 value.span(),
             ));
@@ -880,7 +894,7 @@ impl SemanticAnalyzer {
                     .copied()
                     .unwrap_or(Span::unknown());
                 self.warnings.push(SemanticWarning {
-                    message: format!("Variable '{}' is declared but never used", name),
+                    message: format!("Variable '{name}' is declared but never used"),
                     span,
                 });
             }

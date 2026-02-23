@@ -1,0 +1,36 @@
+[package]
+name = "volta-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.volta]
+path = ".."
+features = ["onnx-import"]
+
+[[bin]]
+name = "lexer"
+path = "fuzz_targets/lexer.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parser"
+path = "fuzz_targets/parser.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "onnx_bytes"
+path = "fuzz_targets/onnx_bytes.rs"
+test = false
+doc = false
+bench = false

@@ -17,6 +17,7 @@ impl Default for LoweringContext {
 }
 
 impl LoweringContext {
+    #[must_use]
     pub fn new() -> Self {
         let mut graph = Graph::new();
         let entry_block = graph.create_block();
@@ -27,6 +28,7 @@ impl LoweringContext {
         }
     }
 
+    #[must_use]
     pub fn lower_program(mut self, program: &Program) -> Graph {
         for stmt in &program.statements {
             self.lower_stmt(stmt);
@@ -79,6 +81,7 @@ impl LoweringContext {
     }
 }
 
+#[must_use]
 pub fn lower_program(program: &Program) -> Graph {
     let graph = LoweringContext::new().lower_program(program);
     debug_assert!(verify_graph(&graph).is_ok());
@@ -171,7 +174,16 @@ mod tests {
                 | Op::Softmax(_)
                 | Op::Log(_)
                 | Op::Exp(_)
+                | Op::Sigmoid(_)
+                | Op::SigmoidBackward(_, _)
+                | Op::GeluExact(_)
+                | Op::Gelu(_)
+                | Op::GeluBackward(_, _)
+                | Op::Gemm { .. }
+                | Op::GemmBackward { .. }
                 | Op::ReduceSum { .. }
+                | Op::ReduceMax { .. }
+                | Op::ReduceMean { .. }
                 | Op::Conv2D(_, _)
                 | Op::Parameter(_)
                 | Op::Input(_)

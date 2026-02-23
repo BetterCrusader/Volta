@@ -7,7 +7,8 @@ pub struct Span {
 }
 
 impl Span {
-    pub fn new(line: usize, column: usize, end_line: usize, end_column: usize) -> Self {
+    #[must_use]
+    pub const fn new(line: usize, column: usize, end_line: usize, end_column: usize) -> Self {
         Self {
             line,
             column,
@@ -16,15 +17,18 @@ impl Span {
         }
     }
 
-    pub fn single(line: usize, column: usize) -> Self {
+    #[must_use]
+    pub const fn single(line: usize, column: usize) -> Self {
         Self::new(line, column, line, column)
     }
 
-    pub fn unknown() -> Self {
+    #[must_use]
+    pub const fn unknown() -> Self {
         Self::single(0, 0)
     }
 
-    pub fn merge(start: Span, end: Span) -> Self {
+    #[must_use]
+    pub const fn merge(start: Span, end: Span) -> Self {
         Self::new(start.line, start.column, end.end_line, end.end_column)
     }
 }
@@ -101,20 +105,21 @@ pub enum Stmt {
 }
 
 impl Stmt {
+    #[must_use]
     pub fn span(&self) -> Span {
         match self {
-            Stmt::VarDecl { span, .. }
-            | Stmt::Assign { span, .. }
-            | Stmt::Model { span, .. }
-            | Stmt::Dataset { span, .. }
-            | Stmt::Train { span, .. }
-            | Stmt::Save { span, .. }
-            | Stmt::Load { span, .. }
-            | Stmt::Print { span, .. }
-            | Stmt::Function { span, .. }
-            | Stmt::Return { span, .. }
-            | Stmt::Loop { span, .. }
-            | Stmt::If { span, .. } => *span,
+            Self::VarDecl { span, .. }
+            | Self::Assign { span, .. }
+            | Self::Model { span, .. }
+            | Self::Dataset { span, .. }
+            | Self::Train { span, .. }
+            | Self::Save { span, .. }
+            | Self::Load { span, .. }
+            | Self::Print { span, .. }
+            | Self::Function { span, .. }
+            | Self::Return { span, .. }
+            | Self::Loop { span, .. }
+            | Self::If { span, .. } => *span,
         }
     }
 }
@@ -162,20 +167,21 @@ pub enum Expr {
 }
 
 impl Expr {
+    #[must_use]
     pub fn span(&self) -> Span {
         match self {
-            Expr::Int { span, .. }
-            | Expr::Float { span, .. }
-            | Expr::Bool { span, .. }
-            | Expr::Str { span, .. }
-            | Expr::Ident { span, .. }
-            | Expr::Call { span, .. }
-            | Expr::Binary { span, .. } => *span,
+            Self::Int { span, .. }
+            | Self::Float { span, .. }
+            | Self::Bool { span, .. }
+            | Self::Str { span, .. }
+            | Self::Ident { span, .. }
+            | Self::Call { span, .. }
+            | Self::Binary { span, .. } => *span,
         }
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
     Greater,
     Less,

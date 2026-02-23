@@ -59,19 +59,13 @@ pub fn infer_with_backend(
     for (name, tensor) in inputs {
         context.inputs.insert(
             name.clone(),
-            RuntimeValue::Tensor {
-                shape: tensor.shape.clone(),
-                data: tensor.data.clone(),
-            },
+            RuntimeValue::Tensor(std::sync::Arc::new(tensor.clone())),
         );
     }
     for (name, tensor) in parameters {
         context.parameters.insert(
             name.clone(),
-            RuntimeValue::Tensor {
-                shape: tensor.shape.clone(),
-                data: tensor.data.clone(),
-            },
+            RuntimeValue::Tensor(std::sync::Arc::new(tensor.clone())),
         );
     }
 
@@ -88,11 +82,10 @@ pub fn infer_with_backend(
     })?;
 
     match runtime {
-        RuntimeValue::Tensor { shape, data } => {
-            Tensor::new(shape, data).map_err(|err| TrainApiError {
+        RuntimeValue::Tensor(tensor) => Tensor::new(tensor.shape.clone(), tensor.data.clone())
+            .map_err(|err| TrainApiError {
                 message: format!("Infer output is invalid tensor: {}", err.message),
-            })
-        }
+            }),
         RuntimeValue::Float(_) | RuntimeValue::Int(_) => Err(TrainApiError {
             message: "Infer output must be a tensor".to_string(),
         }),
@@ -108,6 +101,14 @@ pub fn train<D: Dataset>(
     train_with_backend(model, dataset, config, &backend)
 }
 
+/// Trains a compiled model with an explicit backend.
+///
+/// This API handles checkpoint preloading, dataset batching/shuffling policy,
+/// delegates training to IR-level training, and optionally writes checkpoints.
+///
+/// # Errors
+/// Returns [`TrainApiError`] when dataset access fails, checkpoint IO/format
+/// fails, graph training fails, or result conversion cannot be completed.
 pub fn train_with_backend<D: Dataset>(
     model: &CompiledModel,
     dataset: &D,

@@ -1,19 +1,30 @@
 [package]
 name = "volta"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 
 [features]
 default = []
 onnx-import = ["dep:tract-onnx", "dep:prost"]
+# Enable data-parallel execution on the CPU via rayon.
+# With this flag OFF the runtime is fully sequential and bit-exact across
+# every platform — safe for determinism-critical training.
+# With this flag ON multi-core throughput rises linearly; floating-point
+# order of operations may differ from the sequential path.
+parallel = ["dep:rayon"]
 
 [dependencies]
 cudarc = { version = "0.19.2", default-features = false, features = ["std", "driver", "runtime", "cublas", "nvrtc", "fallback-dynamic-loading", "cuda-13010"] }
+rayon = { version = "1", optional = true }
 tract-onnx = { version = "0.22", optional = true }
 prost = { version = "0.11.9", optional = true }
 
 [dev-dependencies]
 proptest = "1"
+
+[[bench]]
+name = "benchmarks"
+harness = false
 
 # ── Build profiles ──────────────────────────────────────────────────────────────
 

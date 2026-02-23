@@ -3,8 +3,8 @@ use std::hash::{Hash, Hasher};
 
 use crate::ir::{
     AllocationPlan, Graph, KernelGroup, Schedule, StorageClass, ValueId, build_schedule,
-    graph_fingerprint, group_kernels, plan_allocation, verify_allocation,
-    verify_graph, verify_schedule,
+    graph_fingerprint, group_kernels, plan_allocation, verify_allocation, verify_graph,
+    verify_schedule,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

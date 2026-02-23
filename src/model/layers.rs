@@ -13,6 +13,7 @@ impl Default for Sequential {
 }
 
 impl Sequential {
+    #[must_use]
     pub fn new() -> Self {
         Self { layers: Vec::new() }
     }

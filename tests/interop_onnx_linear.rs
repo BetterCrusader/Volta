@@ -62,21 +62,17 @@ fn imports_linear_relu_graph_and_executes() {
     let mut context = ExecutionContext::default();
     context.inputs.insert(
         "x".to_string(),
-        RuntimeValue::Tensor {
-            shape: vec![1, 2],
-            data: vec![3.0, 1.0],
-        },
+        RuntimeValue::Tensor(std::sync::Arc::new(
+            Tensor::new(vec![1, 2], vec![3.0, 1.0]).unwrap(),
+        )),
     );
 
     let output = execute_value_with_context(&imported.graph, imported.output, &context)
         .expect("execution should pass");
-    let RuntimeValue::Tensor { shape, data } = output else {
+    let RuntimeValue::Tensor(tensor) = output else {
         panic!("expected tensor output");
     };
 
-    assert_eq!(shape, vec![1, 2]);
-    assert_eq!(
-        Tensor::new(shape, data).expect("valid tensor").data,
-        vec![3.25, 0.0]
-    );
+    assert_eq!(tensor.shape, vec![1, 2]);
+    assert_eq!(tensor.data, vec![3.25, 0.0]);
 }

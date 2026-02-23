@@ -34,6 +34,14 @@ pub struct AllocationError {
     pub message: String,
 }
 
+/// Plans the memory allocation for all IR values in the given `graph`.
+///
+/// # Errors
+///
+/// Returns `Err(AllocationError)` if the schedule is invalid, shape
+/// inference fails, or the graph contains cycles that prevent liveness analysis.
+#[allow(clippy::implicit_hasher)]
+#[must_use = "the allocation plan must be used or errored"]
 pub fn plan_allocation(
     graph: &Graph,
     schedule: &Schedule,
@@ -130,6 +138,12 @@ pub fn plan_allocation(
     Ok(plan)
 }
 
+/// Verifies an existing allocation plan against the current graph schedule.
+///
+/// # Errors
+///
+/// Returns `Err(AllocationError)` if the schedule is invalid or the plan
+/// is inconsistent with the graph's current memory requirements.
 pub fn verify_allocation(
     graph: &Graph,
     schedule: &Schedule,
@@ -180,8 +194,7 @@ pub fn verify_allocation(
                     conflict_edges.push((value_a, value_b));
                     return Err(AllocationError {
                         message: format!(
-                            "Illegal aliasing: {:?} and {:?} overlap on immutable storage",
-                            value_a, value_b
+                            "Illegal aliasing: {value_a:?} and {value_b:?} overlap on immutable storage"
                         ),
                     });
                 }

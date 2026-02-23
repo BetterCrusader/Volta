@@ -70,6 +70,7 @@ impl Dataset for TinyTransformerFixtureDataset {
     }
 }
 
+#[must_use]
 pub fn build_tiny_transformer_fixture_for_tests() -> (
     CompiledModel,
     TinyTransformerFixtureDataset,

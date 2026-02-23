@@ -5,6 +5,7 @@ use crate::ir::{ElementwiseUnaryOp, Graph, Op, Pass, run_with_verifier_guard};
 pub struct TensorConstantPropagationPass;
 
 impl TensorConstantPropagationPass {
+    #[must_use]
     pub fn new() -> Self {
         Self
     }
@@ -45,16 +46,17 @@ fn fold_tensor_op(op: &Op, known_tensors: &[Option<Tensor>]) -> Option<Op> {
         Op::Div(a, b) => {
             let lhs = known_tensors.get(a.0).and_then(|v| v.as_ref())?;
             let rhs = known_tensors.get(b.0).and_then(|v| v.as_ref())?;
-            let mut out = Vec::with_capacity(lhs.data.len());
             if lhs.shape != rhs.shape {
                 return None;
             }
-            for (x, y) in lhs.data.iter().zip(rhs.data.iter()) {
-                if *y == 0.0 {
-                    return None;
-                }
-                out.push(*x / *y);
-            }
+            // Use collect::<Option<_>>() so that a zero divisor collapses the
+            // entire iterator to None without an explicit early return.
+            let out: Vec<f32> = lhs
+                .data
+                .iter()
+                .zip(rhs.data.iter())
+                .map(|(x, y)| if *y == 0.0 { None } else { Some(x / y) })
+                .collect::<Option<Vec<_>>>()?;
             const_tensor_op(Tensor::new(lhs.shape.clone(), out).ok()?)
         }
         Op::Neg(a) => {
@@ -80,7 +82,9 @@ fn fold_tensor_op(op: &Op, known_tensors: &[Option<Tensor>]) -> Option<Op> {
             const_tensor_op(input.relu_backward(grad).ok()?)
         }
         Op::ElementwiseChain { input, ops } => {
-            let mut tensor = known_tensors.get(input.0).and_then(|v| v.clone())?;
+            let mut tensor = known_tensors
+                .get(input.0)
+                .and_then(std::clone::Clone::clone)?;
             for op in ops {
                 tensor = match op {
                     ElementwiseUnaryOp::Neg => tensor.scale(-1.0).ok()?,
@@ -96,7 +100,7 @@ fn fold_tensor_op(op: &Op, known_tensors: &[Option<Tensor>]) -> Option<Op> {
         Op::Concat { inputs, axis } => {
             let tensors = inputs
                 .iter()
-                .map(|id| known_tensors.get(id.0).and_then(|v| v.clone()))
+                .map(|id| known_tensors.get(id.0).and_then(std::clone::Clone::clone))
                 .collect::<Option<Vec<_>>>()?;
             const_tensor_op(Tensor::concat(&tensors, *axis).ok()?)
         }
@@ -123,7 +127,16 @@ fn fold_tensor_op(op: &Op, known_tensors: &[Option<Tensor>]) -> Option<Op> {
         | Op::Softmax(_)
         | Op::Log(_)
         | Op::Exp(_)
+        | Op::Sigmoid(_)
+        | Op::SigmoidBackward(_, _)
+        | Op::GeluExact(_)
+        | Op::Gelu(_)
+        | Op::GeluBackward(_, _)
+        | Op::Gemm { .. }
+        | Op::GemmBackward { .. }
         | Op::ReduceSum { .. }
+        | Op::ReduceMax { .. }
+        | Op::ReduceMean { .. }
         | Op::Conv2D(_, _)
         | Op::Parameter(_)
         | Op::Input(_)
@@ -189,10 +202,9 @@ mod tests {
         let result = execute(&graph).expect("execute should pass");
         assert_eq!(
             result,
-            Some(RuntimeValue::Tensor {
-                shape: vec![1, 1],
-                data: vec![11.0]
-            })
+            Some(RuntimeValue::Tensor(std::sync::Arc::new(
+                crate::ir::tensor::Tensor::new(vec![1, 1], vec![11.0]).unwrap()
+            )))
         );
     }
 }

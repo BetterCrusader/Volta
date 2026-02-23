@@ -90,31 +90,27 @@ fn supported_inference_context() -> ExecutionContext {
     let mut context = ExecutionContext::default();
     context.inputs.insert(
         "x".to_string(),
-        RuntimeValue::Tensor {
-            shape: vec![1, 2],
-            data: vec![1.0, -2.0],
-        },
+        RuntimeValue::Tensor(std::sync::Arc::new(
+            volta::ir::Tensor::new(vec![1, 2], vec![1.0, -2.0]).unwrap(),
+        )),
     );
     context.inputs.insert(
         "logits".to_string(),
-        RuntimeValue::Tensor {
-            shape: vec![2],
-            data: vec![0.1, 0.9],
-        },
+        RuntimeValue::Tensor(std::sync::Arc::new(
+            volta::ir::Tensor::new(vec![2], vec![0.1, 0.9]).unwrap(),
+        )),
     );
     context.parameters.insert(
         "w".to_string(),
-        RuntimeValue::Tensor {
-            shape: vec![2, 2],
-            data: vec![0.5, -1.0, 1.5, 2.0],
-        },
+        RuntimeValue::Tensor(std::sync::Arc::new(
+            volta::ir::Tensor::new(vec![2, 2], vec![0.5, -1.0, 1.5, 2.0]).unwrap(),
+        )),
     );
     context.parameters.insert(
         "b".to_string(),
-        RuntimeValue::Tensor {
-            shape: vec![1, 2],
-            data: vec![0.25, -0.75],
-        },
+        RuntimeValue::Tensor(std::sync::Arc::new(
+            volta::ir::Tensor::new(vec![1, 2], vec![0.25, -0.75]).unwrap(),
+        )),
     );
     context
 }

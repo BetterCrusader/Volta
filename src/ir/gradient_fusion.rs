@@ -4,6 +4,7 @@ use crate::ir::{ElementwiseFusionPass, Graph, Pass, run_with_verifier_guard};
 pub struct GradientFusionPass;
 
 impl GradientFusionPass {
+    #[must_use]
     pub fn new() -> Self {
         Self
     }

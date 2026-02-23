@@ -7,7 +7,9 @@ use volta::model::{build_tiny_transformer_fixture_for_tests, train_with_backend}
 #[test]
 fn strict_cuda_training_replay_is_bitwise_stable() {
     if !cuda_helpers::cuda_runtime_available() {
-        eprintln!("[SKIP] strict_cuda_training_replay_is_bitwise_stable — no CUDA device available");
+        eprintln!(
+            "[SKIP] strict_cuda_training_replay_is_bitwise_stable — no CUDA device available"
+        );
         return;
     }
     cuda_helpers::with_determinism("strict", || {

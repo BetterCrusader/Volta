@@ -45,9 +45,39 @@ enum CseKey {
     Softmax(ValueId),
     Log(ValueId),
     Exp(ValueId),
+    Sigmoid(ValueId),
+    SigmoidBackward(ValueId, ValueId),
+    Gelu(ValueId),
+    GeluExact(ValueId),
+    GeluBackward(ValueId, ValueId),
+    Gemm {
+        lhs: ValueId,
+        rhs: ValueId,
+        bias: Option<ValueId>,
+        alpha: u32,
+        beta: u32,
+    },
+    GemmBackward {
+        lhs: ValueId,
+        rhs: ValueId,
+        bias: Option<ValueId>,
+        alpha: u32,
+        beta: u32,
+    },
     ReduceSum {
         input: ValueId,
         axis: Option<usize>,
+        keepdims: bool,
+    },
+    ReduceMax {
+        input: ValueId,
+        axis: Option<usize>,
+        keepdims: bool,
+    },
+    ReduceMean {
+        input: ValueId,
+        axis: Option<usize>,
+        keepdims: bool,
     },
     Conv2D(ValueId, ValueId),
 }
@@ -56,6 +86,7 @@ enum CseKey {
 pub struct CsePass;
 
 impl CsePass {
+    #[must_use]
     pub fn new() -> Self {
         Self
     }
@@ -155,9 +186,63 @@ fn key_of(op: &Op) -> Option<CseKey> {
         Op::Softmax(value) => Some(CseKey::Softmax(*value)),
         Op::Log(value) => Some(CseKey::Log(*value)),
         Op::Exp(value) => Some(CseKey::Exp(*value)),
-        Op::ReduceSum { input, axis } => Some(CseKey::ReduceSum {
+        Op::Sigmoid(value) => Some(CseKey::Sigmoid(*value)),
+        Op::SigmoidBackward(input, grad) => Some(CseKey::SigmoidBackward(*input, *grad)),
+        Op::Gelu(value) => Some(CseKey::Gelu(*value)),
+        Op::GeluExact(value) => Some(CseKey::GeluExact(*value)),
+        Op::GeluBackward(input, grad) => Some(CseKey::GeluBackward(*input, *grad)),
+        Op::Gemm {
+            lhs,
+            rhs,
+            bias,
+            alpha,
+            beta,
+        } => Some(CseKey::Gemm {
+            lhs: *lhs,
+            rhs: *rhs,
+            bias: *bias,
+            alpha: alpha.to_bits(),
+            beta: beta.to_bits(),
+        }),
+        Op::GemmBackward {
+            lhs,
+            rhs,
+            bias,
+            alpha,
+            beta,
+        } => Some(CseKey::GemmBackward {
+            lhs: *lhs,
+            rhs: *rhs,
+            bias: *bias,
+            alpha: alpha.to_bits(),
+            beta: beta.to_bits(),
+        }),
+        Op::ReduceSum {
+            input,
+            axis,
+            keepdims,
+        } => Some(CseKey::ReduceSum {
             input: *input,
             axis: *axis,
+            keepdims: *keepdims,
+        }),
+        Op::ReduceMax {
+            input,
+            axis,
+            keepdims,
+        } => Some(CseKey::ReduceMax {
+            input: *input,
+            axis: *axis,
+            keepdims: *keepdims,
+        }),
+        Op::ReduceMean {
+            input,
+            axis,
+            keepdims,
+        } => Some(CseKey::ReduceMean {
+            input: *input,
+            axis: *axis,
+            keepdims: *keepdims,
         }),
         Op::Conv2D(input, weight) => Some(CseKey::Conv2D(*input, *weight)),
         Op::Parameter(_) | Op::Input(_) | Op::Output(_) | Op::Phi(_) | Op::Removed => None,

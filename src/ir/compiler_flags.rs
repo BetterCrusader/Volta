@@ -9,6 +9,7 @@ pub struct CompilerFlags {
 }
 
 impl CompilerFlags {
+    #[must_use]
     pub fn from_env() -> Self {
         Self {
             strict: read_bool("VOLTA_STRICT", true),
@@ -19,13 +20,14 @@ impl CompilerFlags {
     }
 }
 
+#[must_use]
 fn read_bool(key: &str, default_value: bool) -> bool {
-    std::env::var(key)
-        .ok()
-        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
-        .unwrap_or(default_value)
+    std::env::var(key).ok().map_or(default_value, |value| {
+        value == "1" || value.eq_ignore_ascii_case("true")
+    })
 }
 
+#[must_use]
 fn read_determinism(key: &str, default_value: DeterminismLevel) -> DeterminismLevel {
     let Ok(value) = std::env::var(key) else {
         return default_value;

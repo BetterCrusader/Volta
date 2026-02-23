@@ -1,3 +1,14 @@
+#![allow(
+    clippy::missing_errors_doc,
+    clippy::must_use_candidate,
+    clippy::unused_self,
+    clippy::uninlined_format_args,
+    clippy::too_many_lines,
+    clippy::match_same_arms,
+    clippy::manual_let_else,
+    clippy::needless_pass_by_value
+)]
+
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -54,6 +65,7 @@ struct ProgramStats {
     if_stmt: usize,
 }
 
+#[allow(clippy::too_many_lines)]
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
     let command = match parse_command(&args) {
@@ -210,6 +222,7 @@ fn main() -> ExitCode {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
     if args.is_empty() {
         return Ok(CommandSpec {
@@ -304,7 +317,9 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
         }
         _ if args.len() == 1 && !cmd.starts_with('-') => {
             let token = args[0].as_str();
-            let looks_like_path = token.ends_with(".vt")
+            let looks_like_path = std::path::Path::new(token)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("vt"))
                 || token.contains('/')
                 || token.contains('\\')
                 || Path::new(token).exists();
@@ -354,14 +369,10 @@ fn parse_init_command(args: &[String]) -> Result<CommandSpec, String> {
 fn unknown_command_message(input: &str) -> String {
     if let Some(suggestion) = best_suggestion(input, &CLI_COMMANDS) {
         return format!(
-            "Unknown command '{}'. Did you mean '{}'? Expected run/check/info/doctor/init/version/help",
-            input, suggestion
+            "Unknown command '{input}'. Did you mean '{suggestion}'? Expected run/check/info/doctor/init/version/help"
         );
     }
-    format!(
-        "Unknown command '{}'. Expected run/check/info/doctor/init/version/help",
-        input
-    )
+    format!("Unknown command '{input}'. Expected run/check/info/doctor/init/version/help")
 }
 
 fn parse_file_command(
@@ -497,7 +508,7 @@ struct DoctorReport {
 
 fn collect_doctor_report() -> DoctorReport {
     let cpu_threads = std::thread::available_parallelism()
-        .map(|n| n.get())
+        .map(std::num::NonZero::get)
         .unwrap_or(1);
     let gpu_env = parse_gpu_env_status();
     let onnx_import_enabled = cfg!(feature = "onnx-import");

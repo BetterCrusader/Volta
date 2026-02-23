@@ -49,9 +49,43 @@ pub enum Op {
     Softmax(ValueId),
     Log(ValueId),
     Exp(ValueId),
+    Sigmoid(ValueId),
+    SigmoidBackward(ValueId, ValueId),
+    Gelu(ValueId),
+    GeluExact(ValueId),
+    GeluBackward(ValueId, ValueId),
     ReduceSum {
         input: ValueId,
         axis: Option<usize>,
+        keepdims: bool,
+    },
+    ReduceMax {
+        input: ValueId,
+        axis: Option<usize>,
+        keepdims: bool,
+    },
+    ReduceMean {
+        input: ValueId,
+        axis: Option<usize>,
+        keepdims: bool,
+    },
+    /// Generalised Matrix Multiply: `alpha * (lhs × rhs) + beta * bias`.
+    ///
+    /// Matches the ONNX `Gemm` operator and the standard BLAS SGEMM interface.
+    /// When `bias` is `None` the operation degenerates to a scaled MatMul.
+    Gemm {
+        lhs: ValueId,
+        rhs: ValueId,
+        bias: Option<ValueId>,
+        alpha: f32,
+        beta: f32,
+    },
+    GemmBackward {
+        lhs: ValueId,
+        rhs: ValueId,
+        bias: Option<ValueId>,
+        alpha: f32,
+        beta: f32,
     },
     Conv2D(ValueId, ValueId),
     Parameter(String),
@@ -62,6 +96,7 @@ pub enum Op {
 }
 
 impl Op {
+    #[must_use]
     pub fn input_values(&self) -> Vec<ValueId> {
         match self {
             Op::Add(left, right)
@@ -69,13 +104,34 @@ impl Op {
             | Op::Mul(left, right)
             | Op::Div(left, right)
             | Op::MatMul(left, right)
+            | Op::SigmoidBackward(left, right)
+            | Op::GeluBackward(left, right)
             | Op::ReluBackward(left, right)
             | Op::Conv2D(left, right) => vec![*left, *right],
             Op::Relu(value) | Op::Softmax(value) | Op::Output(value) => vec![*value],
-            Op::Neg(value) | Op::Transpose(value) | Op::Log(value) | Op::Exp(value) => vec![*value],
+            Op::Neg(value)
+            | Op::Transpose(value)
+            | Op::Log(value)
+            | Op::Exp(value)
+            | Op::Sigmoid(value)
+            | Op::Gelu(value)
+            | Op::GeluExact(value)
+            | Op::GemmBackward { lhs: value, .. } => vec![*value],
             Op::ElementwiseChain { input, .. } => vec![*input],
-            Op::Reshape { input, .. } | Op::Gather { input, .. } | Op::Slice { input, .. } | Op::ReduceSum { input, .. } => {
+            Op::Reshape { input, .. }
+            | Op::Gather { input, .. }
+            | Op::Slice { input, .. }
+            | Op::ReduceSum { input, .. }
+            | Op::ReduceMax { input, .. }
+            | Op::ReduceMean { input, .. } => {
                 vec![*input]
+            }
+            Op::Gemm { lhs, rhs, bias, .. } => {
+                let mut inputs = vec![*lhs, *rhs];
+                if let Some(b) = bias {
+                    inputs.push(*b);
+                }
+                inputs
             }
             Op::Concat { inputs, .. } => inputs.clone(),
             Op::Phi(values) => values.clone(),
@@ -96,6 +152,8 @@ impl Op {
             | Op::Div(left, right)
             | Op::MatMul(left, right)
             | Op::ReluBackward(left, right)
+            | Op::SigmoidBackward(left, right)
+            | Op::GeluBackward(left, right)
             | Op::Conv2D(left, right) => {
                 *left = remap(*left);
                 *right = remap(*right);
@@ -106,14 +164,36 @@ impl Op {
             | Op::Neg(value)
             | Op::Transpose(value)
             | Op::Log(value)
-            | Op::Exp(value) => {
+            | Op::Exp(value)
+            | Op::Sigmoid(value)
+            | Op::Gelu(value)
+            | Op::GeluExact(value) => {
                 *value = remap(*value);
             }
             Op::ElementwiseChain { input, .. } => {
                 *input = remap(*input);
             }
-            Op::Reshape { input, .. } | Op::Gather { input, .. } | Op::Slice { input, .. } | Op::ReduceSum { input, .. } => {
+            Op::Reshape { input, .. }
+            | Op::Gather { input, .. }
+            | Op::Slice { input, .. }
+            | Op::ReduceSum { input, .. }
+            | Op::ReduceMax { input, .. }
+            | Op::ReduceMean { input, .. } => {
                 *input = remap(*input);
+            }
+            Op::Gemm { lhs, rhs, bias, .. } => {
+                *lhs = remap(*lhs);
+                *rhs = remap(*rhs);
+                if let Some(b) = bias {
+                    *b = remap(*b);
+                }
+            }
+            Op::GemmBackward { lhs, rhs, bias, .. } => {
+                *lhs = remap(*lhs);
+                *rhs = remap(*rhs);
+                if let Some(b) = bias {
+                    *b = remap(*b);
+                }
             }
             Op::Concat { inputs, .. } => {
                 for input in inputs {

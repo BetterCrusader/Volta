@@ -64,10 +64,9 @@ fn imported_stub_graph_matches_native_ir_execution() {
     let mut context = ExecutionContext::default();
     context.inputs.insert(
         "x".to_string(),
-        RuntimeValue::Tensor {
-            shape: vec![1, 2],
-            data: vec![3.0, 1.0],
-        },
+        RuntimeValue::Tensor(std::sync::Arc::new(
+            volta::ir::Tensor::new(vec![1, 2], vec![3.0, 1.0]).unwrap(),
+        )),
     );
 
     let imported_out = execute_value_with_context(&imported.graph, imported.output, &context)

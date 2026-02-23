@@ -5,6 +5,11 @@ use crate::ir::{
     train_graph_with_backend,
 };
 
+/// Trains a graph using the CUDA backend shortcut.
+///
+/// # Errors
+/// Returns [`TrainError`] when CUDA backend execution fails, backward graph
+/// creation fails, or optimizer updates cannot be applied.
 pub fn train_graph_cuda(
     forward_graph: &Graph,
     loss_value: ValueId,

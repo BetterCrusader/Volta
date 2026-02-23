@@ -9,7 +9,9 @@ use volta::model::{
 #[test]
 fn tiny_transformer_training_runs_with_cuda_backend() {
     if !cuda_helpers::cuda_runtime_available() {
-        eprintln!("[SKIP] tiny_transformer_training_runs_with_cuda_backend — no CUDA device available");
+        eprintln!(
+            "[SKIP] tiny_transformer_training_runs_with_cuda_backend — no CUDA device available"
+        );
         return;
     }
     let (model, dataset, train_config, infer_input) = build_tiny_transformer_fixture_for_tests();

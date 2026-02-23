@@ -57,6 +57,7 @@ impl CrossEntropyLoss {
         let sum = builder.add_op(Op::ReduceSum {
             input: weighted,
             axis: None,
+            keepdims: false,
         })?;
         let neg = builder.add_op(Op::Neg(sum))?;
         builder.add_op(Op::Output(neg))

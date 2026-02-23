@@ -77,6 +77,7 @@ impl CudaDevice {
         })
     }
 
+    #[must_use]
     pub fn has_runtime_handles(&self) -> bool {
         self.runtime.is_some()
     }
@@ -171,8 +172,7 @@ impl CudaDevice {
             .load_function(function_name)
             .map_err(|err| CudaDeviceError {
                 message: format!(
-                    "CUDA function load failed for '{}' in module '{}': {}",
-                    function_name, module_key, err
+                    "CUDA function load failed for '{function_name}' in module '{module_key}': {err}"
                 ),
             })?;
 

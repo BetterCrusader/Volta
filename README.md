@@ -1,39 +1,56 @@
-# Volta: Deterministic ML Runtime You Can Actually Trust
+# Volta: Deterministic-First Compiler + ML Runtime (Experimental)
 
-If the same model input can produce different outcomes, production is roulette.
-Volta removes that roulette: **same inputs, same graph, same policy, same result**.
+Most ML stacks optimize for velocity first and explain behavior later.
+Volta does the opposite: **same inputs, same graph, same policy, same result** is the contract.
 
-Volta is a compiler-first ML runtime in Rust with deterministic execution as a product feature, not an afterthought.
+## Read This First (Honest Status)
 
-## Why This Is Different
-Most stacks optimize for speed first and explain behavior later.
-Volta flips that model:
+- Volta is **experimental** and still early-stage.
+- The current hardening wave in this repo was built rapidly in about **4 days** (2026-02-20 to 2026-02-23), then locked behind strict quality gates.
+- This is **not** a full replacement for PyTorch. It is a deterministic-first engine for a narrower, governed scope.
+
+If you need broad ecosystem coverage today, use PyTorch.
+If you need hard replayability and explicit failure semantics for supported paths, Volta is where we are pushing harder.
+
+## Why This Exists
+
+When reproducibility is optional, production debugging becomes expensive guesswork.
+Volta makes reproducibility a first-class runtime property:
 
 - verifier-first graph discipline
-- deterministic schedule and allocation
-- strict contracts before runtime execution
+- deterministic scheduling and allocation
+- explicit unsupported-path failures (no silent fallback)
 - policy-driven release gates
 
-This is the engine for teams that want ML systems that are inspectable, replayable, and production-safe.
+## Where Volta Is Better Than PyTorch (Today, Narrow Scope)
 
-## What You Can Do Right Now
+This comparison is intentionally scoped and factual.
 
-- Parse and execute the Volta DSL
+- **Determinism as a product contract:** replay discipline is designed into scheduler/allocation/runtime behavior, not treated as best effort.
+- **No silent fallback policy:** unsupported paths are expected to fail loudly, not quietly switch execution semantics.
+- **Governance-backed verification lanes:** Quality Fortress gates enforce determinism and contract alignment in CI.
+
+## Where Volta Is Not Better (Yet)
+
+- PyTorch has vastly larger model/operator ecosystem and tooling.
+- Volta ONNX import is a constrained Wave 1/2 static subset, not full ONNX breadth.
+- Some paths are intentionally explicit stubs/not-implemented (for example selected backward/operator combinations), by design, to avoid fake readiness.
+
+## What Works Right Now
+
+- Parse and execute Volta DSL programs
 - Compile to strict SSA IR
 - Run deterministic CPU and CUDA validation lanes
-- Import ONNX Wave 1 and Wave 2 contracts under governance
-- Ship with hard CI gates instead of guesswork
+- Import ONNX Wave 1 and Wave 2 static contracts under governance
+- Train/infer through guarded runtime gateways with explicit policy checks
 
+## Current Limits (Explicit, No Marketing Spin)
 
+- ONNX scope is partial and static by design.
+- Some autograd and CUDA paths are explicit fail-fast non-support where implementation is incomplete.
+- This repo prioritizes correctness and determinism over broad operator count.
 
-## Project Status
-
-- current stable release channel: `release-v1.0.0` (Volta V1)
-- historical milestones (pre-v1): `v0.1.0-core`, `v0.2.0-*`
-- governance hardening under **Quality Fortress**
-- CUDA inference MVP in Wave 3 hardening track
-- CUDA training hardening in Wave 4 hardening track
-- active engineering focus: deterministic runtime, ONNX interop, release reliability
+Details are tracked in `docs/ONNX_COVERAGE.md` and governance docs.
 
 ## Quick Start
 
@@ -61,7 +78,7 @@ Command intent:
 - `check`: parse + semantic validation (no execution)
 - `info`: structural summary (statements and topology)
 - `doctor`: environment and determinism readiness report
-- `init`: scaffold a Volta project in seconds
+- `init`: scaffold a Volta project quickly
 
 ## Architecture In One View
 
@@ -112,8 +129,8 @@ print "training complete"
 ```bash
 cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
-cargo test
-cargo test --release
+cargo test --all-targets --all-features
+cargo check --manifest-path fuzz/Cargo.toml
 ```
 
 ## Quality Fortress Gates
@@ -173,6 +190,7 @@ Start here:
 - `docs/governance/cuda-determinism-policy.md`
 - `docs/governance/perf-governance.md`
 - `docs/governance/ci-topology.md`
+- `docs/governance/QUALITY_POLICY.md`
 
 ## Contributor Onboarding
 
@@ -182,6 +200,5 @@ Start here:
 
 ## Positioning
 
-Volta is not "yet another eager framework".
-
-It is a deterministic compiler core for teams that treat correctness and replayability as first-class product requirements.
+Volta is not trying to win by feature count right now.
+Volta is trying to win where determinism, replayability, and explicit contracts are non-negotiable.

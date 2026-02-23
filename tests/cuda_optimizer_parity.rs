@@ -11,7 +11,9 @@ use volta::ir::{
 #[test]
 fn cpu_and_cuda_optimizers_match_state_in_strict_mode() {
     if !cuda_helpers::cuda_runtime_available() {
-        eprintln!("[SKIP] cpu_and_cuda_optimizers_match_state_in_strict_mode — no CUDA device available");
+        eprintln!(
+            "[SKIP] cpu_and_cuda_optimizers_match_state_in_strict_mode — no CUDA device available"
+        );
         return;
     }
     cuda_helpers::with_determinism("strict", || {
@@ -101,4 +103,3 @@ fn sample(x: f32, y: f32) -> TrainSample {
     );
     TrainSample { inputs }
 }
-

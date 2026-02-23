@@ -79,8 +79,33 @@ fn infer_shape_for_op(
             ShapeFact::NonTensor => Err("transpose expects tensor input".to_string()),
         },
         Op::MatMul(left, right) => infer_matmul(*left, *right, shapes),
-        Op::Relu(value) | Op::Softmax(value) | Op::Log(value) | Op::Exp(value) => infer_tensor_unary(*value, shapes),
-        Op::ReduceSum { input, axis } => infer_reduce_sum(*input, *axis, shapes),
+        Op::Relu(value)
+        | Op::Softmax(value)
+        | Op::Log(value)
+        | Op::Exp(value)
+        | Op::Sigmoid(value)
+        | Op::GeluExact(value)
+        | Op::Gelu(value) => infer_tensor_unary(*value, shapes),
+        Op::SigmoidBackward(input, grad) | Op::GeluBackward(input, grad) => {
+            infer_same_tensor(*input, *grad, shapes, "backward")
+        }
+        Op::Gemm { lhs, rhs, .. } => infer_matmul(*lhs, *rhs, shapes),
+        Op::GemmBackward { lhs, rhs, .. } => infer_matmul(*lhs, *rhs, shapes),
+        Op::ReduceSum {
+            input,
+            axis,
+            keepdims,
+        } => infer_reduce(*input, *axis, *keepdims, shapes, "reduce_sum"),
+        Op::ReduceMax {
+            input,
+            axis,
+            keepdims,
+        } => infer_reduce(*input, *axis, *keepdims, shapes, "reduce_max"),
+        Op::ReduceMean {
+            input,
+            axis,
+            keepdims,
+        } => infer_reduce(*input, *axis, *keepdims, shapes, "reduce_mean"),
         Op::ReluBackward(input, grad) => infer_same_tensor(*input, *grad, shapes, "relu_backward"),
         Op::Conv2D(input, weight) => infer_conv2d(*input, *weight, shapes),
         Op::Phi(values) => infer_phi(values, shapes),
@@ -98,13 +123,10 @@ fn infer_elementwise(
     match (left_shape, right_shape) {
         (ShapeFact::NonTensor, ShapeFact::NonTensor) => Ok(ShapeFact::NonTensor),
         (ShapeFact::Tensor(a), ShapeFact::Tensor(b)) => {
-            if a == b {
-                Ok(ShapeFact::Tensor(a))
+            if let Some(out_shape) = broadcast_shapes(&a, &b) {
+                Ok(ShapeFact::Tensor(out_shape))
             } else {
-                Err(format!(
-                    "Shape mismatch in elementwise op: {:?} vs {:?}",
-                    a, b
-                ))
+                Err(format!("Shape mismatch in elementwise op: {a:?} vs {b:?}"))
             }
         }
         (ShapeFact::Unknown, x) | (x, ShapeFact::Unknown) => Ok(x),
@@ -383,34 +405,48 @@ fn infer_slice(
     }
 }
 
-fn infer_reduce_sum(
+fn infer_reduce(
     input: ValueId,
     axis: Option<usize>,
+    keepdims: bool,
     shapes: &HashMap<ValueId, ShapeFact>,
+    op_name: &str,
 ) -> Result<ShapeFact, String> {
     match shape_of(input, shapes) {
-        ShapeFact::Tensor(shape) => {
-            match axis {
-                None => Ok(ShapeFact::Tensor(vec![1])),
-                Some(a) => {
-                    if a >= shape.len() {
-                        return Err(format!(
-                            "reduce_sum axis {} out of bounds for rank {} tensor",
-                            a,
-                            shape.len()
-                        ));
+        ShapeFact::Tensor(shape) => match axis {
+            None => {
+                if keepdims {
+                    if shape.is_empty() {
+                        Ok(ShapeFact::Tensor(vec![1]))
+                    } else {
+                        Ok(ShapeFact::Tensor(vec![1; shape.len()]))
                     }
-                    let mut out = shape;
+                } else {
+                    Ok(ShapeFact::Tensor(vec![1]))
+                }
+            }
+            Some(a) => {
+                if a >= shape.len() {
+                    return Err(format!(
+                        "{op_name} axis {} out of bounds for rank {} tensor",
+                        a,
+                        shape.len()
+                    ));
+                }
+                let mut out = shape;
+                if keepdims {
+                    out[a] = 1;
+                } else {
                     out.remove(a);
                     if out.is_empty() {
                         out.push(1);
                     }
-                    Ok(ShapeFact::Tensor(out))
                 }
+                Ok(ShapeFact::Tensor(out))
             }
-        }
+        },
         ShapeFact::Unknown => Ok(ShapeFact::Unknown),
-        ShapeFact::NonTensor => Err("reduce_sum expects tensor input".to_string()),
+        ShapeFact::NonTensor => Err(format!("{op_name} expects tensor input")),
     }
 }
 
@@ -450,6 +486,33 @@ fn unify_shape(current: ShapeFact, next: ShapeFact) -> Result<ShapeFact, String>
 
 fn shape_of(value: ValueId, shapes: &HashMap<ValueId, ShapeFact>) -> ShapeFact {
     shapes.get(&value).cloned().unwrap_or(ShapeFact::Unknown)
+}
+
+pub fn broadcast_shapes(s1: &[usize], s2: &[usize]) -> Option<Vec<usize>> {
+    let max_len = s1.len().max(s2.len());
+    let mut out = vec![0; max_len];
+    for i in 0..max_len {
+        let dim1 = if i < max_len - s1.len() {
+            1
+        } else {
+            s1[i - (max_len - s1.len())]
+        };
+        let dim2 = if i < max_len - s2.len() {
+            1
+        } else {
+            s2[i - (max_len - s2.len())]
+        };
+        if dim1 == dim2 {
+            out[i] = dim1;
+        } else if dim1 == 1 {
+            out[i] = dim2;
+        } else if dim2 == 1 {
+            out[i] = dim1;
+        } else {
+            return None;
+        }
+    }
+    Some(out)
 }
 
 #[cfg(test)]

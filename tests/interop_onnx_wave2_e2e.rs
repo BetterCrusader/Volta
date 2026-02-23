@@ -66,26 +66,23 @@ fn wave2_stub_graph_executes_for_reshape_concat_gather_slice() {
     let mut context = ExecutionContext::default();
     context.inputs.insert(
         "x1".to_string(),
-        RuntimeValue::Tensor {
-            shape: vec![1, 2],
-            data: vec![1.0, 2.0],
-        },
+        RuntimeValue::Tensor(std::sync::Arc::new(
+            volta::ir::Tensor::new(vec![1, 2], vec![1.0, 2.0]).unwrap(),
+        )),
     );
     context.inputs.insert(
         "x2".to_string(),
-        RuntimeValue::Tensor {
-            shape: vec![1, 2],
-            data: vec![3.0, 4.0],
-        },
+        RuntimeValue::Tensor(std::sync::Arc::new(
+            volta::ir::Tensor::new(vec![1, 2], vec![3.0, 4.0]).unwrap(),
+        )),
     );
 
     let value = execute_value_with_context(&program.graph, program.output, &context)
         .expect("wave2 runtime execution should succeed");
     assert_eq!(
         value,
-        RuntimeValue::Tensor {
-            shape: vec![1, 1],
-            data: vec![3.0],
-        }
+        RuntimeValue::Tensor(std::sync::Arc::new(
+            volta::ir::Tensor::new(vec![1, 1], vec![3.0]).unwrap()
+        ))
     );
 }

@@ -10,7 +10,9 @@ use volta::model::{CompiledModel, ModelBuilder, Parameter, TensorShape, infer_wi
 fn cuda_infer_matches_cpu_for_seeded_fuzz_cases() {
     cuda_helpers::with_determinism("strict", || {
         if !cuda_helpers::cuda_runtime_available() {
-            eprintln!("[SKIP] cuda_infer_matches_cpu_for_seeded_fuzz_cases — no CUDA device available");
+            eprintln!(
+                "[SKIP] cuda_infer_matches_cpu_for_seeded_fuzz_cases — no CUDA device available"
+            );
             return;
         }
 
@@ -142,4 +144,3 @@ fn max_rel_diff(left: &[f32], right: &[f32]) -> f32 {
         })
         .fold(0.0_f32, f32::max)
 }
-

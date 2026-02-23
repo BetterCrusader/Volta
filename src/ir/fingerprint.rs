@@ -3,6 +3,7 @@ use std::hash::{Hash, Hasher};
 
 use crate::ir::{Graph, Op};
 
+#[must_use]
 pub fn graph_fingerprint(graph: &Graph) -> u64 {
     let mut hasher = DefaultHasher::new();
     graph.nodes.len().hash(&mut hasher);
@@ -40,12 +41,68 @@ fn hash_op(op: &Op, hasher: &mut DefaultHasher) {
             a.0.hash(hasher);
             b.0.hash(hasher);
         }
-        Op::Neg(v) | Op::Transpose(v) | Op::Relu(v) | Op::Softmax(v) | Op::Output(v) | Op::Log(v) | Op::Exp(v) => {
-            v.0.hash(hasher)
+        Op::Neg(v)
+        | Op::Transpose(v)
+        | Op::Relu(v)
+        | Op::Softmax(v)
+        | Op::Output(v)
+        | Op::Log(v)
+        | Op::Exp(v)
+        | Op::Sigmoid(v)
+        | Op::GeluExact(v)
+        | Op::Gelu(v) => {
+            v.0.hash(hasher);
         }
-        Op::ReduceSum { input, axis } => {
+        Op::SigmoidBackward(a, b) | Op::GeluBackward(a, b) => {
+            a.0.hash(hasher);
+            b.0.hash(hasher);
+        }
+        Op::Gemm {
+            lhs,
+            rhs,
+            bias,
+            alpha,
+            beta,
+        }
+        | Op::GemmBackward {
+            lhs,
+            rhs,
+            bias,
+            alpha,
+            beta,
+        } => {
+            lhs.0.hash(hasher);
+            rhs.0.hash(hasher);
+            bias.hash(hasher);
+            alpha.to_bits().hash(hasher);
+            beta.to_bits().hash(hasher);
+        }
+        Op::ReduceSum {
+            input,
+            axis,
+            keepdims,
+        } => {
             input.0.hash(hasher);
             axis.hash(hasher);
+            keepdims.hash(hasher);
+        }
+        Op::ReduceMax {
+            input,
+            axis,
+            keepdims,
+        } => {
+            input.0.hash(hasher);
+            axis.hash(hasher);
+            keepdims.hash(hasher);
+        }
+        Op::ReduceMean {
+            input,
+            axis,
+            keepdims,
+        } => {
+            input.0.hash(hasher);
+            axis.hash(hasher);
+            keepdims.hash(hasher);
         }
         Op::ElementwiseChain { input, ops } => {
             input.0.hash(hasher);

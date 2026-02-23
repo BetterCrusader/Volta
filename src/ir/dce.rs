@@ -4,6 +4,7 @@ use crate::ir::{Graph, Op, Pass, ValueId, run_with_verifier_guard};
 pub struct DcePass;
 
 impl DcePass {
+    #[must_use]
     pub fn new() -> Self {
         Self
     }

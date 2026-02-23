@@ -106,4 +106,3 @@ fn cuda_softmax_strict_is_deterministic() {
         "softmax must sum to one, got {sum}"
     );
 }
-

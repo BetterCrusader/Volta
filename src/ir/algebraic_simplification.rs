@@ -10,6 +10,7 @@ enum NumericConst {
 pub struct AlgebraicSimplificationPass;
 
 impl AlgebraicSimplificationPass {
+    #[must_use]
     pub fn new() -> Self {
         Self
     }
@@ -43,12 +44,16 @@ fn simplify_op(op: &Op, known: &[Option<NumericConst>]) -> Option<Op> {
         }
         Op::Mul(left, right) => {
             if is_zero(*left, known) {
+                // x * 0  →  0   (return the zero operand)
                 Some(Op::Output(*left))
             } else if is_zero(*right, known) {
+                // 0 * x  →  0   (return the zero operand)
                 Some(Op::Output(*right))
             } else if is_one(*right, known) {
+                // x * 1  →  x
                 Some(Op::Output(*left))
             } else if is_one(*left, known) {
+                // 1 * x  →  x
                 Some(Op::Output(*right))
             } else {
                 None
@@ -84,7 +89,16 @@ fn simplify_op(op: &Op, known: &[Option<NumericConst>]) -> Option<Op> {
         | Op::Softmax(_)
         | Op::Log(_)
         | Op::Exp(_)
+        | Op::Sigmoid(_)
+        | Op::SigmoidBackward(_, _)
+        | Op::GeluExact(_)
+        | Op::Gelu(_)
+        | Op::GeluBackward(_, _)
+        | Op::Gemm { .. }
+        | Op::GemmBackward { .. }
         | Op::ReduceSum { .. }
+        | Op::ReduceMax { .. }
+        | Op::ReduceMean { .. }
         | Op::Conv2D(_, _)
         | Op::Parameter(_)
         | Op::Input(_)
@@ -103,18 +117,22 @@ fn constant_of(op: &Op, known: &[Option<NumericConst>]) -> Option<NumericConst> 
     }
 }
 
+#[allow(clippy::float_cmp)]
+#[must_use]
 fn is_zero(value: ValueId, known: &[Option<NumericConst>]) -> bool {
     match known.get(value.0).and_then(|v| *v) {
-        Some(NumericConst::Int(v)) => v == 0,
-        Some(NumericConst::Float(v)) => v == 0.0,
+        Some(NumericConst::Int(iv)) => iv == 0,
+        Some(NumericConst::Float(fv)) => fv == 0.0,
         None => false,
     }
 }
 
+#[allow(clippy::float_cmp)]
+#[must_use]
 fn is_one(value: ValueId, known: &[Option<NumericConst>]) -> bool {
     match known.get(value.0).and_then(|v| *v) {
-        Some(NumericConst::Int(v)) => v == 1,
-        Some(NumericConst::Float(v)) => v == 1.0,
+        Some(NumericConst::Int(iv)) => iv == 1,
+        Some(NumericConst::Float(fv)) => fv == 1.0,
         None => false,
     }
 }

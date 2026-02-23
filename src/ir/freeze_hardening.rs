@@ -4,10 +4,10 @@ mod tests {
 
     use crate::ir::{
         AlgebraicSimplificationPass, ConstantFoldingPass, CsePass, DcePass,
-        DeadTensorEliminationPass, ElementwiseFusionPass, GradientFusionPass, Graph,
-        Op, OptimizerConfig, Tensor, TensorConstantPropagationPass,
-        TrainConfig, TrainSample, build_execution_plan, build_reverse_graph, graph_fingerprint,
-        run_verified_pass, verify_graph,
+        DeadTensorEliminationPass, ElementwiseFusionPass, GradientFusionPass, Graph, Op,
+        OptimizerConfig, Tensor, TensorConstantPropagationPass, TrainConfig, TrainSample,
+        build_execution_plan, build_reverse_graph, graph_fingerprint, run_verified_pass,
+        verify_graph,
     };
 
     const PASS_COUNT: usize = 8;

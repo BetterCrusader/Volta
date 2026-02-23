@@ -37,6 +37,7 @@ impl Default for ModelBuilder {
 }
 
 impl ModelBuilder {
+    #[must_use]
     pub fn new() -> Self {
         let mut graph = Graph::new();
         let block = graph.create_block();

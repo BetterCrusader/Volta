@@ -32,6 +32,14 @@ pub struct TrainError {
     pub message: String,
 }
 
+impl From<crate::ir::tensor::TensorError> for TrainError {
+    fn from(err: crate::ir::tensor::TensorError) -> Self {
+        TrainError {
+            message: err.message,
+        }
+    }
+}
+
 pub fn train_graph(
     forward_graph: &Graph,
     loss_value: ValueId,
@@ -50,6 +58,15 @@ pub fn train_graph(
     )
 }
 
+/// Trains a graph using a caller-provided backend implementation.
+///
+/// The function executes forward and backward graphs, computes gradients for
+/// parameter nodes, and applies optimizer updates for each sample/epoch pair.
+///
+/// # Errors
+/// Returns [`TrainError`] when graph verification fails, backward graph
+/// construction fails, execution fails on the selected backend, or optimizer
+/// updates cannot be applied.
 pub fn train_graph_with_backend(
     forward_graph: &Graph,
     loss_value: ValueId,
@@ -216,19 +233,13 @@ fn build_context(sample: &TrainSample, parameters: &HashMap<String, Tensor>) -> 
     for (name, tensor) in &sample.inputs {
         context.inputs.insert(
             name.clone(),
-            RuntimeValue::Tensor {
-                shape: tensor.shape.clone(),
-                data: tensor.data.clone(),
-            },
+            RuntimeValue::Tensor(std::sync::Arc::new(tensor.clone())),
         );
     }
     for (name, tensor) in parameters {
         context.parameters.insert(
             name.clone(),
-            RuntimeValue::Tensor {
-                shape: tensor.shape.clone(),
-                data: tensor.data.clone(),
-            },
+            RuntimeValue::Tensor(std::sync::Arc::new(tensor.clone())),
         );
     }
     context
@@ -236,21 +247,21 @@ fn build_context(sample: &TrainSample, parameters: &HashMap<String, Tensor>) -> 
 
 fn runtime_to_tensor(value: RuntimeValue) -> Result<Tensor, String> {
     match value {
-        RuntimeValue::Tensor { shape, data } => Tensor::new(shape, data).map_err(|e| e.message),
+        RuntimeValue::Tensor(tensor) => Ok((*tensor).clone()),
         _ => Err("Expected tensor runtime value".to_string()),
     }
 }
 
 fn scalar_from_runtime(value: RuntimeValue) -> Result<f32, String> {
     match value {
-        RuntimeValue::Tensor { shape, data } => {
-            if data.len() != 1 {
+        RuntimeValue::Tensor(tensor) => {
+            if tensor.data.len() != 1 {
                 return Err(format!(
                     "Expected scalar tensor for loss, got shape {:?}",
-                    shape
+                    tensor.shape
                 ));
             }
-            Ok(data[0])
+            Ok(tensor.data[0])
         }
         RuntimeValue::Float(v) => Ok(v as f32),
         RuntimeValue::Int(v) => Ok(v as f32),
@@ -259,10 +270,9 @@ fn scalar_from_runtime(value: RuntimeValue) -> Result<f32, String> {
 
 fn ones_like(value: &RuntimeValue) -> Result<RuntimeValue, String> {
     match value {
-        RuntimeValue::Tensor { shape, data } => Ok(RuntimeValue::Tensor {
-            shape: shape.clone(),
-            data: vec![1.0; data.len()],
-        }),
+        RuntimeValue::Tensor(tensor) => Ok(RuntimeValue::Tensor(std::sync::Arc::new(
+            Tensor::new(tensor.shape.clone(), vec![1.0; tensor.data.len()]).unwrap(),
+        ))),
         RuntimeValue::Float(_) => Ok(RuntimeValue::Float(1.0)),
         RuntimeValue::Int(_) => Ok(RuntimeValue::Int(1)),
     }

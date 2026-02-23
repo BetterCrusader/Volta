@@ -62,20 +62,22 @@ fn imports_two_layer_mlp_graph() {
     let mut context = ExecutionContext::default();
     context.inputs.insert(
         "x".to_string(),
-        RuntimeValue::Tensor {
-            shape: vec![1, 2],
-            data: vec![2.0, 1.0],
-        },
+        RuntimeValue::Tensor(std::sync::Arc::new(
+            volta::ir::Tensor::new(vec![1, 2], vec![2.0, 1.0]).unwrap(),
+        )),
     );
 
     let output = execute_value_with_context(&imported.graph, imported.output, &context)
         .expect("execution should pass");
-    let RuntimeValue::Tensor { shape, data } = output else {
+    let RuntimeValue::Tensor(tensor) = output else {
         panic!("expected tensor output");
     };
 
-    assert_eq!(shape, vec![1, 2]);
-    assert_eq!(data.len(), 2);
-    assert!(data.iter().all(|value| value.is_finite()));
-    assert!(data[0] > data[1], "first channel should dominate second");
+    assert_eq!(tensor.shape, vec![1, 2]);
+    assert_eq!(tensor.data.len(), 2);
+    assert!(tensor.data.iter().all(|value| value.is_finite()));
+    assert!(
+        tensor.data[0] > tensor.data[1],
+        "first channel should dominate second"
+    );
 }

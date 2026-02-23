@@ -4,6 +4,7 @@ use crate::ir::{Graph, Op, Pass, ShapeFact, ValueId, infer_shapes, run_with_veri
 pub struct DeadTensorEliminationPass;
 
 impl DeadTensorEliminationPass {
+    #[must_use]
     pub fn new() -> Self {
         Self
     }
@@ -124,10 +125,9 @@ mod tests {
         let result = execute(&graph).expect("execute should pass");
         assert_eq!(
             result,
-            Some(RuntimeValue::Tensor {
-                shape: vec![2],
-                data: vec![3.0, 4.0],
-            })
+            Some(RuntimeValue::Tensor(std::sync::Arc::new(
+                crate::ir::tensor::Tensor::new(vec![2], vec![3.0, 4.0]).unwrap()
+            )))
         );
     }
 }

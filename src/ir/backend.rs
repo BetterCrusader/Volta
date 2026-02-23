@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 
 use crate::ir::ExecutionPlan;
 use crate::ir::cuda::{enforce_policy, lower_plan, policy_for};
@@ -83,7 +84,6 @@ impl Backend for CpuBackend {
 
     fn compile(&self, plan: &ExecutionPlan) -> Result<CompiledProgram, BackendError> {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        use std::hash::{Hash, Hasher};
         plan.schedule.ordered_nodes.hash(&mut hasher);
         plan.allocation.peak_bytes.hash(&mut hasher);
 
@@ -121,7 +121,6 @@ impl Backend for CudaBackend {
         })?;
 
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        use std::hash::{Hash, Hasher};
         plan.schedule.ordered_nodes.hash(&mut hasher);
         plan.allocation.peak_bytes.hash(&mut hasher);
         lowered.executable_nodes.hash(&mut hasher);

@@ -1,5 +1,6 @@
 use crate::ir::{Graph, Op, ValueId};
 
+#[must_use]
 pub fn print_graph(graph: &Graph) -> String {
     let mut lines = Vec::new();
     for node in &graph.nodes {
@@ -12,7 +13,7 @@ fn format_op(op: &Op) -> String {
     match op {
         Op::ConstInt(value) => format!("const {value}"),
         Op::ConstFloat(value) => format!("const {value}"),
-        Op::ConstTensor { shape, .. } => format!("const_tensor {:?}", shape),
+        Op::ConstTensor { shape, .. } => format!("const_tensor {shape:?}"),
         Op::Add(left, right) => format!("add {} {}", fmt_value(*left), fmt_value(*right)),
         Op::Sub(left, right) => format!("sub {} {}", fmt_value(*left), fmt_value(*right)),
         Op::Mul(left, right) => format!("mul {} {}", fmt_value(*left), fmt_value(*right)),
@@ -36,7 +37,7 @@ fn format_op(op: &Op) -> String {
                 .map(|id| fmt_value(*id))
                 .collect::<Vec<_>>()
                 .join(" ");
-            format!("concat axis={} {}", axis, formatted)
+            format!("concat axis={axis} {formatted}")
         }
         Op::Gather {
             input,
@@ -64,9 +65,86 @@ fn format_op(op: &Op) -> String {
         Op::Softmax(value) => format!("softmax {}", fmt_value(*value)),
         Op::Log(value) => format!("log {}", fmt_value(*value)),
         Op::Exp(value) => format!("exp {}", fmt_value(*value)),
-        Op::ReduceSum { input, axis } => match axis {
-            Some(a) => format!("reduce_sum axis={} {}", a, fmt_value(*input)),
-            None => format!("reduce_sum {}", fmt_value(*input)),
+        Op::Sigmoid(value) => format!("sigmoid {}", fmt_value(*value)),
+        Op::SigmoidBackward(input, grad) => format!(
+            "sigmoid_backward {} {}",
+            fmt_value(*input),
+            fmt_value(*grad)
+        ),
+        Op::Gelu(value) => format!("gelu {}", fmt_value(*value)),
+        Op::GeluExact(value) => format!("gelu_exact {}", fmt_value(*value)),
+        Op::GeluBackward(input, grad) => {
+            format!("gelu_backward {} {}", fmt_value(*input), fmt_value(*grad))
+        }
+        Op::Gemm {
+            lhs,
+            rhs,
+            bias,
+            alpha,
+            beta,
+        } => {
+            let bias_str = bias
+                .map(|b| format!(" {}", fmt_value(b)))
+                .unwrap_or_default();
+            format!(
+                "gemm {} {}{} alpha={} beta={}",
+                fmt_value(*lhs),
+                fmt_value(*rhs),
+                bias_str,
+                alpha,
+                beta
+            )
+        }
+        Op::GemmBackward {
+            lhs,
+            rhs,
+            bias,
+            alpha,
+            beta,
+        } => {
+            let bias_str = bias
+                .map(|b| format!(" {}", fmt_value(b)))
+                .unwrap_or_default();
+            format!(
+                "gemm_backward {} {}{} alpha={} beta={}",
+                fmt_value(*lhs),
+                fmt_value(*rhs),
+                bias_str,
+                alpha,
+                beta
+            )
+        }
+        Op::ReduceSum {
+            input,
+            axis,
+            keepdims,
+        } => match (axis, keepdims) {
+            (Some(a), true) => format!("reduce_sum axis={} keepdims=1 {}", a, fmt_value(*input)),
+            (Some(a), false) => format!("reduce_sum axis={} {}", a, fmt_value(*input)),
+            (None, true) => format!("reduce_sum keepdims=1 {}", fmt_value(*input)),
+            (None, false) => format!("reduce_sum {}", fmt_value(*input)),
+        },
+        Op::ReduceMax {
+            input,
+            axis,
+            keepdims,
+        } => match (axis, keepdims) {
+            (Some(a), true) => format!("reduce_max axis={} keepdims=1 {}", a, fmt_value(*input)),
+            (Some(a), false) => format!("reduce_max axis={} {}", a, fmt_value(*input)),
+            (None, true) => format!("reduce_max keepdims=1 {}", fmt_value(*input)),
+            (None, false) => format!("reduce_max {}", fmt_value(*input)),
+        },
+        Op::ReduceMean {
+            input,
+            axis,
+            keepdims,
+        } => match (axis, keepdims) {
+            (Some(a), true) => {
+                format!("reduce_mean axis={} keepdims=1 {}", a, fmt_value(*input))
+            }
+            (Some(a), false) => format!("reduce_mean axis={} {}", a, fmt_value(*input)),
+            (None, true) => format!("reduce_mean keepdims=1 {}", fmt_value(*input)),
+            (None, false) => format!("reduce_mean {}", fmt_value(*input)),
         },
         Op::Conv2D(input, weight) => {
             format!("conv2d {} {}", fmt_value(*input), fmt_value(*weight))

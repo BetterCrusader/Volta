@@ -75,6 +75,7 @@ pub struct Lexer {
 }
 
 impl Lexer {
+    #[must_use]
     pub fn new(input: &str) -> Self {
         let normalized = input.replace("\r\n", "\n").replace('\r', "\n");
         Self {
@@ -227,7 +228,7 @@ impl Lexer {
                 _ => {
                     self.advance();
                     return self.make_token(
-                        TokenKind::Error(format!("Unexpected character '{}'", ch)),
+                        TokenKind::Error(format!("Unexpected character '{ch}'")),
                         line,
                         column,
                     );
@@ -353,7 +354,7 @@ impl Lexer {
             match lexeme.parse::<f64>() {
                 Ok(value) => self.make_token(TokenKind::Float(value), line, column),
                 Err(_) => self.make_token(
-                    TokenKind::Error(format!("Invalid float literal {}", lexeme)),
+                    TokenKind::Error(format!("Invalid float literal {lexeme}")),
                     line,
                     column,
                 ),
@@ -362,7 +363,7 @@ impl Lexer {
             match lexeme.parse::<i64>() {
                 Ok(value) => self.make_token(TokenKind::Int(value), line, column),
                 Err(_) => self.make_token(
-                    TokenKind::Error(format!("Invalid integer literal {}", lexeme)),
+                    TokenKind::Error(format!("Invalid integer literal {lexeme}")),
                     line,
                     column,
                 ),

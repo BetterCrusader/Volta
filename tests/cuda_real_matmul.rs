@@ -7,7 +7,9 @@ use volta::ir::cuda::kernels::matmul::matmul_f32;
 #[test]
 fn cuda_device_reports_runtime_properties_when_available() {
     let Some(device) = cuda_helpers::safe_cuda_device() else {
-        eprintln!("[SKIP] cuda_device_reports_runtime_properties_when_available — no CUDA device available");
+        eprintln!(
+            "[SKIP] cuda_device_reports_runtime_properties_when_available — no CUDA device available"
+        );
         return;
     };
 
@@ -60,4 +62,3 @@ fn cpu_matmul(lhs: &[f32], rhs: &[f32], m: usize, n: usize, k: usize) -> Vec<f32
     }
     out
 }
-

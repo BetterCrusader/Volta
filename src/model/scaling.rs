@@ -17,6 +17,7 @@ pub struct ScalingProfile {
 }
 
 impl ScalingProfile {
+    #[must_use]
     pub fn xl_default() -> Self {
         Self {
             tier: ScalingTier::Xl,

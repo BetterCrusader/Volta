@@ -58,20 +58,28 @@ fn classify_op(op: &Op) -> KernelKind {
         Op::Add(_, _) => KernelKind::Add,
         Op::Relu(_) => KernelKind::Relu,
         Op::Softmax(_) => KernelKind::Softmax,
-        Op::ReluBackward(_, _) => KernelKind::Backward,
+        Op::ReluBackward(_, _)
+        | Op::SigmoidBackward(_, _)
+        | Op::GeluBackward(_, _)
+        | Op::GemmBackward { .. } => KernelKind::Backward,
         Op::Sub(_, _)
         | Op::Mul(_, _)
         | Op::Div(_, _)
         | Op::Neg(_)
         | Op::Log(_)
         | Op::Exp(_)
+        | Op::Sigmoid(_)
+        | Op::GeluExact(_)
+        | Op::Gelu(_)
         | Op::ElementwiseChain { .. }
         | Op::Reshape { .. }
         | Op::Concat { .. }
         | Op::Gather { .. }
         | Op::Slice { .. }
-        | Op::ReduceSum { .. } => KernelKind::Elementwise,
-        Op::MatMul(_, _) => KernelKind::MatMul,
+        | Op::ReduceSum { .. }
+        | Op::ReduceMax { .. }
+        | Op::ReduceMean { .. } => KernelKind::Elementwise,
+        Op::MatMul(_, _) | Op::Gemm { .. } => KernelKind::MatMul,
         Op::Conv2D(_, _) => KernelKind::Conv2D,
         Op::ConstInt(_)
         | Op::ConstFloat(_)

@@ -3,11 +3,13 @@ use std::collections::HashMap;
 use crate::ir::tensor::Tensor;
 use crate::ir::{ElementwiseUnaryOp, Graph, NodeId, Op, ValueId, build_schedule};
 
+use std::sync::Arc;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum RuntimeValue {
     Int(i64),
     Float(f64),
-    Tensor { shape: Vec<usize>, data: Vec<f32> },
+    Tensor(Arc<Tensor>),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -93,17 +95,14 @@ fn execute_value_with_context_scheduled(
         let output_index = node.output.0;
         if output_index >= values.len() {
             return Err(error(
-                format!("Output ValueId out of range: {}", output_index),
+                format!("Output ValueId out of range: {output_index}"),
                 Some(node.id),
             ));
         }
 
         if values[output_index].is_some() {
             return Err(error(
-                format!(
-                    "SSA violation: ValueId {} assigned more than once",
-                    output_index
-                ),
+                format!("SSA violation: ValueId {output_index} assigned more than once"),
                 Some(node.id),
             ));
         }
@@ -179,7 +178,7 @@ fn evaluate_op(
         }
         Op::ElementwiseChain { input, ops } => {
             let input_tensor = read_tensor(values, *input, node_id)?;
-            let out = apply_elementwise_chain(input_tensor, ops, node_id)?;
+            let out = apply_elementwise_chain((*input_tensor).clone(), ops, node_id)?;
             Ok(runtime_from_tensor(out))
         }
         Op::Reshape { input, shape } => {
@@ -198,7 +197,7 @@ fn evaluate_op(
             }
             let mut tensors = Vec::with_capacity(inputs.len());
             for input in inputs {
-                tensors.push(read_tensor(values, *input, node_id)?);
+                tensors.push((*read_tensor(values, *input, node_id)?).clone());
             }
             let out =
                 Tensor::concat(&tensors, *axis).map_err(|err| error(err.message, Some(node_id)))?;
@@ -259,7 +258,7 @@ fn evaluate_op(
         }
         Op::Softmax(value) => {
             let tensor = read_tensor(values, *value, node_id)?;
-            softmax(tensor, node_id)
+            softmax(&tensor, node_id)
         }
         Op::Log(value) => {
             let tensor = read_tensor(values, *value, node_id)?;
@@ -275,18 +274,119 @@ fn evaluate_op(
                 .map_err(|err| error(err.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
-        Op::ReduceSum { input, axis } => {
-            let tensor = read_tensor(values, *input, node_id)?;
+        Op::Sigmoid(value) => {
+            let tensor = read_tensor(values, *value, node_id)?;
             let out = tensor
-                .reduce_sum(*axis)
+                .sigmoid()
                 .map_err(|err| error(err.message, Some(node_id)))?;
+            Ok(runtime_from_tensor(out))
+        }
+        Op::Gelu(value) => {
+            let tensor = read_tensor(values, *value, node_id)?;
+            let out = tensor
+                .gelu()
+                .map_err(|err| error(err.message, Some(node_id)))?;
+            Ok(runtime_from_tensor(out))
+        }
+        Op::GeluExact(value) => {
+            let tensor = read_tensor(values, *value, node_id)?;
+            let out = tensor
+                .gelu_exact()
+                .map_err(|err| error(err.message, Some(node_id)))?;
+            Ok(runtime_from_tensor(out))
+        }
+        Op::SigmoidBackward(input, grad) => {
+            let input_tensor = read_tensor(values, *input, node_id)?;
+            let grad_tensor = read_tensor(values, *grad, node_id)?;
+            let out = input_tensor
+                .sigmoid_backward(&grad_tensor)
+                .map_err(|err| error(err.message, Some(node_id)))?;
+            Ok(runtime_from_tensor(out))
+        }
+        Op::GeluBackward(input, grad) => {
+            let input_tensor = read_tensor(values, *input, node_id)?;
+            let grad_tensor = read_tensor(values, *grad, node_id)?;
+            let out = input_tensor
+                .gelu_backward(&grad_tensor)
+                .map_err(|err| error(err.message, Some(node_id)))?;
+            Ok(runtime_from_tensor(out))
+        }
+        Op::ReduceSum {
+            input,
+            axis,
+            keepdims,
+        } => {
+            let tensor = read_tensor(values, *input, node_id)?;
+            let out = if *keepdims {
+                tensor
+                    .reduce_sum_keepdims(*axis)
+                    .map_err(|err| error(err.message, Some(node_id)))?
+            } else {
+                tensor
+                    .reduce_sum(*axis)
+                    .map_err(|err| error(err.message, Some(node_id)))?
+            };
+            Ok(runtime_from_tensor(out))
+        }
+        Op::ReduceMax {
+            input,
+            axis,
+            keepdims,
+        } => {
+            let tensor = read_tensor(values, *input, node_id)?;
+            let out = if *keepdims {
+                tensor
+                    .reduce_max_keepdims(*axis)
+                    .map_err(|err| error(err.message, Some(node_id)))?
+            } else {
+                tensor
+                    .reduce_max(*axis)
+                    .map_err(|err| error(err.message, Some(node_id)))?
+            };
+            Ok(runtime_from_tensor(out))
+        }
+        Op::ReduceMean {
+            input,
+            axis,
+            keepdims,
+        } => {
+            let tensor = read_tensor(values, *input, node_id)?;
+            let out = if *keepdims {
+                tensor
+                    .reduce_mean_keepdims(*axis)
+                    .map_err(|err| error(err.message, Some(node_id)))?
+            } else {
+                tensor
+                    .reduce_mean(*axis)
+                    .map_err(|err| error(err.message, Some(node_id)))?
+            };
             Ok(runtime_from_tensor(out))
         }
         Op::Conv2D(input, weight) => {
             let input_tensor = read_tensor(values, *input, node_id)?;
             let weight_tensor = read_tensor(values, *weight, node_id)?;
-            conv2d(input_tensor, weight_tensor, node_id)
+            conv2d(&input_tensor, &weight_tensor, node_id)
         }
+        Op::Gemm {
+            lhs,
+            rhs,
+            bias,
+            alpha,
+            beta,
+        } => {
+            let lhs_t = read_tensor(values, *lhs, node_id)?;
+            let rhs_t = read_tensor(values, *rhs, node_id)?;
+            let bias_t = bias.map(|b| read_tensor(values, b, node_id)).transpose()?;
+            let bias_ref = bias_t.as_deref();
+            let out = lhs_t
+                .gemm(&rhs_t, bias_ref, *alpha, *beta)
+                .map_err(|err| error(err.message, Some(node_id)))?;
+            Ok(runtime_from_tensor(out))
+        }
+        Op::GemmBackward { .. } => Err(error(
+            "GemmBackward should be decomposed into MatMul in autograd".to_string(),
+            Some(node_id),
+        )),
         Op::Phi(_) => Err(error(
             "Unsupported op in phase 1: phi".to_string(),
             Some(node_id),
@@ -302,11 +402,9 @@ fn read_tensor(
     values: &[Option<RuntimeValue>],
     id: ValueId,
     node: NodeId,
-) -> Result<Tensor, InterpreterError> {
+) -> Result<Arc<Tensor>, InterpreterError> {
     match read_value(values, id, Some(node))? {
-        RuntimeValue::Tensor { shape, data } => {
-            Tensor::new(shape, data).map_err(|err| error(err.message, Some(node)))
-        }
+        RuntimeValue::Tensor(tensor) => Ok(tensor),
         _ => Err(error(
             "Type mismatch: expected tensor input".to_string(),
             Some(node),
@@ -314,7 +412,7 @@ fn read_tensor(
     }
 }
 
-fn softmax(tensor: Tensor, node: NodeId) -> Result<RuntimeValue, InterpreterError> {
+fn softmax(tensor: &Tensor, node: NodeId) -> Result<RuntimeValue, InterpreterError> {
     if tensor.shape.len() != 1 {
         return Err(error(
             format!("Softmax expects 1D tensor, got shape {:?}", tensor.shape),
@@ -332,10 +430,10 @@ fn softmax(tensor: Tensor, node: NodeId) -> Result<RuntimeValue, InterpreterErro
         .data
         .iter()
         .copied()
-        .fold(f32::NEG_INFINITY, |a, b| a.max(b));
+        .fold(f32::NEG_INFINITY, f32::max);
     let mut exps = Vec::with_capacity(tensor.data.len());
     let mut sum = 0.0_f32;
-    for value in tensor.data {
+    for &value in &tensor.data {
         let exp_value = (value - max).exp();
         exps.push(exp_value);
         sum += exp_value;
@@ -347,18 +445,15 @@ fn softmax(tensor: Tensor, node: NodeId) -> Result<RuntimeValue, InterpreterErro
         ));
     }
 
-    // Normalize in-place — reuse the `exps` Vec instead of allocating a second
-    // one for the divided values.
     for v in &mut exps {
         *v /= sum;
     }
-    Ok(RuntimeValue::Tensor {
-        shape: tensor.shape,
-        data: exps,
-    })
+    Ok(RuntimeValue::Tensor(Arc::new(
+        Tensor::new(tensor.shape.clone(), exps).unwrap(),
+    )))
 }
 
-fn conv2d(input: Tensor, weight: Tensor, node: NodeId) -> Result<RuntimeValue, InterpreterError> {
+fn conv2d(input: &Tensor, weight: &Tensor, node: NodeId) -> Result<RuntimeValue, InterpreterError> {
     if input.shape.len() != 2 || weight.shape.len() != 2 {
         return Err(error(
             "Conv2D expects 2D input and 2D kernel".to_string(),
@@ -397,10 +492,9 @@ fn conv2d(input: Tensor, weight: Tensor, node: NodeId) -> Result<RuntimeValue, I
         }
     }
 
-    Ok(RuntimeValue::Tensor {
-        shape: vec![out_h, out_w],
-        data: out,
-    })
+    Ok(RuntimeValue::Tensor(Arc::new(
+        Tensor::new(vec![out_h, out_w], out).unwrap(),
+    )))
 }
 
 fn apply_elementwise_chain(
@@ -446,30 +540,11 @@ fn add_values(
         (RuntimeValue::Float(a), RuntimeValue::Float(b)) => {
             finite_float(a + b, "Float overflow in add", node)
         }
-        (
-            RuntimeValue::Tensor {
-                shape: s1,
-                data: d1,
-            },
-            RuntimeValue::Tensor {
-                shape: s2,
-                data: d2,
-            },
-        ) => {
-            if s1 != s2 {
-                return Err(error(
-                    format!("Shape mismatch in add: {:?} vs {:?}", s1, s2),
-                    Some(node),
-                ));
-            }
-            let mut out = Vec::with_capacity(d1.len());
-            for (a, b) in d1.iter().zip(d2.iter()) {
-                out.push(*a + *b);
-            }
-            Ok(RuntimeValue::Tensor {
-                shape: s1,
-                data: out,
-            })
+        (RuntimeValue::Tensor(t1), RuntimeValue::Tensor(t2)) => {
+            let out_tensor = t1
+                .add_broadcast(&t2)
+                .map_err(|err| error(err.message, Some(node)))?;
+            Ok(RuntimeValue::Tensor(Arc::new(out_tensor)))
         }
         _ => Err(error(
             "Type mismatch in add: expected matching numeric types".to_string(),
@@ -491,30 +566,11 @@ fn sub_values(
         (RuntimeValue::Float(a), RuntimeValue::Float(b)) => {
             finite_float(a - b, "Float overflow in sub", node)
         }
-        (
-            RuntimeValue::Tensor {
-                shape: s1,
-                data: d1,
-            },
-            RuntimeValue::Tensor {
-                shape: s2,
-                data: d2,
-            },
-        ) => {
-            if s1 != s2 {
-                return Err(error(
-                    format!("Shape mismatch in sub: {:?} vs {:?}", s1, s2),
-                    Some(node),
-                ));
-            }
-            let mut out = Vec::with_capacity(d1.len());
-            for (a, b) in d1.iter().zip(d2.iter()) {
-                out.push(*a - *b);
-            }
-            Ok(RuntimeValue::Tensor {
-                shape: s1,
-                data: out,
-            })
+        (RuntimeValue::Tensor(t1), RuntimeValue::Tensor(t2)) => {
+            let out_tensor = t1
+                .sub_broadcast(&t2)
+                .map_err(|err| error(err.message, Some(node)))?;
+            Ok(RuntimeValue::Tensor(Arc::new(out_tensor)))
         }
         _ => Err(error(
             "Type mismatch in sub: expected matching numeric types".to_string(),
@@ -536,30 +592,11 @@ fn mul_values(
         (RuntimeValue::Float(a), RuntimeValue::Float(b)) => {
             finite_float(a * b, "Float overflow in mul", node)
         }
-        (
-            RuntimeValue::Tensor {
-                shape: s1,
-                data: d1,
-            },
-            RuntimeValue::Tensor {
-                shape: s2,
-                data: d2,
-            },
-        ) => {
-            if s1 != s2 {
-                return Err(error(
-                    format!("Shape mismatch in mul: {:?} vs {:?}", s1, s2),
-                    Some(node),
-                ));
-            }
-            let mut out = Vec::with_capacity(d1.len());
-            for (a, b) in d1.iter().zip(d2.iter()) {
-                out.push(*a * *b);
-            }
-            Ok(RuntimeValue::Tensor {
-                shape: s1,
-                data: out,
-            })
+        (RuntimeValue::Tensor(t1), RuntimeValue::Tensor(t2)) => {
+            let out_tensor = t1
+                .mul_broadcast(&t2)
+                .map_err(|err| error(err.message, Some(node)))?;
+            Ok(RuntimeValue::Tensor(Arc::new(out_tensor)))
         }
         _ => Err(error(
             "Type mismatch in mul: expected matching numeric types".to_string(),
@@ -588,33 +625,11 @@ fn div_values(
             }
             finite_float(a / b, "Float overflow in div", node)
         }
-        (
-            RuntimeValue::Tensor {
-                shape: s1,
-                data: d1,
-            },
-            RuntimeValue::Tensor {
-                shape: s2,
-                data: d2,
-            },
-        ) => {
-            if s1 != s2 {
-                return Err(error(
-                    format!("Shape mismatch in div: {:?} vs {:?}", s1, s2),
-                    Some(node),
-                ));
-            }
-            let mut out = Vec::with_capacity(d1.len());
-            for (a, b) in d1.iter().zip(d2.iter()) {
-                if *b == 0.0 {
-                    return Err(error("Division by zero".to_string(), Some(node)));
-                }
-                out.push(*a / *b);
-            }
-            Ok(RuntimeValue::Tensor {
-                shape: s1,
-                data: out,
-            })
+        (RuntimeValue::Tensor(t1), RuntimeValue::Tensor(t2)) => {
+            let out_tensor = t1
+                .div_broadcast(&t2)
+                .map_err(|err| error(err.message, Some(node)))?;
+            Ok(RuntimeValue::Tensor(Arc::new(out_tensor)))
         }
         _ => Err(error(
             "Type mismatch in div: expected matching numeric types".to_string(),
@@ -630,22 +645,19 @@ fn neg_value(value: RuntimeValue, node: NodeId) -> Result<RuntimeValue, Interpre
             .map(RuntimeValue::Int)
             .ok_or_else(|| error("Integer overflow in neg".to_string(), Some(node))),
         RuntimeValue::Float(v) => finite_float(-v, "Float overflow in neg", node),
-        RuntimeValue::Tensor { shape, mut data } => {
-            // Negate in-place: avoids a full heap allocation for just flipping
-            // the sign bit on every element.
-            for v in &mut data {
+        RuntimeValue::Tensor(mut tensor_arc) => {
+            // Negate in-place (makes copy-on-write via Arc::make_mut)
+            let tensor = Arc::make_mut(&mut tensor_arc);
+            for v in &mut tensor.data {
                 *v = -*v;
             }
-            Ok(RuntimeValue::Tensor { shape, data })
+            Ok(RuntimeValue::Tensor(tensor_arc))
         }
     }
 }
 
 fn runtime_from_tensor(tensor: Tensor) -> RuntimeValue {
-    RuntimeValue::Tensor {
-        shape: tensor.shape,
-        data: tensor.data,
-    }
+    RuntimeValue::Tensor(Arc::new(tensor))
 }
 
 fn finite_float(value: f64, message: &str, node: NodeId) -> Result<RuntimeValue, InterpreterError> {
@@ -835,10 +847,9 @@ mod tests {
         let result = execute(&graph).expect("execute should succeed");
         assert_eq!(
             result,
-            Some(RuntimeValue::Tensor {
-                shape: vec![2, 2],
-                data: vec![19.0, 22.0, 43.0, 50.0]
-            })
+            Some(RuntimeValue::Tensor(std::sync::Arc::new(
+                crate::ir::tensor::Tensor::new(vec![2, 2], vec![19.0, 22.0, 43.0, 50.0]).unwrap()
+            )))
         );
     }
 
@@ -862,10 +873,9 @@ mod tests {
         let result = execute(&graph).expect("execute should succeed");
         assert_eq!(
             result,
-            Some(RuntimeValue::Tensor {
-                shape: vec![4],
-                data: vec![0.0, 0.0, 1.0, 3.5]
-            })
+            Some(RuntimeValue::Tensor(std::sync::Arc::new(
+                crate::ir::tensor::Tensor::new(vec![4], vec![0.0, 0.0, 1.0, 3.5]).unwrap()
+            )))
         );
     }
 
@@ -887,9 +897,10 @@ mod tests {
             .expect("add op should succeed");
 
         let result = execute(&graph).expect("execute should succeed");
-        let RuntimeValue::Tensor { data, .. } = result.expect("output exists") else {
+        let RuntimeValue::Tensor(__tensor) = result.expect("output exists") else {
             panic!("expected tensor");
         };
+        let data = &__tensor.data;
 
         let sum = data.iter().copied().sum::<f32>();
         assert!((sum - 1.0).abs() < 1e-5);
@@ -924,10 +935,9 @@ mod tests {
         let result = execute(&graph).expect("execute should succeed");
         assert_eq!(
             result,
-            Some(RuntimeValue::Tensor {
-                shape: vec![2, 2],
-                data: vec![-4.0, -4.0, -4.0, -4.0]
-            })
+            Some(RuntimeValue::Tensor(std::sync::Arc::new(
+                crate::ir::tensor::Tensor::new(vec![2, 2], vec![-4.0, -4.0, -4.0, -4.0]).unwrap()
+            )))
         );
     }
 
@@ -975,19 +985,17 @@ mod tests {
         let mut context = ExecutionContext::default();
         context.inputs.insert(
             "x".to_string(),
-            RuntimeValue::Tensor {
-                shape: vec![1],
-                data: vec![42.0],
-            },
+            RuntimeValue::Tensor(std::sync::Arc::new(
+                crate::ir::tensor::Tensor::new(vec![1], vec![42.0]).unwrap(),
+            )),
         );
 
         let result = execute_with_context(&graph, &context).expect("execute should pass");
         assert_eq!(
             result,
-            Some(RuntimeValue::Tensor {
-                shape: vec![1],
-                data: vec![42.0],
-            })
+            Some(RuntimeValue::Tensor(std::sync::Arc::new(
+                crate::ir::tensor::Tensor::new(vec![1], vec![42.0]).unwrap()
+            )))
         );
     }
 }

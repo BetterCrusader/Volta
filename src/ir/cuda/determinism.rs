@@ -15,6 +15,7 @@ pub struct CudaDeterminismError {
     pub message: String,
 }
 
+#[must_use]
 pub fn policy_for(level: DeterminismLevel) -> CudaDeterminismPolicy {
     match level {
         DeterminismLevel::Strict => CudaDeterminismPolicy {

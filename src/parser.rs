@@ -13,13 +13,16 @@ pub struct ParseError {
 pub struct Parser {
     tokens: Vec<Token>,
     position: usize,
+    depth: usize,
 }
 
 impl Parser {
+    #[must_use]
     pub fn new(tokens: Vec<Token>) -> Self {
         Self {
             tokens,
             position: 0,
+            depth: 0,
         }
     }
 
@@ -38,9 +41,18 @@ impl Parser {
     }
 
     fn parse_statement(&mut self) -> Result<Stmt, ParseError> {
+        self.depth += 1;
+        if self.depth > 256 {
+            self.depth -= 1;
+            return Err(self.error_here_with_hint(
+                "Nesting level too deep",
+                "Maximum permitted nesting depth is 256.",
+            ));
+        }
+
         self.fail_on_lexer_error()?;
 
-        match &self.current().kind {
+        let result = match &self.current().kind {
             TokenKind::Ident(_) => {
                 if self.check_next(&TokenKind::Assign) {
                     self.parse_assign()
@@ -69,7 +81,10 @@ impl Parser {
                 "Unexpected token at start of statement",
                 "Start a statement with an identifier, or a keyword such as model, dataset, train, if, loop, fn, print, save, load.",
             )),
-        }
+        };
+
+        self.depth -= 1;
+        result
     }
 
     fn parse_var_decl(&mut self) -> Result<Stmt, ParseError> {
@@ -400,7 +415,17 @@ impl Parser {
     }
 
     fn parse_expression(&mut self) -> Result<Expr, ParseError> {
-        self.parse_comparison()
+        self.depth += 1;
+        if self.depth > 256 {
+            self.depth -= 1;
+            return Err(self.error_here_with_hint(
+                "Expression too complex",
+                "Maximum permitted nesting depth is 256.",
+            ));
+        }
+        let result = self.parse_comparison();
+        self.depth -= 1;
+        result
     }
 
     fn parse_comparison(&mut self) -> Result<Expr, ParseError> {

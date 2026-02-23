@@ -27,8 +27,7 @@ pub fn export_compiled_model_manifest(model: &CompiledModel) -> Result<String, M
     let output_shape = format!("{:?}", model.output_shape.0);
     let loss_value = model
         .loss
-        .map(|value| value.0.to_string())
-        .unwrap_or_else(|| "null".to_string());
+        .map_or_else(|| "null".to_string(), |value| value.0.to_string());
 
     Ok(format!(
         concat!(

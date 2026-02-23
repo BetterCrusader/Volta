@@ -27,7 +27,9 @@ struct MemoryBaseline {
 #[test]
 fn cuda_memory_guard_enforces_baseline_and_contracts() {
     if !cuda_helpers::cuda_runtime_available() {
-        eprintln!("[SKIP] cuda_memory_guard_enforces_baseline_and_contracts — no CUDA device available");
+        eprintln!(
+            "[SKIP] cuda_memory_guard_enforces_baseline_and_contracts — no CUDA device available"
+        );
         return;
     }
     let strict_runs = (0..5)
@@ -112,7 +114,9 @@ fn cuda_memory_guard_enforces_baseline_and_contracts() {
 #[test]
 fn cuda_memory_guard_rejects_placement_mapping_drift() {
     if !cuda_helpers::cuda_runtime_available() {
-        eprintln!("[SKIP] cuda_memory_guard_rejects_placement_mapping_drift — no CUDA device available");
+        eprintln!(
+            "[SKIP] cuda_memory_guard_rejects_placement_mapping_drift — no CUDA device available"
+        );
         return;
     }
     let model = build_memory_fixture_model();
