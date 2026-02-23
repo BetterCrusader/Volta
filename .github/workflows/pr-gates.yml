@@ -82,6 +82,18 @@ jobs:
       - name: Debug tests
         run: cargo test
 
+  test-onnx-import:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: ONNX import feature tests
+        run: cargo test --features onnx-import
+
   test-release:
     runs-on: ubuntu-latest
     steps:
