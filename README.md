@@ -130,6 +130,7 @@ print "training complete"
 cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
+cargo test --features onnx-import
 cargo check --manifest-path fuzz/Cargo.toml
 ```
 
