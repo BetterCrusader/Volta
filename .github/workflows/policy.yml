@@ -49,6 +49,7 @@ jobs:
                   event_payload = json.load(handle)
 
           pull_request = event_payload.get("pull_request") or {}
+          pr_title = pull_request.get("title") or ""
           pr_body = pull_request.get("body") or ""
           labels = []
           for label in pull_request.get("labels") or []:
@@ -61,6 +62,8 @@ jobs:
               "scripts/ci/policy_check.py",
               "--branch",
               os.environ.get("BRANCH_NAME", ""),
+              "--pr-title",
+              pr_title,
               "--pr-body",
               pr_body,
               "--labels-json",

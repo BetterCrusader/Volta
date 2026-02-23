@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 import json
+import re
 from typing import Iterable, List, Sequence
 
 
@@ -21,6 +22,8 @@ RFC_REQUIRED_PATH_PREFIXES = (
 RFC_DOCUMENT_PREFIX = "docs/governance/rfcs/rfc-"
 
 HARDENING_LABEL = "hardening-approved"
+
+RFC_TOKEN_PATTERN = re.compile(r"\brfc-[a-z0-9][a-z0-9\-]*\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -40,9 +43,9 @@ def _normalize(paths: Iterable[str]) -> List[str]:
     return normalized
 
 
-def _has_rfc_reference(pr_body: str) -> bool:
-    body = pr_body or ""
-    return "RFC-" in body or "Closes RFC:" in body
+def _has_rfc_reference(pr_title: str, pr_body: str) -> bool:
+    combined = "\n".join(value for value in [pr_title or "", pr_body or ""] if value)
+    return bool(RFC_TOKEN_PATTERN.search(combined))
 
 
 def _has_rfc_document(changed_paths: Sequence[str]) -> bool:
@@ -58,6 +61,7 @@ def _requires_rfc_for_paths(paths: Sequence[str]) -> bool:
 
 def validate(
     changed_paths: Sequence[str],
+    pr_title: str,
     pr_body: str,
     branch_name: str = "",
     labels: Sequence[str] | None = None,
@@ -66,7 +70,7 @@ def validate(
     issues: List[str] = []
 
     if _requires_rfc_for_paths(normalized_paths) and not (
-        _has_rfc_reference(pr_body) or _has_rfc_document(normalized_paths)
+        _has_rfc_reference(pr_title, pr_body) or _has_rfc_document(normalized_paths)
     ):
         issues.append("RFC reference required for governance/Tier A policy changes")
 
@@ -82,6 +86,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--paths", nargs="*", default=[], help="Changed repository paths"
     )
+    parser.add_argument("--pr-title", default="", help="Pull request title")
     parser.add_argument("--pr-body", default="", help="Pull request body")
     parser.add_argument("--branch", default="", help="Source branch name")
     parser.add_argument("--labels", nargs="*", default=[], help="PR labels")
@@ -116,6 +121,7 @@ def main() -> int:
 
     result = validate(
         changed_paths=args.paths,
+        pr_title=args.pr_title,
         pr_body=args.pr_body,
         branch_name=args.branch,
         labels=labels,
