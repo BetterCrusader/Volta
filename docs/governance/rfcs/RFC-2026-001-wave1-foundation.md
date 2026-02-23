@@ -42,7 +42,8 @@ Implement Wave 1 governance foundation:
 ## Test Plan
 
 - `bash scripts/ci/wave1_local_verify.sh`
-- `python -m unittest scripts.ci.tests.test_detect_tiers scripts.ci.tests.test_policy_check -v`
+- `python scripts/ci/detect_tiers.py --paths src/ir/tensor.rs`
+- `python scripts/ci/policy_check.py --paths src/ir/tensor.rs --pr-body "RFC-004"`
 - `cargo test --test governance_docs_content -- --nocapture`
 
 ## Rollback Plan

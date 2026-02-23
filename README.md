@@ -139,8 +139,8 @@ cargo check --manifest-path fuzz/Cargo.toml
 
 ```bash
 bash scripts/ci/wave1_local_verify.sh
-python -m unittest scripts.ci.tests.test_detect_tiers -v
-python -m unittest scripts.ci.tests.test_policy_check -v
+python scripts/ci/detect_tiers.py --paths src/ir/tensor.rs
+python scripts/ci/policy_check.py --paths src/ir/tensor.rs --pr-body "RFC-004"
 ```
 
 ### Quality Fortress Wave 2/3 checks
