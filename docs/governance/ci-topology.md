@@ -4,7 +4,7 @@ If you cannot explain your CI topology in one page, you do not control your rele
 
 ## PR Pipelines
 
-- `pr-gates.yml` (blocking): fmt, clippy, debug tests, release tests, CLI smoke, property-fast.
+- `pr-gates.yml` (blocking): fmt, clippy, debug tests, onnx-import tests, release tests, CLI smoke, property-fast.
 - Tier A-sensitive changes activate additional governance checks.
 
 ## Release Pipelines
@@ -28,6 +28,13 @@ If you cannot explain your CI topology in one page, you do not control your rele
 
 - Any blocking failure prevents merge/release.
 - Nightly failures create or update a `nightly-regression` issue for triage.
+
+## Flaky Ownership
+
+- Flaky tests and lanes are tracked in `docs/governance/ci-flaky-registry.md`.
+- Every flaky item must have an explicit owner and triage issue.
+- Weekly CI health review updates status, ETA, and mitigation notes.
+- A release candidate requires one full week of stable blocker-lane signal or explicit owner-approved exception notes.
 
 ## Local Replication
 
