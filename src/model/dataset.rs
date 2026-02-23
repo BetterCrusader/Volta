@@ -24,6 +24,7 @@ pub struct BatchIterator {
 }
 
 impl BatchIterator {
+    #[must_use]
     pub fn new(size: usize, batch_size: usize, shuffle: bool, seed: u64) -> Self {
         let mut indices = (0..size).collect::<Vec<_>>();
         if shuffle {
@@ -54,7 +55,9 @@ impl Iterator for BatchIterator {
 fn deterministic_shuffle(indices: &mut [usize], seed: u64) {
     let mut state = seed | 1;
     for i in (1..indices.len()).rev() {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1);
         let j = (state as usize) % (i + 1);
         indices.swap(i, j);
     }

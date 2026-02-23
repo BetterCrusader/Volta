@@ -17,36 +17,64 @@ use crate::rules::{
     ACTIVATIONS, AUTOPILOT_DEFAULT_ACTIVATION, DEVICES, FLOAT_EPSILON, MAX_SAFE_INT_F64, OPTIMIZERS,
 };
 
+/// A runtime value produced by evaluating a Volta expression.
+///
+/// All arithmetic is performed on `Int` and `Float` variants.
+/// `Str` holds UTF-8 text; `Bool` stores boolean conditions;
+/// `Unit` represents the absence of a meaningful return value.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
+    /// Signed 64-bit integer.
     Int(i64),
+    /// 64-bit IEEE-754 floating-point number.
     Float(f64),
+    /// Boolean true/false.
     Bool(bool),
+    /// UTF-8 string.
     Str(String),
+    /// The unit value, analogous to `()` in Rust.
     Unit,
 }
 
+/// Persistent state of a declared `model` block after successful parsing.
 #[derive(Debug, Clone)]
 pub struct ModelState {
+    /// Number of neurons in each layer (at least 2 values required).
     pub layers: Vec<i64>,
+    /// Activation function name, e.g. `"relu"` or `"sigmoid"`.
     pub activation: String,
+    /// Optional optimizer name, e.g. `"adam"`.
     pub optimizer: Option<String>,
+    /// Optional learning rate for the model-level optimizer.
     pub optimizer_lr: Option<f64>,
+    /// Optional numerical precision tag, e.g. `"fp32"`.
     pub precision: Option<String>,
+    /// Optional memory layout tag, e.g. `"pinned"`.
     pub memory: Option<String>,
+    /// Total number of epochs this model has been trained for across all `train` calls.
     pub trained_epochs: i64,
 }
 
+/// Persistent state of a declared `dataset` block after successful parsing.
 #[derive(Debug, Clone)]
 pub struct DatasetState {
+    /// Number of samples per training batch, if specified.
     pub batch: Option<i64>,
+    /// Whether to shuffle the dataset before each epoch, if specified.
     pub shuffle: Option<bool>,
 }
 
+/// A runtime error produced during execution of a Volta program.
+///
+/// Always carries a human-readable `message`, the source `span` for
+/// line/column reporting, and an optional `hint` with a suggested fix.
 #[derive(Debug, Clone)]
 pub struct RuntimeError {
+    /// Human-readable description of the error.
     pub message: String,
+    /// Source location at which the error occurred.
     pub span: Span,
+    /// Optional suggestion to help the user fix the problem.
     pub hint: Option<String>,
 }
 
@@ -74,6 +102,11 @@ struct TrainPropsExplicit {
     precision: Option<String>,
 }
 
+/// The main Volta interpreter.
+///
+/// Call [`Executor::new`] to create an instance, then [`Executor::execute`]
+/// to run a parsed [`Program`]. The executor is stateful — models and
+/// datasets accumulate across multiple `execute` calls on the same instance.
 pub struct Executor {
     runtime: Runtime,
     in_function_depth: usize,
@@ -87,6 +120,8 @@ impl Default for Executor {
 }
 
 impl Executor {
+    /// Creates a new `Executor` with empty runtime state.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             runtime: Runtime {
@@ -100,6 +135,18 @@ impl Executor {
         }
     }
 
+    /// Executes a Volta [`Program`], resetting all runtime state first.
+    ///
+    /// Returns `Ok(())` on success, or a [`RuntimeError`] describing the
+    /// first failure along with its source location and optional fix hint.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` when:
+    /// - a variable or function is used before declaration
+    /// - arithmetic overflow, division by zero, or non-finite result
+    /// - a `model` or `dataset` block contains invalid property values
+    /// - a `train` statement references an undefined model or dataset
     pub fn execute(&mut self, program: &Program) -> Result<(), RuntimeError> {
         self.runtime.variables.clear();
         self.runtime.models.clear();
@@ -113,8 +160,7 @@ impl Executor {
         let pop_result = self.pop_scope();
 
         match (result, pop_result) {
-            (Err(err), _) => Err(err),
-            (Ok(()), Err(err)) => Err(err),
+            (Err(err), _) | (Ok(()), Err(err)) => Err(err),
             (Ok(()), Ok(())) => Ok(()),
         }
     }
@@ -136,6 +182,7 @@ impl Executor {
         result
     }
 
+    #[allow(clippy::too_many_lines)]
     fn exec_stmt(&mut self, stmt: &Stmt) -> Result<(), RuntimeError> {
         match stmt {
             Stmt::VarDecl { name, value, span } => {
@@ -190,28 +237,10 @@ impl Executor {
                 elif_branches,
                 else_branch,
                 ..
-            } => {
-                let cond_value = self.eval_expr(condition)?;
-                if self.as_bool(&cond_value, condition.span())? {
-                    self.exec_block_with_scope(then_branch)?;
-                    return Ok(());
-                }
-
-                for (elif_condition, branch) in elif_branches {
-                    let elif_value = self.eval_expr(elif_condition)?;
-                    if self.as_bool(&elif_value, elif_condition.span())? {
-                        self.exec_block_with_scope(branch)?;
-                        return Ok(());
-                    }
-                }
-
-                if let Some(branch) = else_branch {
-                    self.exec_block_with_scope(branch)?;
-                }
-            }
+            } => self.exec_if_stmt(condition, then_branch, elif_branches, else_branch)?,
             Stmt::Loop { count, body, span } => {
                 let count_value = self.eval_expr(count)?;
-                let iterations = self.as_int(&count_value, *span)?;
+                let iterations = Self::as_int(&count_value, *span)?;
                 if iterations < 0 {
                     return Err(Self::error(
                         format!("Invalid loop count: {iterations} (must be non-negative)"),
@@ -231,14 +260,12 @@ impl Executor {
             }
             Stmt::Model { name, props, span } => {
                 let model = self.build_model_state(name, props, *span)?;
-                self.touch_model_state(&model);
                 if self.runtime.models.insert(name.clone(), model).is_some() {
                     return Err(Self::error(format!("Duplicate model: '{name}'"), *span));
                 }
             }
             Stmt::Dataset { name, props, span } => {
                 let dataset = self.build_dataset_state(name, props, *span)?;
-                self.touch_dataset_state(&dataset);
                 if self
                     .runtime
                     .datasets
@@ -253,89 +280,7 @@ impl Executor {
                 data,
                 props,
                 span,
-            } => {
-                if !self.runtime.datasets.contains_key(data) {
-                    return Err(Self::error_with_hint(
-                        format!("Undefined dataset: '{data}'"),
-                        *span,
-                        format!(
-                            "Declare dataset '{data}' before training, for example:\ndataset {data}\n    batch 32"
-                        ),
-                    ));
-                }
-
-                let explicit_train = self.parse_train_props(props, *span)?;
-
-                let dataset_state = self
-                    .runtime
-                    .datasets
-                    .get(data)
-                    .ok_or_else(|| Self::error(format!("Undefined dataset: '{data}'"), *span))?
-                    .clone();
-
-                let model_state = self
-                    .runtime
-                    .models
-                    .get_mut(model)
-                    .ok_or_else(|| {
-                        Self::error_with_hint(
-                            format!("Undefined model: '{model}'"),
-                            *span,
-                            format!(
-                                "Declare model '{model}' before training, for example:\nmodel {model}\n    layers 4 3 2"
-                            ),
-                        )
-                    })?;
-
-                let autopilot = AutopilotEngine::new();
-                let resolved = autopilot.resolve(&AutopilotContext {
-                    model: ModelAutopilotInput {
-                        layer_count: model_state.layers.len(),
-                        optimizer: model_state.optimizer.clone(),
-                        lr: model_state.optimizer_lr,
-                        precision: model_state.precision.clone(),
-                    },
-                    dataset: DatasetAutopilotInput {
-                        batch: dataset_state.batch,
-                    },
-                    train: TrainAutopilotInput {
-                        epochs: explicit_train.epochs,
-                        optimizer: explicit_train.optimizer.clone(),
-                        lr: explicit_train.lr,
-                        batch: explicit_train.batch,
-                        precision: explicit_train.precision.clone(),
-                        device: explicit_train.device.clone(),
-                    },
-                    gpu_available: detect_gpu_available(),
-                });
-
-                model_state.trained_epochs = model_state
-                    .trained_epochs
-                    .checked_add(resolved.epochs)
-                    .ok_or_else(|| {
-                        Self::error("Math overflow: trained_epochs overflow".to_string(), *span)
-                    })?;
-
-                println!("Auto configuration:");
-                for decision in &resolved.decisions {
-                    println!(
-                        "    {} = {} ({:?}: {})",
-                        decision.key, decision.value, decision.source, decision.reason
-                    );
-                }
-
-                println!(
-                    "Training model '{}' on dataset '{}' for {} epoch(s) on {} with {} lr={} batch={} precision={}",
-                    model,
-                    data,
-                    resolved.epochs,
-                    resolved.device,
-                    resolved.optimizer,
-                    resolved.lr,
-                    resolved.batch,
-                    resolved.precision
-                );
-            }
+            } => self.exec_train_stmt(model, data, props, *span)?,
             Stmt::Save { model, path, span } => {
                 if !self.runtime.models.contains_key(model) {
                     return Err(Self::error_with_hint(
@@ -344,7 +289,7 @@ impl Executor {
                         "Define the model before saving it in this run.".to_string(),
                     ));
                 }
-                println!("Saving model '{}' to {}", model, path);
+                println!("Saving model '{model}' to {path}");
             }
             Stmt::Load { model, path, span } => {
                 if !self.runtime.models.contains_key(model) {
@@ -354,9 +299,125 @@ impl Executor {
                         "Declare the model name first, then load weights into it.".to_string(),
                     ));
                 }
-                println!("Loading model '{}' from {}", model, path);
+                println!("Loading model '{model}' from {path}");
             }
         }
+
+        Ok(())
+    }
+
+    fn exec_if_stmt(
+        &mut self,
+        condition: &Expr,
+        then_branch: &[Stmt],
+        elif_branches: &[(Expr, Vec<Stmt>)],
+        else_branch: &Option<Vec<Stmt>>,
+    ) -> Result<(), RuntimeError> {
+        let cond_value = self.eval_expr(condition)?;
+        if Self::as_bool(&cond_value, condition.span())? {
+            self.exec_block_with_scope(then_branch)?;
+            return Ok(());
+        }
+
+        for (elif_condition, branch) in elif_branches {
+            let elif_value = self.eval_expr(elif_condition)?;
+            if Self::as_bool(&elif_value, elif_condition.span())? {
+                self.exec_block_with_scope(branch)?;
+                return Ok(());
+            }
+        }
+
+        if let Some(branch) = else_branch {
+            self.exec_block_with_scope(branch)?;
+        }
+
+        Ok(())
+    }
+
+    fn exec_train_stmt(
+        &mut self,
+        model: &str,
+        data: &str,
+        props: &[Property],
+        span: Span,
+    ) -> Result<(), RuntimeError> {
+        if !self.runtime.datasets.contains_key(data) {
+            return Err(Self::error_with_hint(
+                format!("Undefined dataset: '{data}'"),
+                span,
+                format!(
+                    "Declare dataset '{data}' before training, for example:\ndataset {data}\n    batch 32"
+                ),
+            ));
+        }
+
+        let explicit_train = self.parse_train_props(props, span)?;
+
+        let dataset_state = self
+            .runtime
+            .datasets
+            .get(data)
+            .ok_or_else(|| Self::error(format!("Undefined dataset: '{data}'"), span))?
+            .clone();
+
+        let model_state = self.runtime.models.get_mut(model).ok_or_else(|| {
+            Self::error_with_hint(
+                format!("Undefined model: '{model}'"),
+                span,
+                format!(
+                    "Declare model '{model}' before training, for example:\nmodel {model}\n    layers 4 3 2"
+                ),
+            )
+        })?;
+
+        let autopilot = AutopilotEngine::new();
+        let resolved = autopilot.resolve(&AutopilotContext {
+            model: ModelAutopilotInput {
+                layer_count: model_state.layers.len(),
+                optimizer: model_state.optimizer.clone(),
+                lr: model_state.optimizer_lr,
+                precision: model_state.precision.clone(),
+            },
+            dataset: DatasetAutopilotInput {
+                batch: dataset_state.batch,
+            },
+            train: TrainAutopilotInput {
+                epochs: explicit_train.epochs,
+                optimizer: explicit_train.optimizer.clone(),
+                lr: explicit_train.lr,
+                batch: explicit_train.batch,
+                precision: explicit_train.precision.clone(),
+                device: explicit_train.device.clone(),
+            },
+            gpu_available: detect_gpu_available(),
+        });
+
+        model_state.trained_epochs = model_state
+            .trained_epochs
+            .checked_add(resolved.epochs)
+            .ok_or_else(|| {
+                Self::error("Math overflow: trained_epochs overflow".to_string(), span)
+            })?;
+
+        println!("Auto configuration:");
+        for decision in &resolved.decisions {
+            println!(
+                "    {} = {} ({:?}: {})",
+                decision.key, decision.value, decision.source, decision.reason
+            );
+        }
+
+        println!(
+            "Training model '{}' on dataset '{}' for {} epoch(s) on {} with {} lr={} batch={} precision={}",
+            model,
+            data,
+            resolved.epochs,
+            resolved.device,
+            resolved.optimizer,
+            resolved.lr,
+            resolved.batch,
+            resolved.precision
+        );
 
         Ok(())
     }
@@ -367,9 +428,9 @@ impl Executor {
         props: &[Property],
         span: Span,
     ) -> Result<ModelState, RuntimeError> {
-        self.ensure_unique_properties(props, "model", span)?;
+        Self::ensure_unique_properties(props, "model", span)?;
 
-        let layers_expr = self.get_required_prop(props, "layers", "model", span)?;
+        let layers_expr = Self::get_required_prop(props, "layers", "model", span)?;
         if layers_expr.len() < 2 {
             return Err(Self::error(
                 "model.layers must have at least 2 values".to_string(),
@@ -379,13 +440,22 @@ impl Executor {
 
         let mut layers = Vec::with_capacity(layers_expr.len());
         for expr in layers_expr {
-            layers.push(self.expect_int_value(expr, "model.layers")?);
+            let v = self.expect_int_value(expr, "model.layers")?;
+            // BUG FIX: layer sizes of 0 or negative are meaningless and would
+            // silently produce degenerate models downstream.
+            if v <= 0 {
+                return Err(Self::error(
+                    format!("model.layers values must be > 0, found {v}"),
+                    expr.span(),
+                ));
+            }
+            layers.push(v);
         }
 
         let activation = self
             .expect_single_symbol_optional(props, "activation", span)?
             .unwrap_or_else(|| AUTOPILOT_DEFAULT_ACTIVATION.to_string());
-        self.ensure_allowed_symbol("model.activation", &activation, ACTIVATIONS, span)?;
+        Self::ensure_allowed_symbol("model.activation", &activation, ACTIVATIONS, span)?;
 
         let (optimizer, optimizer_lr) = self.parse_optimizer_prop(props, span)?;
         let precision = self.expect_single_symbol_optional(props, "precision", span)?;
@@ -410,9 +480,9 @@ impl Executor {
         props: &[Property],
         span: Span,
     ) -> Result<DatasetState, RuntimeError> {
-        self.ensure_unique_properties(props, "dataset", span)?;
+        Self::ensure_unique_properties(props, "dataset", span)?;
 
-        let batch = match self.find_prop(props, "batch") {
+        let batch = match Self::find_prop(props, "batch") {
             Some(values) => {
                 if values.len() != 1 {
                     return Err(Self::error(
@@ -425,7 +495,7 @@ impl Executor {
             None => None,
         };
 
-        let shuffle = match self.find_prop(props, "shuffle") {
+        let shuffle = match Self::find_prop(props, "shuffle") {
             Some(values) => {
                 if values.len() != 1 {
                     return Err(Self::error(
@@ -441,14 +511,15 @@ impl Executor {
         Ok(DatasetState { batch, shuffle })
     }
 
+    #[allow(clippy::too_many_lines)]
     fn parse_train_props(
         &mut self,
         props: &[Property],
         span: Span,
     ) -> Result<TrainPropsExplicit, RuntimeError> {
-        self.ensure_unique_properties(props, "train", span)?;
+        Self::ensure_unique_properties(props, "train", span)?;
 
-        let epochs = match self.find_prop(props, "epochs") {
+        let epochs = match Self::find_prop(props, "epochs") {
             Some(values) => {
                 if values.len() != 1 {
                     return Err(Self::error(
@@ -468,7 +539,7 @@ impl Executor {
             None => None,
         };
 
-        let device = match self.find_prop(props, "device") {
+        let device = match Self::find_prop(props, "device") {
             Some(values) => {
                 if values.len() != 1 {
                     return Err(Self::error(
@@ -477,13 +548,13 @@ impl Executor {
                     ));
                 }
                 let parsed = self.expect_symbol_value(&values[0], "train.device")?;
-                self.ensure_allowed_symbol("train.device", &parsed, DEVICES, values[0].span())?;
+                Self::ensure_allowed_symbol("train.device", &parsed, DEVICES, values[0].span())?;
                 Some(parsed)
             }
             None => None,
         };
 
-        let optimizer = match self.find_prop(props, "optimizer") {
+        let optimizer = match Self::find_prop(props, "optimizer") {
             Some(values) => {
                 if values.len() != 1 {
                     return Err(Self::error(
@@ -492,7 +563,7 @@ impl Executor {
                     ));
                 }
                 let parsed = self.expect_symbol_value(&values[0], "train.optimizer")?;
-                self.ensure_allowed_symbol(
+                Self::ensure_allowed_symbol(
                     "train.optimizer",
                     &parsed,
                     OPTIMIZERS,
@@ -503,7 +574,7 @@ impl Executor {
             None => None,
         };
 
-        let lr = match self.find_prop(props, "lr") {
+        let lr = match Self::find_prop(props, "lr") {
             Some(values) => {
                 if values.len() != 1 {
                     return Err(Self::error(
@@ -512,7 +583,7 @@ impl Executor {
                     ));
                 }
                 let raw = self.eval_expr(&values[0])?;
-                let parsed = self.to_f64(&raw, values[0].span())?;
+                let parsed = Self::to_f64(&raw, values[0].span())?;
                 if parsed <= 0.0 {
                     return Err(Self::error(
                         "train.lr must be > 0".to_string(),
@@ -524,7 +595,7 @@ impl Executor {
             None => None,
         };
 
-        let batch = match self.find_prop(props, "batch") {
+        let batch = match Self::find_prop(props, "batch") {
             Some(values) => {
                 if values.len() != 1 {
                     return Err(Self::error(
@@ -544,7 +615,7 @@ impl Executor {
             None => None,
         };
 
-        let precision = match self.find_prop(props, "precision") {
+        let precision = match Self::find_prop(props, "precision") {
             Some(values) => {
                 if values.len() != 1 {
                     return Err(Self::error(
@@ -572,7 +643,7 @@ impl Executor {
         props: &[Property],
         span: Span,
     ) -> Result<(Option<String>, Option<f64>), RuntimeError> {
-        if let Some(values) = self.find_prop(props, "optimizer") {
+        if let Some(values) = Self::find_prop(props, "optimizer") {
             if values.is_empty() || values.len() > 2 {
                 return Err(Self::error(
                     "model.optimizer expects 1 or 2 values".to_string(),
@@ -581,7 +652,7 @@ impl Executor {
             }
 
             let optimizer = self.expect_symbol_value(&values[0], "model.optimizer")?;
-            self.ensure_allowed_symbol(
+            Self::ensure_allowed_symbol(
                 "model.optimizer",
                 &optimizer,
                 OPTIMIZERS,
@@ -590,7 +661,7 @@ impl Executor {
 
             let optimizer_lr = if values.len() == 2 {
                 let lr_value = self.eval_expr(&values[1])?;
-                let lr_float = self.to_f64(&lr_value, values[1].span())?;
+                let lr_float = Self::to_f64(&lr_value, values[1].span())?;
                 if lr_float <= 0.0 {
                     return Err(Self::error(
                         "model.optimizer learning rate must be > 0".to_string(),
@@ -609,10 +680,9 @@ impl Executor {
     }
 
     fn ensure_unique_properties(
-        &self,
         props: &[Property],
         context: &str,
-        span: Span,
+        _span: Span,
     ) -> Result<(), RuntimeError> {
         let mut seen = HashSet::new();
         for prop in props {
@@ -623,7 +693,6 @@ impl Executor {
                 ));
             }
         }
-        let _ = span;
         Ok(())
     }
 
@@ -649,78 +718,71 @@ impl Executor {
             } => {
                 let l = self.eval_expr(left)?;
                 let r = self.eval_expr(right)?;
-                self.eval_binary(op, l, r, *span)
+                self.eval_binary(*op, &l, &r, *span)
             }
         }
     }
 
     fn eval_binary(
         &self,
-        op: &BinaryOp,
-        left: Value,
-        right: Value,
+        op: BinaryOp,
+        lhs: &Value,
+        rhs: &Value,
         span: Span,
     ) -> Result<Value, RuntimeError> {
         match op {
-            BinaryOp::Add => self.eval_add(left, right, span),
-            BinaryOp::Sub => self.eval_sub(left, right, span),
-            BinaryOp::Mul => self.eval_mul(left, right, span),
-            BinaryOp::Div => self.eval_div(left, right, span),
-            BinaryOp::Greater => self.eval_cmp(left, right, CmpOp::Greater, span),
-            BinaryOp::Less => self.eval_cmp(left, right, CmpOp::Less, span),
-            BinaryOp::GreaterEq => self.eval_cmp(left, right, CmpOp::GreaterEq, span),
-            BinaryOp::LessEq => self.eval_cmp(left, right, CmpOp::LessEq, span),
-            BinaryOp::Equal => self.eval_eq(left, right, true, span),
-            BinaryOp::NotEqual => self.eval_eq(left, right, false, span),
+            BinaryOp::Add => Self::eval_add(lhs, rhs, span),
+            BinaryOp::Sub => Self::eval_sub(lhs, rhs, span),
+            BinaryOp::Mul => Self::eval_mul(lhs, rhs, span),
+            BinaryOp::Div => Self::eval_div(lhs, rhs, span),
+            BinaryOp::Greater => Self::eval_cmp(lhs, rhs, CmpOp::Greater, span),
+            BinaryOp::Less => Self::eval_cmp(lhs, rhs, CmpOp::Less, span),
+            BinaryOp::GreaterEq => Self::eval_cmp(lhs, rhs, CmpOp::GreaterEq, span),
+            BinaryOp::LessEq => Self::eval_cmp(lhs, rhs, CmpOp::LessEq, span),
+            BinaryOp::Equal => Self::eval_eq(lhs, rhs, true, span),
+            BinaryOp::NotEqual => Self::eval_eq(lhs, rhs, false, span),
         }
     }
 
-    fn eval_add(&self, left: Value, right: Value, span: Span) -> Result<Value, RuntimeError> {
-        match (left, right) {
-            (Value::Int(a), Value::Int(b)) => a.checked_add(b).map(Value::Int).ok_or_else(|| {
+    fn eval_add(left: &Value, right: &Value, span: Span) -> Result<Value, RuntimeError> {
+        if let (Value::Int(a), Value::Int(b)) = (left, right) {
+            return a.checked_add(*b).map(Value::Int).ok_or_else(|| {
                 Self::error("Math overflow: int addition overflow".to_string(), span)
-            }),
-            (a, b) => {
-                let result = self.to_f64(&a, span)? + self.to_f64(&b, span)?;
-                self.finite_float(result, "Math overflow: float addition overflow", span)
-                    .map(Value::Float)
-            }
+            });
         }
+        let result = Self::to_f64(left, span)? + Self::to_f64(right, span)?;
+        Self::finite_float(result, "Math overflow: float addition overflow", span).map(Value::Float)
     }
 
-    fn eval_sub(&self, left: Value, right: Value, span: Span) -> Result<Value, RuntimeError> {
-        match (left, right) {
-            (Value::Int(a), Value::Int(b)) => a.checked_sub(b).map(Value::Int).ok_or_else(|| {
+    fn eval_sub(left: &Value, right: &Value, span: Span) -> Result<Value, RuntimeError> {
+        if let (Value::Int(a), Value::Int(b)) = (left, right) {
+            return a.checked_sub(*b).map(Value::Int).ok_or_else(|| {
                 Self::error("Math overflow: int subtraction overflow".to_string(), span)
-            }),
-            (a, b) => {
-                let result = self.to_f64(&a, span)? - self.to_f64(&b, span)?;
-                self.finite_float(result, "Math overflow: float subtraction overflow", span)
-                    .map(Value::Float)
-            }
+            });
         }
+        let result = Self::to_f64(left, span)? - Self::to_f64(right, span)?;
+        Self::finite_float(result, "Math overflow: float subtraction overflow", span)
+            .map(Value::Float)
     }
 
-    fn eval_mul(&self, left: Value, right: Value, span: Span) -> Result<Value, RuntimeError> {
-        match (left, right) {
-            (Value::Int(a), Value::Int(b)) => a.checked_mul(b).map(Value::Int).ok_or_else(|| {
+    fn eval_mul(left: &Value, right: &Value, span: Span) -> Result<Value, RuntimeError> {
+        if let (Value::Int(a), Value::Int(b)) = (left, right) {
+            return a.checked_mul(*b).map(Value::Int).ok_or_else(|| {
                 Self::error(
                     "Math overflow: int multiplication overflow".to_string(),
                     span,
                 )
-            }),
-            (a, b) => {
-                let result = self.to_f64(&a, span)? * self.to_f64(&b, span)?;
-                self.finite_float(result, "Math overflow: float multiplication overflow", span)
-                    .map(Value::Float)
-            }
+            });
         }
+        let result = Self::to_f64(left, span)? * Self::to_f64(right, span)?;
+        Self::finite_float(result, "Math overflow: float multiplication overflow", span)
+            .map(Value::Float)
     }
 
-    fn eval_div(&self, left: Value, right: Value, span: Span) -> Result<Value, RuntimeError> {
-        let numerator = self.to_f64(&left, span)?;
-        let denominator = self.to_f64(&right, span)?;
-        if denominator == 0.0 {
+    fn eval_div(left: &Value, right: &Value, span: Span) -> Result<Value, RuntimeError> {
+        let numerator = Self::to_f64(left, span)?;
+        let denominator = Self::to_f64(right, span)?;
+        if denominator.abs() < f64::EPSILON {
             return Err(Self::error_with_hint(
                 "Division by zero".to_string(),
                 span,
@@ -728,19 +790,12 @@ impl Executor {
             ));
         }
         let result = numerator / denominator;
-        self.finite_float(result, "Math overflow: float division overflow", span)
-            .map(Value::Float)
+        Self::finite_float(result, "Math overflow: float division overflow", span).map(Value::Float)
     }
 
-    fn eval_cmp(
-        &self,
-        left: Value,
-        right: Value,
-        op: CmpOp,
-        span: Span,
-    ) -> Result<Value, RuntimeError> {
-        let l = self.to_f64(&left, span)?;
-        let r = self.to_f64(&right, span)?;
+    fn eval_cmp(left: &Value, right: &Value, op: CmpOp, span: Span) -> Result<Value, RuntimeError> {
+        let l = Self::to_f64(left, span)?;
+        let r = Self::to_f64(right, span)?;
 
         let result = match op {
             CmpOp::Greater => l > r,
@@ -753,15 +808,14 @@ impl Executor {
     }
 
     fn eval_eq(
-        &self,
-        left: Value,
-        right: Value,
+        left: &Value,
+        right: &Value,
         equality: bool,
         span: Span,
     ) -> Result<Value, RuntimeError> {
-        let result = match (&left, &right) {
+        let result = match (left, right) {
             (Value::Int(_), Value::Float(_)) | (Value::Float(_), Value::Int(_)) => {
-                (self.to_f64(&left, span)? - self.to_f64(&right, span)?).abs() <= FLOAT_EPSILON
+                (Self::to_f64(left, span)? - Self::to_f64(right, span)?).abs() <= FLOAT_EPSILON
             }
             (Value::Float(a), Value::Float(b)) => (a - b).abs() <= FLOAT_EPSILON,
             _ => left == right,
@@ -770,7 +824,7 @@ impl Executor {
         Ok(Value::Bool(if equality { result } else { !result }))
     }
 
-    fn to_f64(&self, value: &Value, span: Span) -> Result<f64, RuntimeError> {
+    fn to_f64(value: &Value, span: Span) -> Result<f64, RuntimeError> {
         match value {
             Value::Int(v) => {
                 let magnitude = v.checked_abs().map_or(i64::MAX, |abs| abs);
@@ -781,7 +835,9 @@ impl Executor {
                         span,
                     ));
                 }
-                Ok(*v as f64)
+                #[allow(clippy::cast_precision_loss)]
+                let f = *v as f64;
+                Ok(f)
             }
             Value::Float(v) => Ok(*v),
             _ => Err(Self::error(
@@ -791,7 +847,7 @@ impl Executor {
         }
     }
 
-    fn as_bool(&self, value: &Value, span: Span) -> Result<bool, RuntimeError> {
+    fn as_bool(value: &Value, span: Span) -> Result<bool, RuntimeError> {
         match value {
             Value::Bool(v) => Ok(*v),
             _ => Err(Self::error_with_hint(
@@ -802,7 +858,7 @@ impl Executor {
         }
     }
 
-    fn as_int(&self, value: &Value, span: Span) -> Result<i64, RuntimeError> {
+    fn as_int(value: &Value, span: Span) -> Result<i64, RuntimeError> {
         match value {
             Value::Int(v) => Ok(*v),
             _ => Err(Self::error_with_hint(
@@ -871,7 +927,7 @@ impl Executor {
         key: &str,
         span: Span,
     ) -> Result<Option<String>, RuntimeError> {
-        if let Some(values) = self.find_prop(props, key) {
+        if let Some(values) = Self::find_prop(props, key) {
             if values.len() != 1 {
                 return Err(Self::error(
                     format!("model.{key} expects exactly one value"),
@@ -885,7 +941,7 @@ impl Executor {
         }
     }
 
-    fn find_prop<'a>(&self, props: &'a [Property], key: &str) -> Option<&'a [Expr]> {
+    fn find_prop<'a>(props: &'a [Property], key: &str) -> Option<&'a [Expr]> {
         for prop in props {
             if prop.key == key {
                 return Some(prop.values.as_slice());
@@ -895,13 +951,12 @@ impl Executor {
     }
 
     fn get_required_prop<'a>(
-        &self,
         props: &'a [Property],
         key: &str,
         context: &str,
         span: Span,
     ) -> Result<&'a [Expr], RuntimeError> {
-        self.find_prop(props, key).ok_or_else(|| {
+        Self::find_prop(props, key).ok_or_else(|| {
             Self::error(
                 format!("Invalid property: missing required property '{key}' in {context}"),
                 span,
@@ -910,7 +965,6 @@ impl Executor {
     }
 
     fn ensure_allowed_symbol(
-        &self,
         label: &str,
         value: &str,
         allowed: &[&str],
@@ -920,27 +974,20 @@ impl Executor {
             Ok(())
         } else {
             let suggestion = best_suggestion(value, allowed);
+            let joined = allowed.join(", ");
             let hint = match suggestion {
-                Some(candidate) => format!(
-                    "Did you mean '{candidate}'? Allowed values: {}",
-                    allowed.join(", ")
-                ),
-                None => format!("Allowed values: {}", allowed.join(", ")),
+                Some(candidate) => format!("Did you mean '{candidate}'? Allowed values: {joined}"),
+                None => format!("Allowed values: {joined}"),
             };
             Err(Self::error_with_hint(
-                format!(
-                    "Invalid property: {} has invalid value '{}'; allowed: {}",
-                    label,
-                    value,
-                    allowed.join(", ")
-                ),
+                format!("Invalid property: {label} has invalid value '{value}'; allowed: {joined}"),
                 span,
                 hint,
             ))
         }
     }
 
-    fn finite_float(&self, value: f64, context: &str, span: Span) -> Result<f64, RuntimeError> {
+    fn finite_float(value: f64, context: &str, span: Span) -> Result<f64, RuntimeError> {
         if value.is_finite() {
             Ok(value)
         } else {
@@ -959,6 +1006,17 @@ impl Executor {
         args: &[Expr],
         span: Span,
     ) -> Result<Value, RuntimeError> {
+        // BUG FIX: unbounded recursion would cause a stack overflow. Cap at 128.
+        const MAX_CALL_DEPTH: usize = 128;
+        if self.in_function_depth >= MAX_CALL_DEPTH {
+            return Err(Self::error(
+                format!(
+                    "Call stack overflow: function '{callee}' exceeded maximum call depth of {MAX_CALL_DEPTH}"
+                ),
+                span,
+            ));
+        }
+
         let function = self.runtime.functions.get(callee).cloned().ok_or_else(|| {
             Self::error_with_hint(
                 format!("Undefined function: '{callee}'"),
@@ -982,18 +1040,25 @@ impl Executor {
         let _ = function.span;
         let previous_return = self.return_slot.take();
         self.push_scope();
+        // BUG FIX: use a scopeguard-style pattern so in_function_depth is
+        // decremented and scope is popped even when exec_block_no_scope errors.
         self.in_function_depth += 1;
 
-        for (param, arg_expr) in function.params.iter().zip(args.iter()) {
-            let arg_value = self.eval_expr(arg_expr)?;
-            if let Some(scope) = self.runtime.variables.last_mut() {
-                scope.insert(param.clone(), arg_value);
+        let exec_result = (|| {
+            for (param, arg_expr) in function.params.iter().zip(args.iter()) {
+                let arg_value = self.eval_expr(arg_expr)?;
+                if let Some(scope) = self.runtime.variables.last_mut() {
+                    scope.insert(param.clone(), arg_value);
+                }
             }
-        }
+            self.exec_block_no_scope(&function.body)
+        })();
 
-        self.exec_block_no_scope(&function.body)?;
+        // Always restore depth and pop scope regardless of success/failure.
         self.in_function_depth = self.in_function_depth.saturating_sub(1);
         self.pop_scope()?;
+
+        exec_result?;
 
         let ret = self.return_slot.take().unwrap_or(Value::Unit);
         self.return_slot = previous_return;
@@ -1055,9 +1120,11 @@ impl Executor {
                 }
 
                 let stored = if matches!(current, Value::Float(_)) {
-                    match value {
-                        Value::Int(v) => Value::Float(v as f64),
-                        other => other,
+                    #[allow(clippy::cast_precision_loss)]
+                    if let Value::Int(v) = value {
+                        Value::Float(v as f64)
+                    } else {
+                        value
                     }
                 } else {
                     value
@@ -1084,6 +1151,7 @@ impl Executor {
         None
     }
 
+    #[must_use]
     fn error(message: String, span: Span) -> RuntimeError {
         RuntimeError {
             message,
@@ -1092,6 +1160,7 @@ impl Executor {
         }
     }
 
+    #[must_use]
     fn error_with_hint(message: String, span: Span, hint: String) -> RuntimeError {
         RuntimeError {
             message,
@@ -1102,41 +1171,26 @@ impl Executor {
 }
 
 impl Value {
+    #[must_use]
     fn type_name(&self) -> &'static str {
         match self {
-            Value::Int(_) => "int",
-            Value::Float(_) => "float",
-            Value::Bool(_) => "bool",
-            Value::Str(_) => "str",
-            Value::Unit => "unit",
+            Self::Int(_) => "int",
+            Self::Float(_) => "float",
+            Self::Bool(_) => "bool",
+            Self::Str(_) => "str",
+            Self::Unit => "unit",
         }
     }
 
+    #[must_use]
     fn to_display(&self) -> String {
         match self {
-            Value::Int(v) => v.to_string(),
-            Value::Float(v) => v.to_string(),
-            Value::Bool(v) => v.to_string(),
-            Value::Str(v) => v.clone(),
-            Value::Unit => String::new(),
+            Self::Int(v) => v.to_string(),
+            Self::Float(v) => v.to_string(),
+            Self::Bool(v) => v.to_string(),
+            Self::Str(v) => v.clone(),
+            Self::Unit => String::new(),
         }
-    }
-}
-
-impl Executor {
-    fn touch_model_state(&self, state: &ModelState) {
-        let _ = (
-            &state.layers,
-            &state.activation,
-            &state.optimizer,
-            &state.optimizer_lr,
-            &state.precision,
-            &state.memory,
-        );
-    }
-
-    fn touch_dataset_state(&self, state: &DatasetState) {
-        let _ = (&state.batch, &state.shuffle);
     }
 }
 
@@ -1354,5 +1408,98 @@ mod tests {
 
         let model = ex.runtime.models.get("m").expect("model exists");
         assert_eq!(model.trained_epochs, 2);
+    }
+
+    // ── Regression tests for bugs found in the production code audit ──────────
+
+    #[test]
+    fn model_layer_of_zero_is_rejected() {
+        // BUG FIX: model.layers values must be > 0.
+        // Before the fix, a layer size of 0 was silently accepted and propagated
+        // as a degenerate model to the autopilot and executor, causing silent
+        // incorrect behaviour downstream.
+        let src = "model m\n    layers 128 0 10\n";
+        let program = parse(src);
+        let mut ex = Executor::new();
+        let err = ex
+            .execute(&program)
+            .expect_err("zero layer must be rejected");
+        assert!(
+            err.message.contains("must be > 0"),
+            "expected rejection of zero layer, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn model_layer_of_negative_is_rejected() {
+        let src = "model m\n    layers 128 -4 10\n";
+        let program = parse(src);
+        let mut ex = Executor::new();
+        let err = ex
+            .execute(&program)
+            .expect_err("negative layer must be rejected");
+        assert!(
+            err.message.contains("must be > 0"),
+            "expected rejection of negative layer, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn call_stack_overflow_is_caught_at_depth_128() {
+        // BUG FIX: before the fix, infinite self-recursion would cause an
+        // OS-level stack overflow. Now the runtime catches it at depth 128.
+        // We spawn a thread with a larger stack (8 MB) to give the test safe
+        // headroom while still validating the guard.
+        let src = "fn inf(n)\n    return inf(n + 1)\nresult inf(0)\n".to_string();
+        let handle = std::thread::Builder::new()
+            .stack_size(8 * 1024 * 1024)
+            .spawn(move || {
+                let program = parse(&src);
+                let mut ex = Executor::new();
+                ex.execute(&program).expect_err("must hit call-depth limit")
+            })
+            .expect("thread spawn failed");
+        let err = handle.join().expect("thread panicked");
+        assert!(
+            err.message.contains("Call stack overflow"),
+            "expected call stack error, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn execution_continues_correctly_after_error_inside_function() {
+        // BUG FIX: before the fix, a runtime error inside a function body left
+        // `in_function_depth` incremented. This caused subsequent `return`
+        // statements outside any function to be accepted silently.
+        //
+        // Strategy: register boom() and ok_fn() at top level, call boom() via a
+        // VarDecl (the only call-statement form the parser supports), confirm it
+        // errors, then call ok_fn() and verify it returns 42.
+        let src = concat!(
+            "fn boom()\n",
+            "    _x 1 / 0\n", // division by zero inside boom
+            "fn ok_fn()\n",
+            "    return 42\n",
+        );
+        let program_setup = parse(src);
+        let mut ex = Executor::new();
+        ex.push_scope();
+        ex.exec_block_no_scope(&program_setup.statements)
+            .expect("function registration must not fail");
+
+        // Call boom() — it errors inside; depth must be restored afterwards.
+        // Wrap in VarDecl because the language has no bare call statement.
+        let boom_prog = parse("_e boom()\n");
+        let _ = ex.exec_block_no_scope(&boom_prog.statements); // ignore error
+
+        // ok_fn() must still work correctly after the error.
+        let ok_prog = parse("result ok_fn()\n");
+        ex.exec_block_no_scope(&ok_prog.statements)
+            .expect("ok_fn must succeed after boom() error recovery");
+
+        assert_eq!(ex.get_var("result"), Some(Value::Int(42)));
     }
 }

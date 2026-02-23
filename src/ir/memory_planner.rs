@@ -25,6 +25,7 @@ pub struct MemoryPlan {
     pub peak_live_bytes: usize,
 }
 
+#[must_use]
 pub fn render_lifetime_heatmap(plan: &MemoryPlan, node_count: usize) -> String {
     let mut lines = Vec::new();
     for value in &plan.values {

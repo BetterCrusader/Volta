@@ -16,6 +16,30 @@ impl InteropError {
     }
 }
 
+impl From<crate::ir::tensor::TensorError> for InteropError {
+    fn from(err: crate::ir::tensor::TensorError) -> Self {
+        InteropError {
+            message: err.message,
+        }
+    }
+}
+
+impl From<crate::ir::VerifyError> for InteropError {
+    fn from(err: crate::ir::VerifyError) -> Self {
+        InteropError {
+            message: err.message,
+        }
+    }
+}
+
+impl From<crate::ir::ShapeError> for InteropError {
+    fn from(err: crate::ir::ShapeError) -> Self {
+        InteropError {
+            message: err.message,
+        }
+    }
+}
+
 pub use contract::{
     ImportedProgram, IrContractVersion, IrDataType, IrGraphContract, IrNodeContract, IrOpContract,
     IrTensorLiteral, IrTensorSpec,

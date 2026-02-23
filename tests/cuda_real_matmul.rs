@@ -1,10 +1,15 @@
+#[path = "common/cuda.rs"]
+mod cuda_helpers;
+
 use volta::ir::DeterminismLevel;
-use volta::ir::cuda::device::CudaDevice;
 use volta::ir::cuda::kernels::matmul::matmul_f32;
 
 #[test]
 fn cuda_device_reports_runtime_properties_when_available() {
-    let Some(device) = safe_cuda_device() else {
+    let Some(device) = cuda_helpers::safe_cuda_device() else {
+        eprintln!(
+            "[SKIP] cuda_device_reports_runtime_properties_when_available — no CUDA device available"
+        );
         return;
     };
 
@@ -18,7 +23,8 @@ fn cuda_device_reports_runtime_properties_when_available() {
 
 #[test]
 fn cuda_matmul_matches_cpu() {
-    let Some(device) = safe_cuda_device() else {
+    let Some(device) = cuda_helpers::safe_cuda_device() else {
+        eprintln!("[SKIP] cuda_matmul_matches_cpu — no CUDA device available");
         return;
     };
 
@@ -55,13 +61,4 @@ fn cpu_matmul(lhs: &[f32], rhs: &[f32], m: usize, n: usize, k: usize) -> Vec<f32
         }
     }
     out
-}
-
-fn safe_cuda_device() -> Option<CudaDevice> {
-    let result = std::panic::catch_unwind(|| CudaDevice::new(0));
-    match result {
-        Ok(Ok(device)) => Some(device),
-        Ok(Err(_)) => None,
-        Err(_) => None,
-    }
 }

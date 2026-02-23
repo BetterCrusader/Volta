@@ -8,6 +8,7 @@ use crate::ir::{
 pub struct ElementwiseFusionPass;
 
 impl ElementwiseFusionPass {
+    #[must_use]
     pub fn new() -> Self {
         Self
     }
@@ -139,10 +140,9 @@ mod tests {
         assert_eq!(before, after);
         assert_eq!(
             after,
-            Some(RuntimeValue::Tensor {
-                shape: vec![3],
-                data: vec![0.0, -2.0, 0.0],
-            })
+            Some(RuntimeValue::Tensor(std::sync::Arc::new(
+                crate::ir::tensor::Tensor::new(vec![3], vec![0.0, -2.0, 0.0]).unwrap()
+            )))
         );
     }
 }

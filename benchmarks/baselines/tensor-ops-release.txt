@@ -1,0 +1,23 @@
+date: 2026-02-22
+command: cargo run --release --bin tensor_bench
+
+=== Tensor Operation Benchmarks ===
+
+--- MatMul ---
+matmul 64x64 x1000: 23561 ns/iter
+matmul 128x128 x1000: 210415 ns/iter
+matmul 256x256 x100: 1483198 ns/iter
+
+--- Softmax ---
+softmax 64 x1000: 320 ns/iter
+softmax 1024 x1000: 3406 ns/iter
+
+--- Unary Ops ---
+sigmoid 1024 x1000: 3956 ns/iter
+gelu 1024 x1000: 5211 ns/iter
+
+--- Binary Ops ---
+add same shape 1024 x1000: 114 ns/iter
+
+--- Reductions ---
+reduce_sum 1024 x1000: 831 ns/iter

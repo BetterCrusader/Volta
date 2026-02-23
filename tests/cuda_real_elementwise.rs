@@ -1,12 +1,15 @@
+#[path = "common/cuda.rs"]
+mod cuda_helpers;
+
 use volta::ir::DeterminismLevel;
-use volta::ir::cuda::device::CudaDevice;
 use volta::ir::cuda::kernels::add::{add_f32, div_f32};
 use volta::ir::cuda::kernels::relu::relu_f32;
 use volta::ir::cuda::kernels::softmax::softmax_f32;
 
 #[test]
 fn cuda_add_matches_cpu() {
-    let Some(device) = safe_cuda_device() else {
+    let Some(device) = cuda_helpers::safe_cuda_device() else {
+        eprintln!("[SKIP] cuda_add_matches_cpu — no CUDA device available");
         return;
     };
 
@@ -31,7 +34,8 @@ fn cuda_add_matches_cpu() {
 
 #[test]
 fn cuda_relu_matches_cpu() {
-    let Some(device) = safe_cuda_device() else {
+    let Some(device) = cuda_helpers::safe_cuda_device() else {
+        eprintln!("[SKIP] cuda_relu_matches_cpu — no CUDA device available");
         return;
     };
 
@@ -53,7 +57,8 @@ fn cuda_relu_matches_cpu() {
 
 #[test]
 fn cuda_div_matches_cpu() {
-    let Some(device) = safe_cuda_device() else {
+    let Some(device) = cuda_helpers::safe_cuda_device() else {
+        eprintln!("[SKIP] cuda_div_matches_cpu — no CUDA device available");
         return;
     };
 
@@ -78,7 +83,8 @@ fn cuda_div_matches_cpu() {
 
 #[test]
 fn cuda_softmax_strict_is_deterministic() {
-    let Some(device) = safe_cuda_device() else {
+    let Some(device) = cuda_helpers::safe_cuda_device() else {
+        eprintln!("[SKIP] cuda_softmax_strict_is_deterministic — no CUDA device available");
         return;
     };
 
@@ -99,13 +105,4 @@ fn cuda_softmax_strict_is_deterministic() {
         (sum - 1.0).abs() <= 1e-5,
         "softmax must sum to one, got {sum}"
     );
-}
-
-fn safe_cuda_device() -> Option<CudaDevice> {
-    let result = std::panic::catch_unwind(|| CudaDevice::new(0));
-    match result {
-        Ok(Ok(device)) => Some(device),
-        Ok(Err(_)) => None,
-        Err(_) => None,
-    }
 }

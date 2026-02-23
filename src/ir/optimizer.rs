@@ -27,6 +27,14 @@ pub struct OptimizerError {
     pub message: String,
 }
 
+impl From<crate::ir::tensor::TensorError> for OptimizerError {
+    fn from(err: crate::ir::tensor::TensorError) -> Self {
+        OptimizerError {
+            message: err.message,
+        }
+    }
+}
+
 pub fn apply_gradients(
     parameters: &mut HashMap<String, Tensor>,
     gradients: &HashMap<String, Tensor>,
@@ -51,6 +59,14 @@ fn apply_sgd(
     gradients: &HashMap<String, Tensor>,
     lr: f32,
 ) -> Result<(), OptimizerError> {
+    // BUG FIX: a NaN or non-positive lr would silently corrupt all parameters
+    // without any error message. Validate before use.
+    if !lr.is_finite() || lr <= 0.0 {
+        return Err(OptimizerError {
+            message: format!("SGD learning rate must be a finite positive number, got {lr}"),
+        });
+    }
+
     for (name, parameter) in parameters {
         let Some(gradient) = gradients.get(name) else {
             continue;
@@ -79,9 +95,51 @@ fn apply_adam(
     epsilon: f32,
     state: &mut OptimizerState,
 ) -> Result<(), OptimizerError> {
+    // BUG FIX: validate all hyperparameters before use.
+    //
+    // If beta1 == 1.0:  bias1 = 1 - 1^step = 0.0 → m_hat = m / 0 = NaN.
+    // If beta2 == 1.0:  bias2 = 1 - 1^step = 0.0 → v_hat = v / 0 = NaN.
+    // If epsilon <= 0:  denominator can reach 0 → parameter update = ±Inf.
+    //
+    // In all cases the corruption propagated silently without any error.
+    if !lr.is_finite() || lr <= 0.0 {
+        return Err(OptimizerError {
+            message: format!("Adam learning rate must be a finite positive number, got {lr}"),
+        });
+    }
+    if !(0.0..1.0).contains(&beta1) || !beta1.is_finite() {
+        return Err(OptimizerError {
+            message: format!("Adam beta1 must be in [0, 1), got {beta1}"),
+        });
+    }
+    if !(0.0..1.0).contains(&beta2) || !beta2.is_finite() {
+        return Err(OptimizerError {
+            message: format!("Adam beta2 must be in [0, 1), got {beta2}"),
+        });
+    }
+    if !epsilon.is_finite() || epsilon <= 0.0 {
+        return Err(OptimizerError {
+            message: format!("Adam epsilon must be a finite positive number, got {epsilon}"),
+        });
+    }
+
     let step_i32 = i32::try_from(state.step).map_err(|_| OptimizerError {
         message: "Optimizer step overflow for Adam bias correction".to_string(),
     })?;
+
+    // Guaranteed > 0 because beta values are strictly in [0, 1) and step >= 1.
+    let bias1 = 1.0_f32 - beta1.powi(step_i32);
+    let bias2 = 1.0_f32 - beta2.powi(step_i32);
+    // Sanity guard against extreme floating-point underflow (extremely rare).
+    if bias1 <= 0.0 || bias2 <= 0.0 {
+        return Err(OptimizerError {
+            message: format!(
+                "Adam bias correction underflowed (bias1={bias1}, bias2={bias2}); \
+                 step={} with beta1={beta1}, beta2={beta2}",
+                state.step,
+            ),
+        });
+    }
 
     for (name, parameter) in parameters {
         let Some(gradient) = gradients.get(name) else {
@@ -115,8 +173,6 @@ fn apply_adam(
 
         let one_minus_beta1 = 1.0_f32 - beta1;
         let one_minus_beta2 = 1.0_f32 - beta2;
-        let bias1 = 1.0_f32 - beta1.powi(step_i32);
-        let bias2 = 1.0_f32 - beta2.powi(step_i32);
 
         for ((p, g), (m_i, v_i)) in parameter
             .data
@@ -167,5 +223,106 @@ mod tests {
 
         let w = params.get("w").expect("param exists");
         assert!((w.data[0] - 0.95).abs() < 1e-6);
+    }
+
+    // ── Regression tests for optimizer bugs found in the production code audit ─
+
+    #[test]
+    fn sgd_rejects_non_positive_learning_rate() {
+        // BUG FIX: SGD with lr=0 or negative silently corrupts parameters.
+        let mut params = HashMap::new();
+        params.insert(
+            "w".to_string(),
+            Tensor::new(vec![1], vec![1.0]).expect("valid tensor"),
+        );
+        let mut grads = HashMap::new();
+        grads.insert(
+            "w".to_string(),
+            Tensor::new(vec![1], vec![1.0]).expect("valid tensor"),
+        );
+        let mut state = OptimizerState::default();
+
+        for bad_lr in [0.0_f32, -0.01, f32::NAN, f32::INFINITY] {
+            let err = apply_gradients(
+                &mut params,
+                &grads,
+                &OptimizerConfig::Sgd { lr: bad_lr },
+                &mut state,
+            )
+            .expect_err(&format!("lr={bad_lr} must be rejected"));
+            assert!(
+                err.message.contains("learning rate"),
+                "expected 'learning rate' in error for lr={bad_lr}, got: {}",
+                err.message
+            );
+        }
+    }
+
+    #[test]
+    fn adam_rejects_beta_equal_to_one() {
+        // BUG FIX: beta1=1.0 → bias1=0 → m_hat=m/0=NaN propagated silently.
+        let mut params = HashMap::new();
+        params.insert(
+            "w".to_string(),
+            Tensor::new(vec![1], vec![1.0]).expect("valid tensor"),
+        );
+        let mut grads = HashMap::new();
+        grads.insert(
+            "w".to_string(),
+            Tensor::new(vec![1], vec![1.0]).expect("valid tensor"),
+        );
+        let mut state = OptimizerState::default();
+
+        let err = apply_gradients(
+            &mut params,
+            &grads,
+            &OptimizerConfig::Adam {
+                lr: 0.001,
+                beta1: 1.0, // invalid – bias1 = 0
+                beta2: 0.999,
+                epsilon: 1e-8,
+            },
+            &mut state,
+        )
+        .expect_err("beta1=1.0 must be rejected");
+        assert!(
+            err.message.contains("beta1"),
+            "expected beta1 rejection, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn adam_rejects_non_positive_epsilon() {
+        // BUG FIX: epsilon <= 0 makes the denominator reach 0 → Inf update.
+        let mut params = HashMap::new();
+        params.insert(
+            "w".to_string(),
+            Tensor::new(vec![1], vec![1.0]).expect("valid tensor"),
+        );
+        let mut grads = HashMap::new();
+        grads.insert(
+            "w".to_string(),
+            Tensor::new(vec![1], vec![1.0]).expect("valid tensor"),
+        );
+        let mut state = OptimizerState::default();
+
+        let err = apply_gradients(
+            &mut params,
+            &grads,
+            &OptimizerConfig::Adam {
+                lr: 0.001,
+                beta1: 0.9,
+                beta2: 0.999,
+                epsilon: 0.0, // invalid
+            },
+            &mut state,
+        )
+        .expect_err("epsilon=0 must be rejected");
+        assert!(
+            err.message.contains("epsilon"),
+            "expected epsilon rejection, got: {}",
+            err.message
+        );
     }
 }

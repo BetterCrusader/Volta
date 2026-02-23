@@ -73,6 +73,42 @@ pub enum OnnxOpStub {
         ends: Vec<usize>,
         axes: Vec<usize>,
     },
+    Log {
+        input: String,
+    },
+    Exp {
+        input: String,
+    },
+    Sigmoid {
+        input: String,
+    },
+    Gelu {
+        input: String,
+    },
+    ReduceSum {
+        input: String,
+        axis: Option<usize>,
+        keepdims: bool,
+    },
+    ReduceMax {
+        input: String,
+        axis: Option<usize>,
+        keepdims: bool,
+    },
+    ReduceMean {
+        input: String,
+        axis: Option<usize>,
+        keepdims: bool,
+    },
+    /// Generalised matrix multiply: `alpha * (lhs × rhs) + beta * bias`.
+    /// Matches ONNX `Gemm` op (opset 11+).
+    Gemm {
+        lhs: String,
+        rhs: String,
+        bias: Option<String>,
+        alpha: f32,
+        beta: f32,
+    },
     Output {
         value: String,
     },
@@ -189,6 +225,60 @@ impl OnnxImporter {
                     ends: ends.clone(),
                     axes: axes.clone(),
                 },
+                OnnxOpStub::Log { input } => IrOpContract::Log {
+                    input: input.clone(),
+                },
+                OnnxOpStub::Exp { input } => IrOpContract::Exp {
+                    input: input.clone(),
+                },
+                OnnxOpStub::Sigmoid { input } => IrOpContract::Sigmoid {
+                    input: input.clone(),
+                },
+                OnnxOpStub::Gelu { input } => IrOpContract::Gelu {
+                    input: input.clone(),
+                },
+                OnnxOpStub::ReduceSum {
+                    input,
+                    axis,
+                    keepdims,
+                } => IrOpContract::ReduceSum {
+                    input: input.clone(),
+                    axis: *axis,
+                    keepdims: *keepdims,
+                },
+                OnnxOpStub::ReduceMax {
+                    input,
+                    axis,
+                    keepdims,
+                } => IrOpContract::ReduceMax {
+                    input: input.clone(),
+                    axis: *axis,
+                    keepdims: *keepdims,
+                },
+                OnnxOpStub::ReduceMean {
+                    input,
+                    axis,
+                    keepdims,
+                } => IrOpContract::ReduceMean {
+                    input: input.clone(),
+                    axis: *axis,
+                    keepdims: *keepdims,
+                },
+                OnnxOpStub::Gemm {
+                    lhs,
+                    rhs,
+                    bias,
+                    alpha,
+                    beta,
+                } => IrOpContract::Gemm {
+                    lhs: lhs.clone(),
+                    rhs: rhs.clone(),
+                    bias: bias.clone(),
+                    alpha: *alpha,
+                    beta: *beta,
+                    trans_a: false,
+                    trans_b: false,
+                },
                 OnnxOpStub::Output { value } => IrOpContract::Output {
                     value: value.clone(),
                 },
@@ -233,6 +323,7 @@ impl OnnxImporter {
         let mut nodes = Vec::<IrNodeContract>::new();
         let mut input_specs = Vec::<IrTensorSpec>::new();
         let mut parameter_specs = Vec::<IrTensorSpec>::new();
+        let mut value_ranks = HashMap::<String, usize>::new();
 
         let initializer_names: HashSet<&str> = graph
             .initializer
@@ -251,6 +342,7 @@ impl OnnxImporter {
             }
             let mut spec = tensor_spec_from_value_info(value)?;
             spec.name = value.name.clone();
+            value_ranks.insert(value.name.clone(), spec.shape.len());
             input_specs.push(spec.clone());
             nodes.push(IrNodeContract {
                 id: value.name.clone(),
@@ -262,6 +354,7 @@ impl OnnxImporter {
 
         for tensor in &graph.initializer {
             let spec = tensor_spec_from_initializer(tensor)?;
+            value_ranks.insert(tensor.name.clone(), spec.shape.len());
             parameter_specs.push(spec.clone());
             nodes.push(IrNodeContract {
                 id: tensor.name.clone(),
@@ -277,13 +370,16 @@ impl OnnxImporter {
                 ))
             })?;
 
-            let op = map_proto_op(proto_node, &initializer_lookup)?;
+            let op = map_proto_op(proto_node, &initializer_lookup, &value_ranks)?;
             let node = IrNodeContract {
                 id: id.to_string(),
                 op,
             };
             if let Some(plugin) = self.plugins.find(op_kind_from_contract(&node.op)) {
                 plugin.validate_node(&node)?;
+            }
+            if let Some(rank) = inferred_output_rank(&node.op, &value_ranks) {
+                value_ranks.insert(node.id.clone(), rank);
             }
             nodes.push(node);
         }
@@ -314,12 +410,22 @@ pub fn import_onnx_stub_graph(source: &OnnxGraphStub) -> Result<ImportedProgram,
     OnnxImporter::default().import_graph(source)
 }
 
+/// Imports a serialized ONNX protobuf model from raw bytes.
+///
+/// # Errors
+/// Returns [`InteropError`] when protobuf decoding fails or when the importer
+/// encounters unsupported operators, attributes, dtypes, or shape constraints.
 pub fn import_onnx_bytes(bytes: &[u8]) -> Result<ImportedProgram, InteropError> {
     let model = pb::ModelProto::decode(bytes)
         .map_err(|err| InteropError::new(format!("failed to decode ONNX protobuf: {err}")))?;
     OnnxImporter::default().import_model_proto(&model)
 }
 
+/// Imports an ONNX model from a filesystem path.
+///
+/// # Errors
+/// Returns [`InteropError`] if the file cannot be read, protobuf decoding
+/// fails, or graph import validation fails.
 pub fn import_onnx_file(path: impl AsRef<Path>) -> Result<ImportedProgram, InteropError> {
     let data = std::fs::read(path.as_ref()).map_err(|err| {
         InteropError::new(format!(
@@ -371,6 +477,131 @@ fn attribute_i64(node: &pb::NodeProto, key: &str) -> Option<i64> {
         .map(|attr| attr.i)
 }
 
+/// Reads a float (`FLOAT`) attribute by name from an ONNX node.
+///
+/// Returns `None` if the attribute is absent or has a different type.
+fn attribute_f32(node: &pb::NodeProto, key: &str) -> Option<f32> {
+    node.attribute
+        .iter()
+        .find(|attr| attr.name == key)
+        .map(|attr| attr.f)
+}
+
+fn attribute_string(node: &pb::NodeProto, key: &str) -> Option<String> {
+    node.attribute
+        .iter()
+        .find(|attr| attr.name == key)
+        .and_then(|attr| String::from_utf8(attr.s.clone()).ok())
+}
+
+fn attribute_i64s(node: &pb::NodeProto, key: &str) -> Option<Vec<i64>> {
+    node.attribute
+        .iter()
+        .find(|attr| attr.name == key)
+        .map(|attr| attr.ints.clone())
+}
+
+fn parse_reduce_axis(
+    node: &pb::NodeProto,
+    initializers: &HashMap<&str, &pb::TensorProto>,
+    op_name: &str,
+    input_rank: Option<usize>,
+) -> Result<Option<usize>, InteropError> {
+    if let Some(axis_name) = node.input.get(1).filter(|name| !name.is_empty()) {
+        let axis_tensor = initializers
+            .get(axis_name.as_str())
+            .copied()
+            .ok_or_else(|| {
+                InteropError::new(format!(
+                    "node '{}' {} axes input '{}' must be initializer for static import",
+                    node.name, op_name, axis_name
+                ))
+            })?;
+        let axes = parse_reduce_axes(axis_tensor, node, op_name, input_rank)?;
+        return single_axis_from_list(&axes, node, op_name);
+    }
+
+    if let Some(axes) = attribute_i64s(node, "axes") {
+        let axes = normalize_reduce_axes(&axes, node, op_name, input_rank)?;
+        return single_axis_from_list(&axes, node, op_name);
+    }
+
+    if let Some(axis) = attribute_i64(node, "axis") {
+        let axes = normalize_reduce_axes(&[axis], node, op_name, input_rank)?;
+        return single_axis_from_list(&axes, node, op_name);
+    }
+
+    Ok(None)
+}
+
+fn parse_reduce_axes(
+    tensor: &pb::TensorProto,
+    node: &pb::NodeProto,
+    op_name: &str,
+    input_rank: Option<usize>,
+) -> Result<Vec<usize>, InteropError> {
+    let axes = parse_tensor_data_as_i64(tensor)?;
+    if axes.is_empty() {
+        return Ok(Vec::new());
+    }
+    normalize_reduce_axes(&axes, node, op_name, input_rank)
+}
+
+fn normalize_reduce_axes(
+    axes: &[i64],
+    node: &pb::NodeProto,
+    op_name: &str,
+    input_rank: Option<usize>,
+) -> Result<Vec<usize>, InteropError> {
+    axes.iter()
+        .map(|&axis| normalize_single_axis(axis, node, op_name, input_rank))
+        .collect()
+}
+
+fn normalize_single_axis(
+    axis: i64,
+    node: &pb::NodeProto,
+    op_name: &str,
+    input_rank: Option<usize>,
+) -> Result<usize, InteropError> {
+    if axis >= 0 {
+        return Ok(axis as usize);
+    }
+
+    let Some(rank) = input_rank else {
+        return Err(InteropError::new(format!(
+            "node '{}' {} negative axis {} requires known input rank",
+            node.name, op_name, axis
+        )));
+    };
+    let rank_i64 = rank as i64;
+    let normalized = rank_i64 + axis;
+    if normalized < 0 || normalized >= rank_i64 {
+        return Err(InteropError::new(format!(
+            "node '{}' {} axis {} is out of bounds for rank {}",
+            node.name, op_name, axis, rank
+        )));
+    }
+    Ok(normalized as usize)
+}
+
+fn single_axis_from_list(
+    axes: &[usize],
+    node: &pb::NodeProto,
+    op_name: &str,
+) -> Result<Option<usize>, InteropError> {
+    if axes.is_empty() {
+        Ok(None)
+    } else if axes.len() == 1 {
+        Ok(Some(axes[0]))
+    } else {
+        Err(InteropError::new(format!(
+            "node '{}' {} supports only a single axis in Wave 2 static import",
+            node.name, op_name
+        )))
+    }
+}
+
 fn parse_usize_list(tensor: &pb::TensorProto, label: &str) -> Result<Vec<usize>, InteropError> {
     let dims = parse_tensor_data_as_i64(tensor)?;
     if dims.is_empty() {
@@ -396,6 +627,7 @@ fn parse_usize_list(tensor: &pb::TensorProto, label: &str) -> Result<Vec<usize>,
 fn map_proto_op(
     node: &pb::NodeProto,
     initializers: &HashMap<&str, &pb::TensorProto>,
+    value_ranks: &HashMap<String, usize>,
 ) -> Result<IrOpContract, InteropError> {
     let op = node.op_type.as_str();
     Ok(match op {
@@ -428,9 +660,93 @@ fn map_proto_op(
         "Relu" => IrOpContract::Relu {
             input: require_input(node, 0)?.to_string(),
         },
+        "Sigmoid" => IrOpContract::Sigmoid {
+            input: require_input(node, 0)?.to_string(),
+        },
+        "Gelu" => {
+            let approximation = attribute_string(node, "approximate")
+                .or_else(|| attribute_string(node, "approximation"));
+            if let Some(mode) = approximation {
+                if mode == "tanh" {
+                    IrOpContract::Gelu {
+                        input: require_input(node, 0)?.to_string(),
+                    }
+                } else if mode == "none" {
+                    IrOpContract::GeluExact {
+                        input: require_input(node, 0)?.to_string(),
+                    }
+                } else {
+                    return Err(InteropError::new(format!(
+                        "node '{}' Gelu approximation '{}' is unsupported; supported: tanh|none",
+                        node.name, mode
+                    )));
+                }
+            } else {
+                IrOpContract::Gelu {
+                    input: require_input(node, 0)?.to_string(),
+                }
+            }
+        }
+        "Log" => IrOpContract::Log {
+            input: require_input(node, 0)?.to_string(),
+        },
+        "Exp" => IrOpContract::Exp {
+            input: require_input(node, 0)?.to_string(),
+        },
         "Softmax" => IrOpContract::Softmax {
             input: require_input(node, 0)?.to_string(),
         },
+        "ReduceSum" => {
+            let input = require_input(node, 0)?.to_string();
+            let input_rank = value_ranks.get(&input).copied();
+            let keepdims = attribute_i64(node, "keepdims").unwrap_or(1);
+            if keepdims != 0 && keepdims != 1 {
+                return Err(InteropError::new(format!(
+                    "node '{}' ReduceSum keepdims must be 0 or 1, got {}",
+                    node.name, keepdims
+                )));
+            }
+            let axis = parse_reduce_axis(node, initializers, "ReduceSum", input_rank)?;
+            IrOpContract::ReduceSum {
+                input,
+                axis,
+                keepdims: keepdims == 1,
+            }
+        }
+        "ReduceMax" => {
+            let input = require_input(node, 0)?.to_string();
+            let input_rank = value_ranks.get(&input).copied();
+            let keepdims = attribute_i64(node, "keepdims").unwrap_or(1);
+            if keepdims != 0 && keepdims != 1 {
+                return Err(InteropError::new(format!(
+                    "node '{}' ReduceMax keepdims must be 0 or 1, got {}",
+                    node.name, keepdims
+                )));
+            }
+            let axis = parse_reduce_axis(node, initializers, "ReduceMax", input_rank)?;
+            IrOpContract::ReduceMax {
+                input,
+                axis,
+                keepdims: keepdims == 1,
+            }
+        }
+        "ReduceMean" => {
+            let input = require_input(node, 0)?.to_string();
+            let input_rank = value_ranks.get(&input).copied();
+            let keepdims = attribute_i64(node, "keepdims").unwrap_or(1);
+            if keepdims != 0 && keepdims != 1 {
+                return Err(InteropError::new(format!(
+                    "node '{}' ReduceMean keepdims must be 0 or 1, got {}",
+                    node.name, keepdims
+                )));
+            }
+            let axis = parse_reduce_axis(node, initializers, "ReduceMean", input_rank)?;
+            IrOpContract::ReduceMean {
+                input,
+                axis,
+                keepdims: keepdims == 1,
+            }
+        }
         "Reshape" => {
             let input = require_input(node, 0)?.to_string();
             let shape_tensor = require_initializer_input(node, 1, initializers)?;
@@ -522,6 +838,52 @@ fn map_proto_op(
                 starts,
                 ends,
                 axes,
+            }
+        }
+        // Gemm: alpha * (A @ B) + beta * C
+        // Spec: https://onnx.ai/onnx/operators/onnx__Gemm.html
+        "Gemm" => {
+            let lhs = require_input(node, 0)?.to_string();
+            let rhs = require_input(node, 1)?.to_string();
+            // Input[2] (bias) is optional — empty string means absent.
+            let bias = node.input.get(2).filter(|name| !name.is_empty()).cloned();
+            // Read float attributes, falling back to the ONNX-specified defaults.
+            let alpha = attribute_f32(node, "alpha").unwrap_or(1.0_f32);
+            let beta = attribute_f32(node, "beta").unwrap_or(1.0_f32);
+            let trans_a_raw = attribute_i64(node, "transA").unwrap_or(0);
+            let trans_b_raw = attribute_i64(node, "transB").unwrap_or(0);
+            if !alpha.is_finite() {
+                return Err(InteropError::new(format!(
+                    "Gemm node '{}' alpha attribute must be finite, got {alpha}",
+                    node.name
+                )));
+            }
+            if !beta.is_finite() {
+                return Err(InteropError::new(format!(
+                    "Gemm node '{}' beta attribute must be finite, got {beta}",
+                    node.name
+                )));
+            }
+            if trans_a_raw != 0 && trans_a_raw != 1 {
+                return Err(InteropError::new(format!(
+                    "Gemm node '{}' transA must be 0 or 1, got {}",
+                    node.name, trans_a_raw
+                )));
+            }
+            if trans_b_raw != 0 && trans_b_raw != 1 {
+                return Err(InteropError::new(format!(
+                    "Gemm node '{}' transB must be 0 or 1, got {}",
+                    node.name, trans_b_raw
+                )));
+            }
+            IrOpContract::Gemm {
+                lhs,
+                rhs,
+                bias,
+                alpha,
+                beta,
+                trans_a: trans_a_raw == 1,
+                trans_b: trans_b_raw == 1,
             }
         }
         unsupported => {
@@ -855,11 +1217,19 @@ fn op_kind(op: &OnnxOpStub) -> &'static str {
         OnnxOpStub::MatMul { .. } => "MatMul",
         OnnxOpStub::Transpose { .. } => "Transpose",
         OnnxOpStub::Relu { .. } => "Relu",
+        OnnxOpStub::Sigmoid { .. } => "Sigmoid",
+        OnnxOpStub::Gelu { .. } => "Gelu",
+        OnnxOpStub::ReduceSum { .. } => "ReduceSum",
+        OnnxOpStub::ReduceMax { .. } => "ReduceMax",
+        OnnxOpStub::ReduceMean { .. } => "ReduceMean",
+        OnnxOpStub::Log { .. } => "Log",
+        OnnxOpStub::Exp { .. } => "Exp",
         OnnxOpStub::Softmax { .. } => "Softmax",
         OnnxOpStub::Reshape { .. } => "Reshape",
         OnnxOpStub::Concat { .. } => "Concat",
         OnnxOpStub::Gather { .. } => "Gather",
         OnnxOpStub::Slice { .. } => "Slice",
+        OnnxOpStub::Gemm { .. } => "Gemm",
         OnnxOpStub::Output { .. } => "Output",
     }
 }
@@ -878,10 +1248,76 @@ fn op_kind_from_contract(op: &IrOpContract) -> &'static str {
         IrOpContract::Transpose { .. } => "Transpose",
         IrOpContract::Relu { .. } => "Relu",
         IrOpContract::Softmax { .. } => "Softmax",
+        IrOpContract::Log { .. } => "Log",
+        IrOpContract::Exp { .. } => "Exp",
+        IrOpContract::Sigmoid { .. } => "Sigmoid",
+        IrOpContract::Gelu { .. } => "Gelu",
+        IrOpContract::GeluExact { .. } => "GeluExact",
+        IrOpContract::ReduceSum { .. } => "ReduceSum",
+        IrOpContract::ReduceMax { .. } => "ReduceMax",
+        IrOpContract::ReduceMean { .. } => "ReduceMean",
+        IrOpContract::Gemm { .. } => "Gemm",
         IrOpContract::Reshape { .. } => "Reshape",
         IrOpContract::Concat { .. } => "Concat",
         IrOpContract::Gather { .. } => "Gather",
         IrOpContract::Slice { .. } => "Slice",
         IrOpContract::Output { .. } => "Output",
+    }
+}
+
+fn inferred_output_rank(op: &IrOpContract, value_ranks: &HashMap<String, usize>) -> Option<usize> {
+    match op {
+        IrOpContract::Input { .. }
+        | IrOpContract::Parameter { .. }
+        | IrOpContract::ConstTensor(_)
+        | IrOpContract::Output { .. } => None,
+        IrOpContract::Add { lhs, .. }
+        | IrOpContract::Sub { lhs, .. }
+        | IrOpContract::Mul { lhs, .. }
+        | IrOpContract::Div { lhs, .. }
+        | IrOpContract::Neg { input: lhs }
+        | IrOpContract::Relu { input: lhs }
+        | IrOpContract::Softmax { input: lhs }
+        | IrOpContract::Log { input: lhs }
+        | IrOpContract::Exp { input: lhs }
+        | IrOpContract::Sigmoid { input: lhs }
+        | IrOpContract::Gelu { input: lhs }
+        | IrOpContract::GeluExact { input: lhs }
+        | IrOpContract::Transpose { input: lhs } => value_ranks.get(lhs).copied(),
+        IrOpContract::MatMul { lhs, rhs } | IrOpContract::Gemm { lhs, rhs, .. } => {
+            match (value_ranks.get(lhs), value_ranks.get(rhs)) {
+                (Some(2), Some(2)) => Some(2),
+                _ => None,
+            }
+        }
+        IrOpContract::ReduceSum {
+            input,
+            axis,
+            keepdims,
+        }
+        | IrOpContract::ReduceMax {
+            input,
+            axis,
+            keepdims,
+        }
+        | IrOpContract::ReduceMean {
+            input,
+            axis,
+            keepdims,
+        } => value_ranks.get(input).copied().map(|rank| {
+            if *keepdims {
+                if axis.is_some() { rank } else { rank.max(1) }
+            } else if axis.is_some() {
+                rank.saturating_sub(1)
+            } else {
+                1
+            }
+        }),
+        IrOpContract::Reshape { shape, .. } => Some(shape.len()),
+        IrOpContract::Concat { inputs, .. } => inputs
+            .first()
+            .and_then(|name| value_ranks.get(name).copied()),
+        IrOpContract::Gather { input, .. } => value_ranks.get(input).copied(),
+        IrOpContract::Slice { input, .. } => value_ranks.get(input).copied(),
     }
 }

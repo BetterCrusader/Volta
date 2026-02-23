@@ -23,6 +23,7 @@ pub struct GraphError {
 }
 
 impl Graph {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             blocks: Vec::new(),
@@ -41,18 +42,20 @@ impl Graph {
             .insert(name.to_string(), shape);
     }
 
+    #[must_use]
     pub fn input_shape(&self, name: &str) -> Option<&[usize]> {
         self.shape_signature
             .inputs
             .get(name)
-            .map(|shape| shape.as_slice())
+            .map(std::vec::Vec::as_slice)
     }
 
+    #[must_use]
     pub fn parameter_shape(&self, name: &str) -> Option<&[usize]> {
         self.shape_signature
             .parameters
             .get(name)
-            .map(|shape| shape.as_slice())
+            .map(std::vec::Vec::as_slice)
     }
 
     pub fn create_block(&mut self) -> BasicBlockId {
@@ -79,10 +82,12 @@ impl Graph {
         Ok((node_id, value_id))
     }
 
+    #[must_use]
     pub fn node(&self, id: NodeId) -> Option<&Node> {
         self.nodes.get(id.0)
     }
 
+    #[must_use]
     pub fn value_count(&self) -> usize {
         self.nodes
             .iter()
@@ -91,6 +96,7 @@ impl Graph {
             .map_or(0, |max_id| max_id + 1)
     }
 
+    #[must_use]
     pub fn last_value_id(&self) -> Option<ValueId> {
         self.nodes.last().map(|node| node.output)
     }

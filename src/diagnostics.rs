@@ -1,7 +1,23 @@
+use std::fmt::Write as _;
+
 use crate::ast::Span;
 
 const MAX_SUGGESTION_DISTANCE: usize = 2;
 
+/// Returns the closest matching candidate from `candidates` for the given `value`,
+/// or `None` if the minimum edit distance exceeds [`MAX_SUGGESTION_DISTANCE`].
+///
+/// Matching is case-insensitive and based on the Levenshtein edit distance.
+/// Use this to power "did you mean?" suggestions in error messages.
+///
+/// # Examples
+///
+/// ```
+/// use volta::diagnostics::best_suggestion;
+/// assert_eq!(best_suggestion("trian", &["train", "model"]), Some("train"));
+/// assert_eq!(best_suggestion("xyz", &["train", "model"]), None);
+/// ```
+#[must_use]
 pub fn best_suggestion<'a>(value: &str, candidates: &'a [&'a str]) -> Option<&'a str> {
     let value_norm = value.trim().to_ascii_lowercase();
     if value_norm.is_empty() {
@@ -26,6 +42,16 @@ pub fn best_suggestion<'a>(value: &str, candidates: &'a [&'a str]) -> Option<&'a
     })
 }
 
+/// Renders a rich diagnostic message with optional source context and hint.
+///
+/// Output format:
+/// ```text
+/// <kind> at <line>:<column>: <message>
+///    4 | source line text
+///      |   ^
+/// help: hint text
+/// ```
+#[must_use]
 pub fn render_diagnostic(
     kind: &str,
     message: &str,
@@ -38,7 +64,7 @@ pub fn render_diagnostic(
 
     if let Some(source_line) = source_line(source, line) {
         rendered.push('\n');
-        rendered.push_str(&format!("{line:>4} | {source_line}"));
+        let _ = write!(rendered, "{line:>4} | {source_line}");
         rendered.push('\n');
         rendered.push_str("     | ");
         rendered.push_str(&" ".repeat(column.saturating_sub(1)));
@@ -49,12 +75,17 @@ pub fn render_diagnostic(
         && !hint_text.is_empty()
     {
         rendered.push('\n');
-        rendered.push_str(&format!("help: {hint_text}"));
+        rendered.push_str("help: ");
+        rendered.push_str(hint_text);
     }
 
     rendered
 }
 
+/// Convenience wrapper around [`render_diagnostic`] that accepts a [`Span`] directly.
+///
+/// Extracts `line` and `column` from the span and delegates to `render_diagnostic`.
+#[must_use]
 pub fn render_span_diagnostic(
     kind: &str,
     message: &str,
@@ -65,6 +96,8 @@ pub fn render_span_diagnostic(
     render_diagnostic(kind, message, span.line, span.column, source, hint)
 }
 
+/// Returns the 1-indexed source line at position `line`, or `None` if
+/// `line == 0` or exceeds the number of lines in `source`.
 fn source_line(source: &str, line: usize) -> Option<&str> {
     if line == 0 {
         return None;
@@ -72,6 +105,11 @@ fn source_line(source: &str, line: usize) -> Option<&str> {
     source.lines().nth(line.saturating_sub(1))
 }
 
+/// Computes the Levenshtein edit distance between two UTF-8 strings.
+///
+/// Uses an optimized two-row dynamic programming algorithm: `O(n)` space,
+/// `O(m * n)` time where `m` and `n` are the character-counted lengths of
+/// `left` and `right` respectively.
 fn levenshtein(left: &str, right: &str) -> usize {
     if left == right {
         return 0;

@@ -14,6 +14,7 @@ pub struct Node {
 }
 
 impl Node {
+    #[must_use]
     pub fn new(id: NodeId, op: Op, output: ValueId) -> Self {
         Self { id, op, output }
     }

@@ -28,3 +28,14 @@ python scripts/perf/perf_gate.py --threshold-percent 5
 Rule:
 - if performance regresses above threshold, exit code is non-zero
 - CI treats that as a hard failure for release/perf lanes
+
+## Tensor microbench harness
+
+For tensor-level performance baselines (matmul, softmax, unary ops, reductions):
+
+```bash
+cargo run --release --bin tensor_bench
+```
+
+Current baseline snapshot is tracked in:
+- `benchmarks/baselines/tensor-ops-release.txt`

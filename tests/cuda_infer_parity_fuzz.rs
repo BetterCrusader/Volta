@@ -1,13 +1,18 @@
+#[path = "common/cuda.rs"]
+mod cuda_helpers;
+
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
 
 use volta::ir::{CpuBackend, CudaBackend, Tensor};
 use volta::model::{CompiledModel, ModelBuilder, Parameter, TensorShape, infer_with_backend};
 
 #[test]
 fn cuda_infer_matches_cpu_for_seeded_fuzz_cases() {
-    with_determinism("strict", || {
-        if !cuda_runtime_available() {
+    cuda_helpers::with_determinism("strict", || {
+        if !cuda_helpers::cuda_runtime_available() {
+            eprintln!(
+                "[SKIP] cuda_infer_matches_cpu_for_seeded_fuzz_cases — no CUDA device available"
+            );
             return;
         }
 
@@ -40,7 +45,7 @@ fn cuda_infer_matches_cpu_for_seeded_fuzz_cases() {
             let cuda_out = match infer_with_backend(&model, &model.parameters, &infer_input, &cuda)
             {
                 Ok(out) => out,
-                Err(err) if is_cuda_unavailable(&err.message) => return,
+                Err(err) if cuda_helpers::is_cuda_unavailable(&err.message) => return,
                 Err(err) => panic!("cuda infer failed for case {case_idx}: {}", err.message),
             };
 
@@ -138,63 +143,4 @@ fn max_rel_diff(left: &[f32], right: &[f32]) -> f32 {
             (a - b).abs() / denom
         })
         .fold(0.0_f32, f32::max)
-}
-
-fn is_cuda_unavailable(message: &str) -> bool {
-    message.contains("CUDA device init failed")
-        || message.contains("runtime handles")
-        || message.contains("NVRTC")
-        || message.contains("cuBLAS init failed")
-        || message.contains("CUDA context init failed")
-}
-
-fn cuda_runtime_available() -> bool {
-    let result = std::panic::catch_unwind(|| volta::ir::cuda::device::CudaDevice::new(0));
-    match result {
-        Ok(Ok(_)) => true,
-        Ok(Err(_)) => false,
-        Err(_) => false,
-    }
-}
-
-fn with_determinism(level: &str, run: impl FnOnce()) {
-    let _guard = match env_lock().lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    let _restore = EnvVarRestore::set("VOLTA_DETERMINISM", level);
-    run();
-}
-
-fn env_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
-
-struct EnvVarRestore {
-    key: &'static str,
-    previous: Option<String>,
-}
-
-impl EnvVarRestore {
-    fn set(key: &'static str, value: &str) -> Self {
-        let previous = std::env::var(key).ok();
-        unsafe {
-            std::env::set_var(key, value);
-        }
-        Self { key, previous }
-    }
-}
-
-impl Drop for EnvVarRestore {
-    fn drop(&mut self) {
-        match self.previous.take() {
-            Some(value) => unsafe {
-                std::env::set_var(self.key, value);
-            },
-            None => unsafe {
-                std::env::remove_var(self.key);
-            },
-        }
-    }
 }

@@ -1,14 +1,24 @@
 $ErrorActionPreference = "Stop"
 
 function Invoke-Step {
-    param([string[]]$Args)
-    Write-Host "[cli-smoke] $($Args -join ' ')"
+    param([string[]]$CommandParts)
+    if (-not $CommandParts -or $CommandParts.Count -eq 0) {
+        throw "Invoke-Step requires at least one command part"
+    }
+
+    Write-Host "[cli-smoke] $($CommandParts -join ' ')"
+    $command = $CommandParts[0]
+    $commandArgs = @()
+    if ($CommandParts.Count -gt 1) {
+        $commandArgs = $CommandParts[1..($CommandParts.Count - 1)]
+    }
+
     $log = New-TemporaryFile
-    & $Args[0] $Args[1..($Args.Length - 1)] *> $log
+    & $command @commandArgs *> $log
     if ($LASTEXITCODE -ne 0) {
         Get-Content $log
         Remove-Item $log -ErrorAction SilentlyContinue
-        throw "Command failed: $($Args -join ' ')"
+        throw "Command failed: $($CommandParts -join ' ')"
     }
     Remove-Item $log -ErrorAction SilentlyContinue
 }

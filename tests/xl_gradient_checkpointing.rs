@@ -1,4 +1,6 @@
-use std::sync::{Mutex, OnceLock};
+#[path = "common/cuda.rs"]
+mod cuda_helpers;
+
 use volta::ir::CudaBackend;
 use volta::model::{
     GradientCheckpointingConfig, build_tiny_transformer_fixture_for_tests,
@@ -41,10 +43,13 @@ fn checkpoint_plan_rejects_zero_interval() {
 
 #[test]
 fn strict_training_with_and_without_checkpointing_produces_identical_result() {
-    if !cuda_runtime_available() {
+    if !cuda_helpers::cuda_runtime_available() {
+        eprintln!(
+            "[SKIP] strict_training_with_and_without_checkpointing_produces_identical_result — no CUDA device available"
+        );
         return;
     }
-    with_determinism("strict", || {
+    cuda_helpers::with_determinism("strict", || {
         let (model, dataset, mut config, _infer_input) = build_tiny_transformer_fixture_for_tests();
         let cuda = CudaBackend;
 
@@ -75,55 +80,4 @@ fn strict_training_with_and_without_checkpointing_produces_identical_result() {
             with_checkpointing.final_loss.to_bits()
         );
     });
-}
-
-fn with_determinism(level: &str, run: impl FnOnce()) {
-    let _guard = match env_lock().lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    let _restore = EnvVarRestore::set("VOLTA_DETERMINISM", level);
-    run();
-}
-
-fn cuda_runtime_available() -> bool {
-    let result = std::panic::catch_unwind(|| volta::ir::cuda::device::CudaDevice::new(0));
-    match result {
-        Ok(Ok(_)) => true,
-        Ok(Err(_)) => false,
-        Err(_) => false,
-    }
-}
-
-fn env_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
-
-struct EnvVarRestore {
-    key: &'static str,
-    previous: Option<String>,
-}
-
-impl EnvVarRestore {
-    fn set(key: &'static str, value: &str) -> Self {
-        let previous = std::env::var(key).ok();
-        unsafe {
-            std::env::set_var(key, value);
-        }
-        Self { key, previous }
-    }
-}
-
-impl Drop for EnvVarRestore {
-    fn drop(&mut self) {
-        match self.previous.take() {
-            Some(value) => unsafe {
-                std::env::set_var(self.key, value);
-            },
-            None => unsafe {
-                std::env::remove_var(self.key);
-            },
-        }
-    }
 }

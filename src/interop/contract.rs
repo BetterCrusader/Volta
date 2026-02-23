@@ -68,6 +68,49 @@ pub enum IrOpContract {
     Softmax {
         input: String,
     },
+    Log {
+        input: String,
+    },
+    Exp {
+        input: String,
+    },
+    Sigmoid {
+        input: String,
+    },
+    Gelu {
+        input: String,
+    },
+    GeluExact {
+        input: String,
+    },
+    ReduceSum {
+        input: String,
+        axis: Option<usize>,
+        keepdims: bool,
+    },
+    ReduceMax {
+        input: String,
+        axis: Option<usize>,
+        keepdims: bool,
+    },
+    ReduceMean {
+        input: String,
+        axis: Option<usize>,
+        keepdims: bool,
+    },
+    /// Generalised matrix multiply: `alpha * (lhs × rhs) + beta * bias`.
+    ///
+    /// Matches the ONNX `Gemm` operator and the standard BLAS SGEMM interface.
+    /// `bias` is optional — when `None` the operation is a scaled MatMul.
+    Gemm {
+        lhs: String,
+        rhs: String,
+        bias: Option<String>,
+        alpha: f32,
+        beta: f32,
+        trans_a: bool,
+        trans_b: bool,
+    },
     Reshape {
         input: String,
         shape: Vec<usize>,
@@ -115,6 +158,14 @@ pub struct ImportedProgram {
 }
 
 impl IrGraphContract {
+    /// Validates the IR graph contract for structural correctness.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(InteropError)` if:
+    /// - the node list is empty
+    /// - any node ID is duplicated
+    /// - an edge references an undefined node ID
     pub fn validate(&self) -> Result<(), InteropError> {
         if self.nodes.is_empty() {
             return Err(InteropError::new(
@@ -241,6 +292,15 @@ impl IrGraphContract {
         Ok(())
     }
 
+    /// Compiles the validated IR graph into an [`ImportedProgram`].
+    ///
+    /// Calls [`validate`][Self::validate] internally. On success returns\\    
+    /// the compiled program ready for execution.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(InteropError)` if validation fails or any node
+    /// cannot be lowered into the IR graph representation.
     pub fn compile(&self) -> Result<ImportedProgram, InteropError> {
         self.validate()?;
 
@@ -363,6 +423,95 @@ impl IrGraphContract {
                         .map_err(|err| InteropError::new(err.message))?;
                     value
                 }
+                IrOpContract::Log { input } => {
+                    let input = resolve_value(&ids, input)?;
+                    let (_, value) = graph
+                        .add_op(block, Op::Log(input))
+                        .map_err(|err| InteropError::new(err.message))?;
+                    value
+                }
+                IrOpContract::Exp { input } => {
+                    let input = resolve_value(&ids, input)?;
+                    let (_, value) = graph
+                        .add_op(block, Op::Exp(input))
+                        .map_err(|err| InteropError::new(err.message))?;
+                    value
+                }
+                IrOpContract::Sigmoid { input } => {
+                    let input = resolve_value(&ids, input)?;
+                    let (_, value) = graph
+                        .add_op(block, Op::Sigmoid(input))
+                        .map_err(|err| InteropError::new(err.message))?;
+                    value
+                }
+                IrOpContract::Gelu { input } => {
+                    let input = resolve_value(&ids, input)?;
+                    let (_, value) = graph
+                        .add_op(block, Op::Gelu(input))
+                        .map_err(|err| InteropError::new(err.message))?;
+                    value
+                }
+                IrOpContract::GeluExact { input } => {
+                    let input = resolve_value(&ids, input)?;
+                    let (_, value) = graph
+                        .add_op(block, Op::GeluExact(input))
+                        .map_err(|err| InteropError::new(err.message))?;
+                    value
+                }
+                IrOpContract::ReduceSum {
+                    input,
+                    axis,
+                    keepdims,
+                } => {
+                    let input = resolve_value(&ids, input)?;
+                    let (_, value) = graph
+                        .add_op(
+                            block,
+                            Op::ReduceSum {
+                                input,
+                                axis: *axis,
+                                keepdims: *keepdims,
+                            },
+                        )
+                        .map_err(|err| InteropError::new(err.message))?;
+                    value
+                }
+                IrOpContract::ReduceMax {
+                    input,
+                    axis,
+                    keepdims,
+                } => {
+                    let input = resolve_value(&ids, input)?;
+                    let (_, value) = graph
+                        .add_op(
+                            block,
+                            Op::ReduceMax {
+                                input,
+                                axis: *axis,
+                                keepdims: *keepdims,
+                            },
+                        )
+                        .map_err(|err| InteropError::new(err.message))?;
+                    value
+                }
+                IrOpContract::ReduceMean {
+                    input,
+                    axis,
+                    keepdims,
+                } => {
+                    let input = resolve_value(&ids, input)?;
+                    let (_, value) = graph
+                        .add_op(
+                            block,
+                            Op::ReduceMean {
+                                input,
+                                axis: *axis,
+                                keepdims: *keepdims,
+                            },
+                        )
+                        .map_err(|err| InteropError::new(err.message))?;
+                    value
+                }
                 IrOpContract::Reshape { input, shape } => {
                     let input = resolve_value(&ids, input)?;
                     let (_, value) = graph
@@ -438,9 +587,59 @@ impl IrGraphContract {
                     output = Some(output_id);
                     output_id
                 }
+                IrOpContract::Gemm {
+                    lhs,
+                    rhs,
+                    bias,
+                    alpha,
+                    beta,
+                    trans_a,
+                    trans_b,
+                } => {
+                    let mut lhs_id = resolve_value(&ids, lhs)?;
+                    let mut rhs_id = resolve_value(&ids, rhs)?;
+
+                    if *trans_a {
+                        let (_, transposed) = graph
+                            .add_op(block, Op::Transpose(lhs_id))
+                            .map_err(|err| InteropError::new(err.message))?;
+                        lhs_id = transposed;
+                    }
+                    if *trans_b {
+                        let (_, transposed) = graph
+                            .add_op(block, Op::Transpose(rhs_id))
+                            .map_err(|err| InteropError::new(err.message))?;
+                        rhs_id = transposed;
+                    }
+
+                    let bias_id = bias
+                        .as_deref()
+                        .map(|b| resolve_value(&ids, b))
+                        .transpose()?;
+                    let (_, value) = graph
+                        .add_op(
+                            block,
+                            Op::Gemm {
+                                lhs: lhs_id,
+                                rhs: rhs_id,
+                                bias: bias_id,
+                                alpha: *alpha,
+                                beta: *beta,
+                            },
+                        )
+                        .map_err(|err| InteropError::new(err.message))?;
+                    value
+                }
             };
             ids.insert(node.id.clone(), value);
         }
+
+        crate::ir::shape_inference::infer_shapes(&graph).map_err(|err| {
+            InteropError::new(format!(
+                "import-time shape inference failed for graph '{}': {}",
+                self.name, err.message
+            ))
+        })?;
 
         for spec in &self.parameters {
             let element_count = spec.shape.iter().copied().product::<usize>();
@@ -471,6 +670,7 @@ fn resolve_value(ids: &HashMap<String, ValueId>, id: &str) -> Result<ValueId, In
         .ok_or_else(|| InteropError::new(format!("unknown value id '{id}'")))
 }
 
+#[must_use]
 fn op_inputs(op: &IrOpContract) -> Vec<&str> {
     match op {
         IrOpContract::Input { .. }
@@ -485,11 +685,26 @@ fn op_inputs(op: &IrOpContract) -> Vec<&str> {
         | IrOpContract::Transpose { input }
         | IrOpContract::Relu { input }
         | IrOpContract::Softmax { input }
+        | IrOpContract::Log { input }
+        | IrOpContract::Exp { input }
+        | IrOpContract::Sigmoid { input }
+        | IrOpContract::Gelu { input }
+        | IrOpContract::GeluExact { input }
+        | IrOpContract::ReduceSum { input, .. }
+        | IrOpContract::ReduceMax { input, .. }
+        | IrOpContract::ReduceMean { input, .. }
         | IrOpContract::Reshape { input, .. }
         | IrOpContract::Gather { input, .. }
         | IrOpContract::Slice { input, .. }
         | IrOpContract::Output { value: input } => vec![input.as_str()],
         IrOpContract::Concat { inputs, .. } => inputs.iter().map(String::as_str).collect(),
+        IrOpContract::Gemm { lhs, rhs, bias, .. } => {
+            let mut out = vec![lhs.as_str(), rhs.as_str()];
+            if let Some(b) = bias {
+                out.push(b.as_str());
+            }
+            out
+        }
     }
 }
 

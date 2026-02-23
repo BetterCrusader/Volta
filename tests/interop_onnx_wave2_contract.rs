@@ -43,19 +43,17 @@ fn wave2_contract_reshape_compiles_and_executes() {
     let mut context = ExecutionContext::default();
     context.inputs.insert(
         "x".to_string(),
-        RuntimeValue::Tensor {
-            shape: vec![1, 4],
-            data: vec![1.0, 2.0, 3.0, 4.0],
-        },
+        RuntimeValue::Tensor(std::sync::Arc::new(
+            volta::ir::Tensor::new(vec![1, 4], vec![1.0, 2.0, 3.0, 4.0]).unwrap(),
+        )),
     );
     let value = execute_value_with_context(&program.graph, program.output, &context)
         .expect("reshape should execute");
     assert_eq!(
         value,
-        RuntimeValue::Tensor {
-            shape: vec![2, 2],
-            data: vec![1.0, 2.0, 3.0, 4.0],
-        }
+        RuntimeValue::Tensor(std::sync::Arc::new(
+            volta::ir::Tensor::new(vec![2, 2], vec![1.0, 2.0, 3.0, 4.0]).unwrap()
+        ))
     );
 }
 

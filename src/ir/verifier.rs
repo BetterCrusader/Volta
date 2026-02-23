@@ -43,7 +43,7 @@ pub fn verify_graph(graph: &Graph) -> Result<(), VerifyError> {
     for (index, node) in graph.nodes.iter().enumerate() {
         if node.id.0 != index {
             return Err(err(format!(
-                "Node id mismatch at index {index}: node.id={} ",
+                "Node id mismatch at index {index}: node.id={}",
                 node.id.0
             )));
         }
@@ -176,8 +176,39 @@ fn infer_type_for_op(
             }
             require_tensor_or_unknown(current, node_id, "concat")
         }
-        Op::Transpose(value) | Op::Relu(value) | Op::Softmax(value) => {
+        Op::Transpose(value)
+        | Op::Relu(value)
+        | Op::Softmax(value)
+        | Op::Log(value)
+        | Op::Exp(value)
+        | Op::Sigmoid(value)
+        | Op::GeluExact(value)
+        | Op::Gelu(value) => {
             let ty = type_of(*value, value_types);
+            require_tensor_or_unknown(ty, node_id, "tensor unary op")
+        }
+        Op::SigmoidBackward(input, grad) | Op::GeluBackward(input, grad) => {
+            let left = type_of(*input, value_types);
+            let right = type_of(*grad, value_types);
+            let same = require_same_strict(left, right, node_id, "backward op")?;
+            require_tensor_or_unknown(same, node_id, "backward op")
+        }
+        Op::Gemm { lhs, rhs, .. } => {
+            let left = type_of(*lhs, value_types);
+            let right = type_of(*rhs, value_types);
+            require_same_strict(left, right, node_id, "gemm")?;
+            require_tensor_or_unknown(left, node_id, "gemm")
+        }
+        Op::GemmBackward { lhs, rhs, .. } => {
+            let left = type_of(*lhs, value_types);
+            let right = type_of(*rhs, value_types);
+            let same = require_same_strict(left, right, node_id, "gemm_backward")?;
+            require_tensor_or_unknown(same, node_id, "gemm_backward")
+        }
+        Op::ReduceSum { input, .. }
+        | Op::ReduceMax { input, .. }
+        | Op::ReduceMean { input, .. } => {
+            let ty = type_of(*input, value_types);
             require_tensor_or_unknown(ty, node_id, "tensor unary op")
         }
         Op::ReluBackward(input, grad) | Op::MatMul(input, grad) | Op::Conv2D(input, grad) => {

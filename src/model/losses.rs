@@ -50,12 +50,17 @@ impl CrossEntropyLoss {
             });
         }
 
-        // Current IR has no log/reduction primitives. We keep deterministic, strict
-        // surrogate loss on probabilities: ||softmax(logits) - target||^2.
+        // Real cross-entropy: -sum(target * log(softmax(logits)))
         let probs = builder.add_op(Op::Softmax(logits))?;
-        let diff = builder.add_op(Op::Sub(probs, target))?;
-        let sq = builder.add_op(Op::Mul(diff, diff))?;
-        builder.add_op(Op::Output(sq))
+        let log_probs = builder.add_op(Op::Log(probs))?;
+        let weighted = builder.add_op(Op::Mul(target, log_probs))?;
+        let sum = builder.add_op(Op::ReduceSum {
+            input: weighted,
+            axis: None,
+            keepdims: false,
+        })?;
+        let neg = builder.add_op(Op::Neg(sum))?;
+        builder.add_op(Op::Output(neg))
     }
 }
 
@@ -65,7 +70,7 @@ mod tests {
     use crate::model::{CrossEntropyLoss, ModelBuilder, TensorShape};
 
     #[test]
-    fn cross_entropy_surrogate_builds_with_equal_shapes() {
+    fn cross_entropy_builds_with_equal_shapes() {
         let mut builder = ModelBuilder::new();
         let logits = builder.input("logits").expect("input should build");
         let target = builder.input("target").expect("input should build");

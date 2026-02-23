@@ -27,7 +27,7 @@ impl SpyBackend {
 impl Backend for SpyBackend {
     fn capabilities(&self) -> BackendCapabilities {
         BackendCapabilities {
-            backend: BackendKind::Metal,
+            backend: BackendKind::Cuda,
             supports_inference: true,
             supports_training: true,
             supports_strict_determinism: true,

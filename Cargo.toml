@@ -1,16 +1,53 @@
 [package]
 name = "volta"
-version = "0.1.0"
+version = "1.1.0"
 edition = "2024"
 
 [features]
 default = []
 onnx-import = ["dep:tract-onnx", "dep:prost"]
+# Enable data-parallel execution on the CPU via rayon.
+# With this flag OFF the runtime is fully sequential and bit-exact across
+# every platform — safe for determinism-critical training.
+# With this flag ON multi-core throughput rises linearly; floating-point
+# order of operations may differ from the sequential path.
+parallel = ["dep:rayon"]
 
 [dependencies]
 cudarc = { version = "0.19.2", default-features = false, features = ["std", "driver", "runtime", "cublas", "nvrtc", "fallback-dynamic-loading", "cuda-13010"] }
+rayon = { version = "1", optional = true }
 tract-onnx = { version = "0.22", optional = true }
 prost = { version = "0.11.9", optional = true }
 
 [dev-dependencies]
 proptest = "1"
+
+[[bench]]
+name = "benchmarks"
+harness = false
+
+# ── Build profiles ──────────────────────────────────────────────────────────────
+
+[profile.release]
+# Thin LTO: cross-crate inlining without the full-program link time cost.
+lto           = "thin"
+# Single codegen unit lets LLVM see the whole crate for better optimization.
+codegen-units = 1
+# No unwinding machinery in release builds — saves ~5-10% binary size and
+# lets the compiler elide cleanup paths.
+panic         = "abort"
+# Strip debug symbols from the final binary for smaller distributable.
+strip         = "symbols"
+opt-level     = 3
+
+[profile.bench]
+# Inherit release settings so benchmarks run under real production conditions.
+inherits  = "release"
+# Keep debug info so profilers (perf, samply, cargo-flamegraph) can symbolize.
+debug     = true
+strip     = "none"
+
+[profile.dev]
+# Overflow checks are on by default in dev — keep them.
+# Slightly higher opt level speeds up tests without losing debug info.
+opt-level = 1

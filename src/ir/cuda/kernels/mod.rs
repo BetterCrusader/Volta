@@ -1,7 +1,6 @@
 pub mod add;
 pub mod backward;
 pub mod matmul;
-pub mod reductions;
 pub mod relu;
 pub mod softmax;
 
@@ -15,7 +14,6 @@ pub enum CudaKernel {
     Relu,
     Softmax,
     Backward,
-    Reduction,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -33,7 +31,7 @@ pub fn dispatch_group(kind: KernelKind, nodes: &[NodeId]) -> Result<BackendExecu
         KernelKind::Softmax => CudaKernel::Softmax,
         KernelKind::Backward | KernelKind::Elementwise => CudaKernel::Backward,
         KernelKind::Conv2D | KernelKind::Control => {
-            return Err(format!("unsupported CUDA kernel class: {:?}", kind));
+            return Err(format!("unsupported CUDA kernel class: {kind:?}"));
         }
     };
 
@@ -51,6 +49,5 @@ pub fn execute_node(node: &BackendExecutableNode) -> Result<(), String> {
         CudaKernel::Relu => relu::run(&node.nodes),
         CudaKernel::Softmax => softmax::run(&node.nodes),
         CudaKernel::Backward => backward::run(&node.nodes),
-        CudaKernel::Reduction => reductions::run(&node.nodes),
     }
 }

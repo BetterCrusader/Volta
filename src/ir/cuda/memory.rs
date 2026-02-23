@@ -34,7 +34,7 @@ impl<T: DeviceRepr> DeviceBuffer<T> {
         let alloc_len = padded_len.max(1);
         let storage =
             unsafe { stream.alloc::<T>(alloc_len) }.map_err(|err| CudaDeviceMemoryError {
-                message: format!("cudaMalloc failed for {} elements: {err}", padded_len),
+                message: format!("cudaMalloc failed for {padded_len} elements: {err}"),
             })?;
         let aligned_256 = pointer_is_256_aligned(&storage, &stream);
 
@@ -100,18 +100,22 @@ impl<T: DeviceRepr> DeviceBuffer<T> {
         Ok(host)
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.len
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
 
+    #[must_use]
     pub fn padded_len(&self) -> usize {
         self.padded_len
     }
 
+    #[must_use]
     pub fn is_256_aligned(&self) -> bool {
         self.aligned_256
     }
@@ -135,10 +139,7 @@ impl<T: DeviceRepr + ValidAsZeroBits> DeviceBuffer<T> {
         let storage = stream
             .alloc_zeros::<T>(alloc_len)
             .map_err(|err| CudaDeviceMemoryError {
-                message: format!(
-                    "cudaMalloc zeroed failed for {} elements: {err}",
-                    padded_len
-                ),
+                message: format!("cudaMalloc zeroed failed for {padded_len} elements: {err}"),
             })?;
         let aligned_256 = pointer_is_256_aligned(&storage, &stream);
 

@@ -10,6 +10,7 @@ pub struct BasicBlock {
 }
 
 impl BasicBlock {
+    #[must_use]
     pub fn new(id: BasicBlockId) -> Self {
         Self {
             id,

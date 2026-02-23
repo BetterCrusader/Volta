@@ -4,63 +4,101 @@ use crate::rules::{
     AUTOPILOT_SMALL_MODEL_MAX_LAYERS,
 };
 
+/// Model-level parameters fed into the autopilot decision engine.
 #[derive(Debug, Clone)]
 pub struct ModelAutopilotInput {
+    /// Number of declared layers.
     pub layer_count: usize,
+    /// Explicit optimizer name, if set at model level.
     pub optimizer: Option<String>,
+    /// Explicit learning rate, if set at model level.
     pub lr: Option<f64>,
+    /// Explicit precision tag, if set at model level.
     pub precision: Option<String>,
 }
 
+/// Dataset-level parameters fed into the autopilot decision engine.
 #[derive(Debug, Clone)]
 pub struct DatasetAutopilotInput {
+    /// Batch size, if declared in the `dataset` block.
     pub batch: Option<i64>,
 }
 
+/// Train-statement parameters that override model/dataset defaults.
 #[derive(Debug, Clone)]
 pub struct TrainAutopilotInput {
+    /// Explicit epoch count, if provided in `train`.
     pub epochs: Option<i64>,
+    /// Explicit optimizer override for this training run.
     pub optimizer: Option<String>,
+    /// Explicit learning rate override for this training run.
     pub lr: Option<f64>,
+    /// Explicit batch-size override for this training run.
     pub batch: Option<i64>,
+    /// Explicit precision override for this training run.
     pub precision: Option<String>,
+    /// Target device, e.g. `"gpu"` or `"cpu"`.
     pub device: Option<String>,
 }
 
+/// Aggregated context passed to [`AutopilotEngine::resolve`].
 #[derive(Debug, Clone)]
 pub struct AutopilotContext {
+    /// Model-level settings.
     pub model: ModelAutopilotInput,
+    /// Dataset-level settings.
     pub dataset: DatasetAutopilotInput,
+    /// Train-statement-level settings (override model/dataset).
     pub train: TrainAutopilotInput,
+    /// Whether a GPU device was detected at runtime.
     pub gpu_available: bool,
 }
 
+/// Records a single autopilot decision: what was chosen, why, and from where.
 #[derive(Debug, Clone)]
 pub struct Decision {
+    /// The configuration key this decision applies to, e.g. `"epochs"`.
     pub key: &'static str,
+    /// The resolved value, formatted as a string.
     pub value: String,
+    /// Origin of this decision.
     pub source: DecisionSource,
+    /// Human-readable explanation for the value chosen.
     pub reason: String,
 }
 
+/// The origin of an autopilot decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DecisionSource {
+    /// Value was explicitly set by the user in source code.
     Explicit,
+    /// Value was inferred by an autopilot rule (e.g. model size heuristic).
     Rule,
+    /// Value fell back to a hard-coded default.
     Default,
 }
 
+/// The fully resolved training configuration, ready for the executor.
 #[derive(Debug, Clone)]
 pub struct ResolvedTrainConfig {
+    /// Number of epochs to train.
     pub epochs: i64,
+    /// Optimizer name.
     pub optimizer: String,
+    /// Learning rate.
     pub lr: f64,
+    /// Batch size.
     pub batch: i64,
+    /// Numerical precision tag.
     pub precision: String,
+    /// Target device.
     pub device: String,
+    /// Ordered list of decisions made by the autopilot.
     pub decisions: Vec<Decision>,
 }
 
+/// Autopilot engine that fills in missing training hyperparameters
+/// using rule-based heuristics and sensible defaults.
 pub struct AutopilotEngine;
 
 impl Default for AutopilotEngine {
@@ -70,10 +108,22 @@ impl Default for AutopilotEngine {
 }
 
 impl AutopilotEngine {
+    /// Creates a new [`AutopilotEngine`].
+    #[must_use]
     pub fn new() -> Self {
         Self
     }
 
+    /// Resolves a complete [`ResolvedTrainConfig`] from the given context.
+    ///
+    /// For each hyperparameter the engine applies a three-tier priority:
+    /// 1. **Explicit** — value set directly in the `train` block.
+    /// 2. **Rule** — value inferred from model size or other heuristics.
+    /// 3. **Default** — hard-coded fallback constant from `rules.rs`.
+    ///
+    /// All decisions are recorded in [`ResolvedTrainConfig::decisions`]
+    /// so the executor can print a transparent configuration summary.
+    #[must_use]
     pub fn resolve(&self, input: &AutopilotContext) -> ResolvedTrainConfig {
         let mut decisions = Vec::new();
 
@@ -232,15 +282,17 @@ enum ModelSize {
 }
 
 impl ModelSize {
-    fn label(self) -> &'static str {
+    #[must_use]
+    const fn label(self) -> &'static str {
         match self {
-            ModelSize::Small => "small",
-            ModelSize::Medium => "medium",
-            ModelSize::Large => "large",
+            Self::Small => "small",
+            Self::Medium => "medium",
+            Self::Large => "large",
         }
     }
 }
 
+#[must_use]
 fn classify_model(layer_count: usize) -> ModelSize {
     if layer_count <= AUTOPILOT_SMALL_MODEL_MAX_LAYERS {
         ModelSize::Small
@@ -251,6 +303,7 @@ fn classify_model(layer_count: usize) -> ModelSize {
     }
 }
 
+#[must_use]
 fn detected_device(gpu_available: bool) -> &'static str {
     if gpu_available { "gpu" } else { "cpu" }
 }

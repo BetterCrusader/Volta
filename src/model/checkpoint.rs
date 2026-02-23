@@ -24,7 +24,7 @@ pub fn save_checkpoint(
         let shape = tensor
             .shape
             .iter()
-            .map(|d| d.to_string())
+            .map(std::string::ToString::to_string)
             .collect::<Vec<_>>()
             .join(",");
         let data = tensor

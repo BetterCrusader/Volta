@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 
 use crate::ir::ExecutionPlan;
 use crate::ir::cuda::{enforce_policy, lower_plan, policy_for};
@@ -83,7 +84,6 @@ impl Backend for CpuBackend {
 
     fn compile(&self, plan: &ExecutionPlan) -> Result<CompiledProgram, BackendError> {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        use std::hash::{Hash, Hasher};
         plan.schedule.ordered_nodes.hash(&mut hasher);
         plan.allocation.peak_bytes.hash(&mut hasher);
 
@@ -91,27 +91,6 @@ impl Backend for CpuBackend {
             schedule_len: plan.schedule.ordered_nodes.len(),
             peak_bytes: plan.allocation.peak_bytes,
             fingerprint: hasher.finish(),
-        })
-    }
-}
-
-#[derive(Debug, Default, Clone, Copy)]
-pub struct LlvmBackend;
-
-impl Backend for LlvmBackend {
-    fn capabilities(&self) -> BackendCapabilities {
-        BackendCapabilities {
-            backend: BackendKind::Llvm,
-            supports_inference: false,
-            supports_training: false,
-            supports_strict_determinism: false,
-            default_determinism: DeterminismLevel::Balanced,
-        }
-    }
-
-    fn compile(&self, _plan: &ExecutionPlan) -> Result<CompiledProgram, BackendError> {
-        Err(BackendError {
-            message: "LLVM backend is not implemented yet".to_string(),
         })
     }
 }
@@ -142,7 +121,6 @@ impl Backend for CudaBackend {
         })?;
 
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        use std::hash::{Hash, Hasher};
         plan.schedule.ordered_nodes.hash(&mut hasher);
         plan.allocation.peak_bytes.hash(&mut hasher);
         lowered.executable_nodes.hash(&mut hasher);

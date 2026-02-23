@@ -96,10 +96,9 @@ fn evaluate_node_cuda(
     match op {
         Op::ConstInt(value) => Ok(RuntimeValue::Int(*value)),
         Op::ConstFloat(value) => Ok(RuntimeValue::Float(*value)),
-        Op::ConstTensor { shape, data } => Ok(RuntimeValue::Tensor {
-            shape: shape.clone(),
-            data: data.clone(),
-        }),
+        Op::ConstTensor { shape, data } => Ok(RuntimeValue::Tensor(std::sync::Arc::new(
+            crate::ir::tensor::Tensor::new(shape.clone(), data.clone()).unwrap(),
+        ))),
         Op::Parameter(name) => {
             context
                 .parameters
@@ -145,13 +144,15 @@ fn evaluate_node_cuda(
                     }
                     Ok(RuntimeValue::Float(negated))
                 }
-                RuntimeValue::Tensor { shape, data } => {
-                    let out = neg_f32(device, &data, determinism).map_err(|message| {
+                RuntimeValue::Tensor(tensor) => {
+                    let out = neg_f32(device, &tensor.data, determinism).map_err(|message| {
                         CudaExecutionError {
                             message: format!("CUDA neg kernel failed: {message}"),
                         }
                     })?;
-                    Ok(RuntimeValue::Tensor { shape, data: out })
+                    Ok(RuntimeValue::Tensor(std::sync::Arc::new(
+                        crate::ir::tensor::Tensor::new(tensor.shape.clone(), out).unwrap(),
+                    )))
                 }
             }
         }
@@ -175,10 +176,9 @@ fn evaluate_node_cuda(
                     }
                 }
             }
-            Ok(RuntimeValue::Tensor {
-                shape: std::mem::take(&mut shape),
-                data,
-            })
+            Ok(RuntimeValue::Tensor(std::sync::Arc::new(
+                crate::ir::tensor::Tensor::new(std::mem::take(&mut shape), data).unwrap(),
+            )))
         }
         Op::Transpose(value) => {
             let (shape, data) = read_tensor(values, *value)?;
@@ -195,10 +195,9 @@ fn evaluate_node_cuda(
                         message: format!("CUDA transpose kernel failed: {message}"),
                     }
                 })?;
-            Ok(RuntimeValue::Tensor {
-                shape: vec![cols, rows],
-                data: out,
-            })
+            Ok(RuntimeValue::Tensor(std::sync::Arc::new(
+                crate::ir::tensor::Tensor::new(vec![cols, rows], out).unwrap(),
+            )))
         }
         Op::MatMul(left, right) => {
             let (lhs_shape, lhs_data) = read_tensor(values, *left)?;
@@ -228,10 +227,9 @@ fn evaluate_node_cuda(
                     message: format!("CUDA matmul kernel failed: {message}"),
                 },
             )?;
-            Ok(RuntimeValue::Tensor {
-                shape: vec![m, n],
-                data: out,
-            })
+            Ok(RuntimeValue::Tensor(std::sync::Arc::new(
+                crate::ir::tensor::Tensor::new(vec![m, n], out).unwrap(),
+            )))
         }
         Op::Relu(value) => {
             let (shape, data) = read_tensor(values, *value)?;
@@ -239,7 +237,9 @@ fn evaluate_node_cuda(
                 relu_f32(device, &data, determinism).map_err(|message| CudaExecutionError {
                     message: format!("CUDA relu kernel failed: {message}"),
                 })?;
-            Ok(RuntimeValue::Tensor { shape, data: out })
+            Ok(RuntimeValue::Tensor(std::sync::Arc::new(
+                crate::ir::tensor::Tensor::new(shape, out).unwrap(),
+            )))
         }
         Op::ReluBackward(input, grad) => {
             let (input_shape, input_data) = read_tensor(values, *input)?;
@@ -257,10 +257,9 @@ fn evaluate_node_cuda(
                     message: format!("CUDA relu backward kernel failed: {message}"),
                 },
             )?;
-            Ok(RuntimeValue::Tensor {
-                shape: input_shape,
-                data: out,
-            })
+            Ok(RuntimeValue::Tensor(std::sync::Arc::new(
+                crate::ir::tensor::Tensor::new(input_shape, out).unwrap(),
+            )))
         }
         Op::Softmax(value) => {
             let (shape, data) = read_tensor(values, *value)?;
@@ -273,22 +272,328 @@ fn evaluate_node_cuda(
                 softmax_f32(device, &data, determinism).map_err(|message| CudaExecutionError {
                     message: format!("CUDA softmax kernel failed: {message}"),
                 })?;
-            Ok(RuntimeValue::Tensor { shape, data: out })
+            Ok(RuntimeValue::Tensor(std::sync::Arc::new(
+                crate::ir::tensor::Tensor::new(shape, out).unwrap(),
+            )))
         }
-        Op::Reshape { .. } => Err(CudaExecutionError {
-            message: "CUDA Reshape execution is not implemented".to_string(),
-        }),
-        Op::Concat { .. } => Err(CudaExecutionError {
-            message: "CUDA Concat execution is not implemented".to_string(),
-        }),
+        Op::Log(value) => {
+            let (shape, data) = read_tensor(values, *value)?;
+            let mut out = Vec::with_capacity(data.len());
+            for v in &data {
+                if *v <= 0.0 {
+                    return Err(CudaExecutionError {
+                        message: format!("log of non-positive value: {}", v),
+                    });
+                }
+                out.push(v.ln());
+            }
+            Ok(RuntimeValue::Tensor(std::sync::Arc::new(
+                crate::ir::tensor::Tensor::new(shape, out).unwrap(),
+            )))
+        }
+        Op::Exp(value) => {
+            let (shape, data) = read_tensor(values, *value)?;
+            let mut out = Vec::with_capacity(data.len());
+            for v in &data {
+                let e = v.exp();
+                if !e.is_finite() {
+                    return Err(CudaExecutionError {
+                        message: format!("exp overflow for value: {}", v),
+                    });
+                }
+                out.push(e);
+            }
+            Ok(RuntimeValue::Tensor(std::sync::Arc::new(
+                crate::ir::tensor::Tensor::new(shape, out).unwrap(),
+            )))
+        }
+        Op::ReduceSum {
+            input,
+            axis,
+            keepdims,
+        } => {
+            let (shape, data) = read_tensor(values, *input)?;
+            let tensor =
+                crate::ir::tensor::Tensor::new(shape, data).map_err(|err| CudaExecutionError {
+                    message: err.message,
+                })?;
+            let out = if *keepdims {
+                tensor
+                    .reduce_sum_keepdims(*axis)
+                    .map_err(|err| CudaExecutionError {
+                        message: err.message,
+                    })?
+            } else {
+                tensor.reduce_sum(*axis).map_err(|err| CudaExecutionError {
+                    message: err.message,
+                })?
+            };
+            Ok(RuntimeValue::Tensor(std::sync::Arc::new(out)))
+        }
+        Op::ReduceMax {
+            input,
+            axis,
+            keepdims,
+        } => {
+            let (shape, data) = read_tensor(values, *input)?;
+            let tensor =
+                crate::ir::tensor::Tensor::new(shape, data).map_err(|err| CudaExecutionError {
+                    message: err.message,
+                })?;
+            let out = if *keepdims {
+                tensor
+                    .reduce_max_keepdims(*axis)
+                    .map_err(|err| CudaExecutionError {
+                        message: err.message,
+                    })?
+            } else {
+                tensor.reduce_max(*axis).map_err(|err| CudaExecutionError {
+                    message: err.message,
+                })?
+            };
+            Ok(RuntimeValue::Tensor(std::sync::Arc::new(out)))
+        }
+        Op::ReduceMean {
+            input,
+            axis,
+            keepdims,
+        } => {
+            let (shape, data) = read_tensor(values, *input)?;
+            let tensor =
+                crate::ir::tensor::Tensor::new(shape, data).map_err(|err| CudaExecutionError {
+                    message: err.message,
+                })?;
+            let out = if *keepdims {
+                tensor
+                    .reduce_mean_keepdims(*axis)
+                    .map_err(|err| CudaExecutionError {
+                        message: err.message,
+                    })?
+            } else {
+                tensor
+                    .reduce_mean(*axis)
+                    .map_err(|err| CudaExecutionError {
+                        message: err.message,
+                    })?
+            };
+            Ok(RuntimeValue::Tensor(std::sync::Arc::new(out)))
+        }
+        Op::Reshape { input, shape } => {
+            let (_, data) = read_tensor(values, *input)?;
+            let element_count: usize = shape.iter().product();
+            if element_count != data.len() {
+                return Err(CudaExecutionError {
+                    message: format!(
+                        "Reshape element mismatch: {} vs {}",
+                        data.len(),
+                        element_count
+                    ),
+                });
+            }
+            Ok(RuntimeValue::Tensor(std::sync::Arc::new(
+                crate::ir::tensor::Tensor::new(shape.clone(), data).unwrap(),
+            )))
+        }
+        Op::Concat { inputs, axis } => {
+            if inputs.len() < 2 {
+                return Err(CudaExecutionError {
+                    message: "Concat requires at least 2 inputs".to_string(),
+                });
+            }
+            let mut tensors: Vec<(Vec<usize>, Vec<f32>)> = Vec::with_capacity(inputs.len());
+            for id in inputs {
+                tensors.push(read_tensor(values, *id)?);
+            }
+            let rank = tensors[0].0.len();
+            if *axis >= rank {
+                return Err(CudaExecutionError {
+                    message: format!("Concat axis {} out of bounds for rank {}", axis, rank),
+                });
+            }
+            let mut out_shape = tensors[0].0.clone();
+            let mut axis_sum = 0usize;
+            for (shape, _) in &tensors {
+                if shape.len() != rank {
+                    return Err(CudaExecutionError {
+                        message: "Concat rank mismatch".to_string(),
+                    });
+                }
+                axis_sum += shape[*axis];
+            }
+            out_shape[*axis] = axis_sum;
+            let mut out = Vec::new();
+            let outer: usize = tensors[0].0[..*axis].iter().product();
+            let inner: usize = tensors[0].0[*axis + 1..].iter().product();
+            for o in 0..outer {
+                for (shape, data) in &tensors {
+                    let axis_dim = shape[*axis];
+                    let start = o * axis_dim * inner;
+                    let end = start + axis_dim * inner;
+                    out.extend_from_slice(&data[start..end]);
+                }
+            }
+            Ok(RuntimeValue::Tensor(std::sync::Arc::new(
+                crate::ir::tensor::Tensor::new(out_shape, out).unwrap(),
+            )))
+        }
         Op::Gather { .. } => Err(CudaExecutionError {
             message: "CUDA Gather execution is not implemented".to_string(),
         }),
-        Op::Slice { .. } => Err(CudaExecutionError {
-            message: "CUDA Slice execution is not implemented".to_string(),
-        }),
+        Op::Slice {
+            input,
+            starts,
+            ends,
+            axes,
+        } => {
+            let (shape, data) = read_tensor(values, *input)?;
+            let rank = shape.len();
+            let mut out_shape = shape.clone();
+            for idx in 0..axes.len() {
+                let axis = axes[idx];
+                let start = starts[idx];
+                let end = ends[idx];
+                if axis >= rank || start >= end || end > shape[axis] {
+                    return Err(CudaExecutionError {
+                        message: format!("Slice bounds error at axis {}", axis),
+                    });
+                }
+                out_shape[axis] = end - start;
+            }
+            let out_count: usize = out_shape.iter().product();
+            let mut out = vec![0.0_f32; out_count];
+            for (linear, out_val) in out.iter_mut().enumerate().take(out_count) {
+                let mut rem = linear;
+                let mut in_offset = 0usize;
+                let mut stride = 1usize;
+                for dim_idx in (0..rank).rev() {
+                    let coord = rem % out_shape[dim_idx];
+                    rem /= out_shape[dim_idx];
+                    let start_shift = axes
+                        .iter()
+                        .position(|a| *a == dim_idx)
+                        .map(|i| starts[i])
+                        .unwrap_or(0);
+                    in_offset += (coord + start_shift) * stride;
+                    stride *= shape[dim_idx];
+                }
+                *out_val = data[in_offset];
+            }
+            Ok(RuntimeValue::Tensor(std::sync::Arc::new(
+                crate::ir::tensor::Tensor::new(out_shape, out).unwrap(),
+            )))
+        }
         Op::Conv2D(_, _) => Err(CudaExecutionError {
             message: "CUDA Conv2D execution is not implemented".to_string(),
+        }),
+        Op::Sigmoid(input) => {
+            let (shape, data) = read_tensor(values, *input)?;
+            let tensor =
+                crate::ir::tensor::Tensor::new(shape, data).map_err(|err| CudaExecutionError {
+                    message: err.message,
+                })?;
+            let out = tensor.sigmoid().map_err(|err| CudaExecutionError {
+                message: err.message,
+            })?;
+            Ok(RuntimeValue::Tensor(std::sync::Arc::new(out)))
+        }
+        Op::SigmoidBackward(input, grad) => {
+            let (shape_x, data_x) = read_tensor(values, *input)?;
+            let (shape_g, data_g) = read_tensor(values, *grad)?;
+            let x = crate::ir::tensor::Tensor::new(shape_x, data_x).map_err(|err| {
+                CudaExecutionError {
+                    message: err.message,
+                }
+            })?;
+            let g = crate::ir::tensor::Tensor::new(shape_g, data_g).map_err(|err| {
+                CudaExecutionError {
+                    message: err.message,
+                }
+            })?;
+            let out = x.sigmoid_backward(&g).map_err(|err| CudaExecutionError {
+                message: err.message,
+            })?;
+            Ok(RuntimeValue::Tensor(std::sync::Arc::new(out)))
+        }
+        Op::Gelu(input) => {
+            let (shape, data) = read_tensor(values, *input)?;
+            let tensor =
+                crate::ir::tensor::Tensor::new(shape, data).map_err(|err| CudaExecutionError {
+                    message: err.message,
+                })?;
+            let out = tensor.gelu().map_err(|err| CudaExecutionError {
+                message: err.message,
+            })?;
+            Ok(RuntimeValue::Tensor(std::sync::Arc::new(out)))
+        }
+        Op::GeluExact(input) => {
+            let (shape, data) = read_tensor(values, *input)?;
+            let tensor =
+                crate::ir::tensor::Tensor::new(shape, data).map_err(|err| CudaExecutionError {
+                    message: err.message,
+                })?;
+            let out = tensor.gelu_exact().map_err(|err| CudaExecutionError {
+                message: err.message,
+            })?;
+            Ok(RuntimeValue::Tensor(std::sync::Arc::new(out)))
+        }
+        Op::GeluBackward(input, grad) => {
+            let (shape_x, data_x) = read_tensor(values, *input)?;
+            let (shape_g, data_g) = read_tensor(values, *grad)?;
+            let x = crate::ir::tensor::Tensor::new(shape_x, data_x).map_err(|err| {
+                CudaExecutionError {
+                    message: err.message,
+                }
+            })?;
+            let g = crate::ir::tensor::Tensor::new(shape_g, data_g).map_err(|err| {
+                CudaExecutionError {
+                    message: err.message,
+                }
+            })?;
+            let out = x.gelu_backward(&g).map_err(|err| CudaExecutionError {
+                message: err.message,
+            })?;
+            Ok(RuntimeValue::Tensor(std::sync::Arc::new(out)))
+        }
+        Op::Gemm {
+            lhs,
+            rhs,
+            bias,
+            alpha,
+            beta,
+        } => {
+            let (lhs_shape, lhs_data) = read_tensor(values, *lhs)?;
+            let (rhs_shape, rhs_data) = read_tensor(values, *rhs)?;
+            let lhs_t = crate::ir::tensor::Tensor::new(lhs_shape, lhs_data).map_err(|err| {
+                CudaExecutionError {
+                    message: err.message,
+                }
+            })?;
+            let rhs_t = crate::ir::tensor::Tensor::new(rhs_shape, rhs_data).map_err(|err| {
+                CudaExecutionError {
+                    message: err.message,
+                }
+            })?;
+
+            let bias_t = if let Some(bias_id) = bias {
+                let (shape, data) = read_tensor(values, *bias_id)?;
+                Some(crate::ir::tensor::Tensor::new(shape, data).map_err(|err| {
+                    CudaExecutionError {
+                        message: err.message,
+                    }
+                })?)
+            } else {
+                None
+            };
+
+            let out = lhs_t
+                .gemm(&rhs_t, bias_t.as_ref(), *alpha, *beta)
+                .map_err(|err| CudaExecutionError {
+                    message: err.message,
+                })?;
+            Ok(RuntimeValue::Tensor(std::sync::Arc::new(out)))
+        }
+        Op::GemmBackward { .. } => Err(CudaExecutionError {
+            message: "CUDA GemmBackward execution is not implemented".to_string(),
         }),
         Op::Phi(_) => Err(CudaExecutionError {
             message: "CUDA phi execution is unsupported".to_string(),
@@ -328,34 +633,24 @@ fn binary_op_cuda(
             let value = apply_float_binary(op, a, b)?;
             Ok(RuntimeValue::Float(value))
         }
-        (
-            RuntimeValue::Tensor {
-                shape: left_shape,
-                data: left_data,
-            },
-            RuntimeValue::Tensor {
-                shape: right_shape,
-                data: right_data,
-            },
-        ) => {
-            if left_shape != right_shape {
+        (RuntimeValue::Tensor(left_tensor), RuntimeValue::Tensor(right_tensor)) => {
+            if left_tensor.shape != right_tensor.shape {
                 return Err(CudaExecutionError {
                     message: format!(
                         "Tensor shape mismatch: left {:?} right {:?}",
-                        left_shape, right_shape
+                        left_tensor.shape, right_tensor.shape
                     ),
                 });
             }
             let kernel = tensor_kernel_for(op);
-            let out = kernel(device, &left_data, &right_data, determinism).map_err(|message| {
-                CudaExecutionError {
+            let out = kernel(device, &left_tensor.data, &right_tensor.data, determinism).map_err(
+                |message| CudaExecutionError {
                     message: format!("CUDA {} kernel failed: {message}", op_name(op)),
-                }
-            })?;
-            Ok(RuntimeValue::Tensor {
-                shape: left_shape,
-                data: out,
-            })
+                },
+            )?;
+            Ok(RuntimeValue::Tensor(std::sync::Arc::new(
+                crate::ir::tensor::Tensor::new(left_tensor.shape.clone(), out).unwrap(),
+            )))
         }
         _ => Err(CudaExecutionError {
             message: "Type mismatch in binary operation".to_string(),
@@ -398,38 +693,28 @@ fn div_op_cuda(
             }
             Ok(RuntimeValue::Float(value))
         }
-        (
-            RuntimeValue::Tensor {
-                shape: left_shape,
-                data: left_data,
-            },
-            RuntimeValue::Tensor {
-                shape: right_shape,
-                data: right_data,
-            },
-        ) => {
-            if left_shape != right_shape {
+        (RuntimeValue::Tensor(left_tensor), RuntimeValue::Tensor(right_tensor)) => {
+            if left_tensor.shape != right_tensor.shape {
                 return Err(CudaExecutionError {
                     message: format!(
                         "Tensor shape mismatch in div: left {:?} right {:?}",
-                        left_shape, right_shape
+                        left_tensor.shape, right_tensor.shape
                     ),
                 });
             }
-            if tensor_has_zero_divisor(&right_data) {
+            if tensor_has_zero_divisor(&right_tensor.data) {
                 return Err(CudaExecutionError {
                     message: "Division by zero".to_string(),
                 });
             }
-            let out = div_f32(device, &left_data, &right_data, determinism).map_err(|message| {
-                CudaExecutionError {
+            let out = div_f32(device, &left_tensor.data, &right_tensor.data, determinism).map_err(
+                |message| CudaExecutionError {
                     message: format!("CUDA div kernel failed: {message}"),
-                }
-            })?;
-            Ok(RuntimeValue::Tensor {
-                shape: left_shape,
-                data: out,
-            })
+                },
+            )?;
+            Ok(RuntimeValue::Tensor(std::sync::Arc::new(
+                crate::ir::tensor::Tensor::new(left_tensor.shape.clone(), out).unwrap(),
+            )))
         }
         _ => Err(CudaExecutionError {
             message: "Type mismatch in div".to_string(),
@@ -514,7 +799,7 @@ fn read_tensor(
     id: ValueId,
 ) -> Result<(Vec<usize>, Vec<f32>), CudaExecutionError> {
     match read_value(values, id)? {
-        RuntimeValue::Tensor { shape, data } => Ok((shape, data)),
+        RuntimeValue::Tensor(tensor) => Ok((tensor.shape.clone(), tensor.data.clone())),
         _ => Err(CudaExecutionError {
             message: format!("Expected tensor runtime value for ValueId {}", id.0),
         }),

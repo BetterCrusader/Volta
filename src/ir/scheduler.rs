@@ -13,6 +13,7 @@ pub struct ScheduleError {
     pub message: String,
 }
 
+#[must_use]
 pub fn schedule_hash(schedule: &Schedule) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     for node in &schedule.ordered_nodes {

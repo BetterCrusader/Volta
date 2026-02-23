@@ -124,16 +124,18 @@ fn run_probe(config: ProbeConfig) -> Result<ProbeReport, TensorError> {
         let matmul_start = Instant::now();
         for _ in 0..config.matmul_iters {
             let out = lhs.matmul(&rhs)?;
-            checksum += out.data[sample_index % out.data.len()] as f64;
+            checksum += f64::from(out.data[sample_index % out.data.len()]);
         }
+        #[allow(clippy::cast_precision_loss)]
         let matmul_ms = matmul_start.elapsed().as_secs_f64() * 1000.0 / config.matmul_iters as f64;
         matmul_samples.push(matmul_ms);
 
         let relu_start = Instant::now();
         for _ in 0..config.relu_iters {
             let out = relu_input.relu()?;
-            checksum += out.data[sample_index % out.data.len()] as f64;
+            checksum += f64::from(out.data[sample_index % out.data.len()]);
         }
+        #[allow(clippy::cast_precision_loss)]
         let relu_ms = relu_start.elapsed().as_secs_f64() * 1000.0 / config.relu_iters as f64;
         relu_samples.push(relu_ms);
     }
@@ -163,6 +165,8 @@ fn make_tensor(rows: usize, cols: usize, seed: u64) -> Result<Tensor, TensorErro
         state = state
             .wrapping_mul(6_364_136_223_846_793_005)
             .wrapping_add(1_442_695_040_888_963_407);
+        // state % 10_007 fits in u16; the as-cast to f32 is lossless for values < 2^24.
+        #[allow(clippy::cast_precision_loss)]
         let bucket = (state % 10_007) as f32;
         data.push((bucket / 10_007.0) - 0.5);
     }
@@ -178,7 +182,7 @@ fn median(values: &[f64]) -> f64 {
     sorted.sort_by(f64::total_cmp);
     let mid = sorted.len() / 2;
     if sorted.len().is_multiple_of(2) {
-        (sorted[mid - 1] + sorted[mid]) / 2.0
+        f64::midpoint(sorted[mid - 1], sorted[mid])
     } else {
         sorted[mid]
     }
@@ -188,7 +192,9 @@ fn stdev(values: &[f64]) -> f64 {
     if values.len() < 2 {
         return 0.0;
     }
-    let mean = values.iter().sum::<f64>() / values.len() as f64;
+    #[allow(clippy::cast_precision_loss)]
+    let len_f64 = values.len() as f64;
+    let mean = values.iter().sum::<f64>() / len_f64;
     let variance = values
         .iter()
         .map(|value| {
@@ -196,7 +202,7 @@ fn stdev(values: &[f64]) -> f64 {
             delta * delta
         })
         .sum::<f64>()
-        / values.len() as f64;
+        / len_f64;
     variance.sqrt()
 }
 
