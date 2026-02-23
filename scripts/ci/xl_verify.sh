@@ -13,8 +13,8 @@ cargo test --test xl_gradient_checkpointing -- --nocapture
 echo "[xl-verify] backend capability matrix gate"
 cargo test --test backend_capability_matrix -- --nocapture
 
-echo "[xl-verify] schedule optimization gate"
-cargo test --test schedule_optimization -- --nocapture
+echo "[xl-verify] pass equivalence gate"
+cargo test --test pass_equivalence -- --nocapture
 
 echo "[xl-verify] model export gate"
 cargo test --test model_export -- --nocapture
