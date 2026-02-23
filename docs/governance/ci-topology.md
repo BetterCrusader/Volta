@@ -40,3 +40,4 @@ If you cannot explain your CI topology in one page, you do not control your rele
 
 - `scripts/ci/wave1_local_verify.sh` reproduces Wave 1 checks.
 - `scripts/ci/wave23_local_verify.sh` reproduces Wave 2+3 checks including perf, soak, and rollback verify.
+- Stale command reference audit evidence is tracked in `docs/governance/ci-stale-reference-sweep-2026-02-23.md`.
