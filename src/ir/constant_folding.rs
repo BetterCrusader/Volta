@@ -102,7 +102,8 @@ fn fold_op(op: &Op, constants: &[Option<ConstValue>]) -> Option<Op> {
         | Op::Input(_)
         | Op::Output(_)
         | Op::Phi(_)
-        | Op::Removed => None,
+        | Op::Removed
+        | Op::SoftmaxCrossEntropyLossFromLogits { .. } => None,
     }
 }
 
@@ -324,7 +325,8 @@ fn const_from_op(op: &Op) -> Option<ConstValue> {
         | Op::Input(_)
         | Op::Output(_)
         | Op::Phi(_)
-        | Op::Removed => None,
+        | Op::Removed
+        | Op::SoftmaxCrossEntropyLossFromLogits { .. } => None,
     }
 }
 

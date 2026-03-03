@@ -19,15 +19,34 @@ cudarc = { version = "0.19.2", default-features = false, features = ["std", "dri
 rayon = { version = "1", optional = true }
 tract-onnx = { version = "0.22", optional = true }
 prost = { version = "0.11.9", optional = true }
+siphasher = "1.0.2"
+rustc-hash = "2.1.1"
+csv = "1.4.0"
+serde = "1.0.228"
+serde_derive = "1.0.228"
+rand = "0.10.0"
+rand_chacha = "0.10.0"
+bincode = "2"
 
 [dev-dependencies]
 proptest = "1"
+csv = "1.4.0"
 
-[[bench]]
-name = "benchmarks"
-harness = false
+[[test]]
+name = "checkpoint_parity"
+path = "tests/checkpoint_parity.rs"
 
-# ── Build profiles ──────────────────────────────────────────────────────────────
+[[test]]
+name = "checkpoint_errors"
+path = "tests/checkpoint_errors.rs"
+
+[[test]]
+name = "infer_partial_batch"
+path = "tests/infer_partial_batch.rs"
+
+[[test]]
+name = "label_col_test"
+path = "tests/label_col_test.rs"
 
 [profile.release]
 # Thin LTO: cross-crate inlining without the full-program link time cost.
@@ -40,13 +59,6 @@ panic         = "abort"
 # Strip debug symbols from the final binary for smaller distributable.
 strip         = "symbols"
 opt-level     = 3
-
-[profile.bench]
-# Inherit release settings so benchmarks run under real production conditions.
-inherits  = "release"
-# Keep debug info so profilers (perf, samply, cargo-flamegraph) can symbolize.
-debug     = true
-strip     = "none"
 
 [profile.dev]
 # Overflow checks are on by default in dev — keep them.

@@ -1,0 +1,12 @@
+model xor
+    layers 2 4 1
+    activation sigmoid
+    optimizer sgd
+    lr 0.3
+
+dataset synthetic
+    batch 100
+
+train xor on synthetic
+    epochs 500
+    device cpu

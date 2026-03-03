@@ -73,11 +73,99 @@ impl LoweringContext {
         }
     }
 
-    fn push_op(&mut self, op: Op) -> Option<ValueId> {
+    pub fn push_op(&mut self, op: Op) -> Option<ValueId> {
         self.graph
             .add_op(self.entry_block, op)
             .ok()
             .map(|(_, value)| value)
+    }
+
+    /// Extends the graph with neural network layers based on the provided configuration.
+    ///
+    /// The input must be a tensor of shape `[batch, in_features]`.
+    /// Returns the `ValueId` representing the final output logits of the model.
+    pub fn lower_model_to_graph(
+        &mut self,
+        layers: &[i64],
+        activation: &str,
+        input_val: ValueId,
+        apply_final_activation: bool,
+    ) -> ValueId {
+        let mut current_input = input_val;
+
+        for (i, w) in layers.windows(2).enumerate() {
+            let in_features = w[0] as usize;
+            let out_features = w[1] as usize;
+
+            // 1. Generate Weights: [in_features, out_features]
+            // In the real system, these would be matched with random tensors in the executor
+            let weight_name = format!("weight_{in_features}_{out_features}");
+            let weight_op = Op::Parameter(weight_name.clone());
+            let weight = self.graph.add_op(self.entry_block, weight_op).unwrap().1;
+
+            // 2. Generate Bias: [1, out_features]
+            let bias_name = format!("bias_{out_features}");
+            let bias_op = Op::Parameter(bias_name.clone());
+            let bias = self.graph.add_op(self.entry_block, bias_op).unwrap().1;
+
+            // 3. Matrix Multiplication
+            let matmul_op = Op::MatMul(current_input, weight);
+            let matmul = self.graph.add_op(self.entry_block, matmul_op).unwrap().1;
+
+            // 4. Add Bias (simulated with elementwise add for brevity, assuming broadcast in backend eventually)
+            let add_op = Op::Add(matmul, bias);
+            let add = self.graph.add_op(self.entry_block, add_op).unwrap().1;
+
+            // 5. Activation
+            current_input = add;
+
+            let is_last_layer = i == layers.len() - 2;
+            if !is_last_layer {
+                if activation == "relu" {
+                    let relu_op = Op::Relu(current_input);
+                    current_input = self.graph.add_op(self.entry_block, relu_op).unwrap().1;
+                } else if activation == "sigmoid" {
+                    let sig_op = Op::Sigmoid(current_input);
+                    current_input = self.graph.add_op(self.entry_block, sig_op).unwrap().1;
+                }
+            } else if apply_final_activation {
+                // For the last layer, if the activation is softmax (e.g. inference), apply it.
+                if activation == "softmax" {
+                    let soft_op = Op::Softmax(current_input);
+                    current_input = self.graph.add_op(self.entry_block, soft_op).unwrap().1;
+                }
+            }
+        }
+
+        current_input
+    }
+
+    /// Constructs a Mean Squared Error (MSE) loss metric.
+    pub fn build_mse_loss(&mut self, predictions: ValueId, target_labels: ValueId) -> ValueId {
+        let error = self.push_op(Op::Sub(predictions, target_labels)).unwrap();
+        let squared_error = self.push_op(Op::Mul(error, error)).unwrap();
+        self.push_op(Op::ReduceMean {
+            input: squared_error,
+            axis: None,
+            keepdims: false,
+        })
+        .unwrap()
+    }
+
+    /// Constructs a Softmax Cross Entropy loss metric.
+    /// Expects raw logits and one-hot target labels.
+    pub fn build_softmax_cross_entropy_loss(&mut self, logits: ValueId, target_labels: ValueId) -> ValueId {
+        self.push_op(Op::SoftmaxCrossEntropyLossFromLogits {
+            logits,
+            targets: target_labels,
+        })
+        .unwrap()
+    }
+
+    /// Consumes the context and returns the constructed graph.
+    #[must_use]
+    pub fn into_graph(self) -> Graph {
+        self.graph
     }
 }
 
@@ -189,6 +277,7 @@ mod tests {
                 | Op::Input(_)
                 | Op::Output(_)
                 | Op::Phi(_)
+                | Op::SoftmaxCrossEntropyLossFromLogits { .. }
                 | Op::Removed => {}
             }
         }

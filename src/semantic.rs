@@ -182,6 +182,7 @@ impl SemanticAnalyzer {
                 | Stmt::Train { .. }
                 | Stmt::Save { .. }
                 | Stmt::Load { .. }
+                | Stmt::Infer { .. }
                 | Stmt::Return { .. }
                 | Stmt::Print { .. } => {}
             }
@@ -323,6 +324,15 @@ impl SemanticAnalyzer {
                         format!("Undefined model in load: '{model}'"),
                         *span,
                         "Declare the model name first, then load weights into it.".to_string(),
+                    ));
+                }
+            }
+            Stmt::Infer { model, span, .. } => {
+                if !self.models.contains(model) {
+                    return Err(Self::error_with_hint(
+                        format!("Undefined model in infer: '{model}'"),
+                        *span,
+                        "Declare the model name before running inference.".to_string(),
                     ));
                 }
             }
@@ -541,6 +551,10 @@ impl SemanticAnalyzer {
                 self.expect_exact_count(context, prop, 1)?;
                 self.expect_symbol(context, &prop.key, &prop.values[0])?;
             }
+            ("model", "seed") => {
+                self.expect_exact_count(context, prop, 1)?;
+                self.expect_value_type(context, &prop.key, &prop.values[0], ValueType::Int)?;
+            }
             ("dataset", "batch") => {
                 self.expect_exact_count(context, prop, 1)?;
                 self.expect_value_type(context, &prop.key, &prop.values[0], ValueType::Int)?;
@@ -548,6 +562,26 @@ impl SemanticAnalyzer {
             ("dataset", "shuffle") => {
                 self.expect_exact_count(context, prop, 1)?;
                 self.expect_value_type(context, &prop.key, &prop.values[0], ValueType::Bool)?;
+            }
+            ("dataset", "source") => {
+                self.expect_exact_count(context, prop, 1)?;
+                self.expect_value_type(context, &prop.key, &prop.values[0], ValueType::Str)?;
+            }
+            ("dataset", "val_split") => {
+                self.expect_exact_count(context, prop, 1)?;
+                let split_ty = self.infer_expr_type(&prop.values[0])?;
+                if !matches!(split_ty, ValueType::Float | ValueType::Int) {
+                    return Err(Self::error(
+                        format!(
+                            "Property 'val_split' in dataset block must be a number, found {:?}", split_ty
+                        ),
+                        prop.values[0].span(),
+                    ));
+                }
+            }
+            ("dataset", "label_col" | "num_classes") => {
+                self.expect_exact_count(context, prop, 1)?;
+                self.expect_value_type(context, &prop.key, &prop.values[0], ValueType::Int)?;
             }
             ("train", "epochs") => {
                 self.expect_exact_count(context, prop, 1)?;

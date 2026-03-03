@@ -10,7 +10,7 @@ use volta::ir::{
 
 #[test]
 fn cuda_inference_is_repeatable_in_strict_mode() {
-    if !cuda_helpers::cuda_runtime_available() {
+    if !cuda_helpers::safe_cuda_device().is_some() {
         eprintln!("[SKIP] cuda_inference_is_repeatable_in_strict_mode — no CUDA device available");
         return;
     }
@@ -43,7 +43,7 @@ fn cuda_inference_is_repeatable_in_strict_mode() {
 
 #[test]
 fn strict_mode_fails_fast_for_nondeterministic_softmax_grouping() {
-    if !cuda_helpers::cuda_runtime_available() {
+    if !cuda_helpers::safe_cuda_device().is_some() {
         eprintln!(
             "[SKIP] strict_mode_fails_fast_for_nondeterministic_softmax_grouping — no CUDA device available"
         );

@@ -49,7 +49,7 @@ train brain on tiny
 
 if x > 0
     save brain as "brain.vt"
-    load brain "brain.vt"
+    load brain as "brain.vt"
     print "ok"
 elif x == 0
     print "zero"

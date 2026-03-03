@@ -7,8 +7,8 @@ use crate::ir::cuda::kernels::add::{
 use crate::ir::{DeterminismLevel, OptimizerConfig, OptimizerError, OptimizerState, Tensor};
 
 pub fn apply_gradients_cuda(
-    parameters: &mut HashMap<String, Tensor>,
-    gradients: &HashMap<String, Tensor>,
+    parameters: &mut HashMap<crate::ir::node::ValueId, Tensor>,
+    gradients: &HashMap<crate::ir::node::ValueId, Tensor>,
     config: &OptimizerConfig,
     state: &mut OptimizerState,
     determinism: DeterminismLevel,
@@ -42,20 +42,20 @@ pub fn apply_gradients_cuda(
 }
 
 fn apply_sgd_cuda(
-    parameters: &mut HashMap<String, Tensor>,
-    gradients: &HashMap<String, Tensor>,
+    parameters: &mut HashMap<crate::ir::node::ValueId, Tensor>,
+    gradients: &HashMap<crate::ir::node::ValueId, Tensor>,
     lr: f32,
     device: &CudaDevice,
     determinism: DeterminismLevel,
 ) -> Result<(), OptimizerError> {
-    for (name, parameter) in parameters {
-        let Some(gradient) = gradients.get(name) else {
+    for (value_id, parameter) in parameters {
+        let Some(gradient) = gradients.get(value_id) else {
             continue;
         };
         if parameter.shape != gradient.shape {
             return Err(OptimizerError {
                 message: format!(
-                    "Shape mismatch in CUDA SGD for '{name}': {:?} vs {:?}",
+                    "Shape mismatch in CUDA SGD for '{value_id}': {:?} vs {:?}",
                     parameter.shape, gradient.shape
                 ),
             });
@@ -63,13 +63,13 @@ fn apply_sgd_cuda(
 
         let scaled = scale_f32(device, &gradient.data, lr, determinism).map_err(|message| {
             OptimizerError {
-                message: format!("CUDA SGD scale kernel failed for '{name}': {message}"),
+                message: format!("CUDA SGD scale kernel failed for '{value_id}': {message}"),
             }
         })?;
         parameter.data =
             sub_f32(device, &parameter.data, &scaled, determinism).map_err(|message| {
                 OptimizerError {
-                    message: format!("CUDA SGD update kernel failed for '{name}': {message}"),
+                    message: format!("CUDA SGD update kernel failed for '{value_id}': {message}"),
                 }
             })?;
     }
@@ -78,8 +78,8 @@ fn apply_sgd_cuda(
 
 #[allow(clippy::too_many_arguments)]
 fn apply_adam_cuda(
-    parameters: &mut HashMap<String, Tensor>,
-    gradients: &HashMap<String, Tensor>,
+    parameters: &mut HashMap<crate::ir::node::ValueId, Tensor>,
+    gradients: &HashMap<crate::ir::node::ValueId, Tensor>,
     lr: f32,
     beta1: f32,
     beta2: f32,
@@ -96,31 +96,31 @@ fn apply_adam_cuda(
     let bias1 = 1.0_f32 - beta1.powi(step_i32);
     let bias2 = 1.0_f32 - beta2.powi(step_i32);
 
-    for (name, parameter) in parameters {
-        let Some(gradient) = gradients.get(name) else {
+    for (value_id, parameter) in parameters {
+        let Some(gradient) = gradients.get(value_id) else {
             continue;
         };
         if parameter.shape != gradient.shape {
             return Err(OptimizerError {
                 message: format!(
-                    "Shape mismatch in CUDA Adam for '{name}': {:?} vs {:?}",
+                    "Shape mismatch in CUDA Adam for '{value_id}': {:?} vs {:?}",
                     parameter.shape, gradient.shape
                 ),
             });
         }
 
-        let m = state.adam_m.entry(name.clone()).or_insert(
+        let m = state.adam_m.entry(*value_id).or_insert(
             Tensor::zeros(parameter.shape.clone()).map_err(|err| OptimizerError {
                 message: format!(
-                    "Failed to initialize CUDA Adam m buffer for '{name}': {}",
+                    "Failed to initialize CUDA Adam m buffer for '{value_id}': {}",
                     err.message
                 ),
             })?,
         );
-        let v = state.adam_v.entry(name.clone()).or_insert(
+        let v = state.adam_v.entry(*value_id).or_insert(
             Tensor::zeros(parameter.shape.clone()).map_err(|err| OptimizerError {
                 message: format!(
-                    "Failed to initialize CUDA Adam v buffer for '{name}': {}",
+                    "Failed to initialize CUDA Adam v buffer for '{value_id}': {}",
                     err.message
                 ),
             })?,
@@ -128,33 +128,42 @@ fn apply_adam_cuda(
 
         let m_beta =
             scale_f32(device, &m.data, beta1, determinism).map_err(|message| OptimizerError {
-                message: format!("CUDA Adam m*beta1 kernel failed for '{name}': {message}"),
+                message: format!("CUDA Adam m*beta1 kernel failed for '{value_id}': {message}"),
             })?;
         let g_beta =
             scale_f32(device, &gradient.data, one_minus_beta1, determinism).map_err(|message| {
                 OptimizerError {
-                    message: format!("CUDA Adam g*(1-beta1) kernel failed for '{name}': {message}"),
+                    message: format!(
+                        "CUDA Adam g*(1-beta1) kernel failed for '{value_id}': {message}"
+                    ),
                 }
             })?;
-        m.data = add_tensors(device, &m_beta, &g_beta, determinism, name, "adam-m update")?;
+        m.data = add_tensors(
+            device,
+            &m_beta,
+            &g_beta,
+            determinism,
+            *value_id,
+            "adam-m update",
+        )?;
 
         let v_beta =
             scale_f32(device, &v.data, beta2, determinism).map_err(|message| OptimizerError {
-                message: format!("CUDA Adam v*beta2 kernel failed for '{name}': {message}"),
+                message: format!("CUDA Adam v*beta2 kernel failed for '{value_id}': {message}"),
             })?;
         let g_sq = mul_tensors(
             device,
             &gradient.data,
             &gradient.data,
             determinism,
-            name,
+            *value_id,
             "adam g^2",
         )?;
         let g_sq_beta =
             scale_f32(device, &g_sq, one_minus_beta2, determinism).map_err(|message| {
                 OptimizerError {
                     message: format!(
-                        "CUDA Adam g^2*(1-beta2) kernel failed for '{name}': {message}"
+                        "CUDA Adam g^2*(1-beta2) kernel failed for '{value_id}': {message}"
                     ),
                 }
             })?;
@@ -163,42 +172,42 @@ fn apply_adam_cuda(
             &v_beta,
             &g_sq_beta,
             determinism,
-            name,
+            *value_id,
             "adam-v update",
         )?;
 
         let m_hat = div_scalar_f32(device, &m.data, bias1, determinism).map_err(|message| {
             OptimizerError {
-                message: format!("CUDA Adam m_hat kernel failed for '{name}': {message}"),
+                message: format!("CUDA Adam m_hat kernel failed for '{value_id}': {message}"),
             }
         })?;
         let v_hat = div_scalar_f32(device, &v.data, bias2, determinism).map_err(|message| {
             OptimizerError {
-                message: format!("CUDA Adam v_hat kernel failed for '{name}': {message}"),
+                message: format!("CUDA Adam v_hat kernel failed for '{value_id}': {message}"),
             }
         })?;
         let denom = add_scalar_f32(
             device,
             &sqrt_f32(device, &v_hat, determinism).map_err(|message| OptimizerError {
-                message: format!("CUDA Adam sqrt kernel failed for '{name}': {message}"),
+                message: format!("CUDA Adam sqrt kernel failed for '{value_id}': {message}"),
             })?,
             epsilon,
             determinism,
         )
         .map_err(|message| OptimizerError {
-            message: format!("CUDA Adam denominator kernel failed for '{name}': {message}"),
+            message: format!("CUDA Adam denominator kernel failed for '{value_id}': {message}"),
         })?;
-        let ratio = div_tensors(device, &m_hat, &denom, determinism, name, "adam ratio")?;
+        let ratio = div_tensors(device, &m_hat, &denom, determinism, *value_id, "adam ratio")?;
         let step =
             scale_f32(device, &ratio, lr, determinism).map_err(|message| OptimizerError {
-                message: format!("CUDA Adam lr*ratio kernel failed for '{name}': {message}"),
+                message: format!("CUDA Adam lr*ratio kernel failed for '{value_id}': {message}"),
             })?;
         parameter.data = sub_tensors(
             device,
             &parameter.data,
             &step,
             determinism,
-            name,
+            *value_id,
             "adam update",
         )?;
     }
@@ -211,7 +220,7 @@ fn add_tensors(
     left: &[f32],
     right: &[f32],
     determinism: DeterminismLevel,
-    name: &str,
+    name: crate::ir::node::ValueId,
     stage: &str,
 ) -> Result<Vec<f32>, OptimizerError> {
     add_f32(device, left, right, determinism).map_err(|message| OptimizerError {
@@ -224,7 +233,7 @@ fn sub_tensors(
     left: &[f32],
     right: &[f32],
     determinism: DeterminismLevel,
-    name: &str,
+    name: crate::ir::node::ValueId,
     stage: &str,
 ) -> Result<Vec<f32>, OptimizerError> {
     sub_f32(device, left, right, determinism).map_err(|message| OptimizerError {
@@ -237,7 +246,7 @@ fn mul_tensors(
     left: &[f32],
     right: &[f32],
     determinism: DeterminismLevel,
-    name: &str,
+    name: crate::ir::node::ValueId,
     stage: &str,
 ) -> Result<Vec<f32>, OptimizerError> {
     mul_f32(device, left, right, determinism).map_err(|message| OptimizerError {
@@ -250,7 +259,7 @@ fn div_tensors(
     left: &[f32],
     right: &[f32],
     determinism: DeterminismLevel,
-    name: &str,
+    name: crate::ir::node::ValueId,
     stage: &str,
 ) -> Result<Vec<f32>, OptimizerError> {
     div_f32(device, left, right, determinism).map_err(|message| OptimizerError {

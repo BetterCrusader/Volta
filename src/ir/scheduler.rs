@@ -15,7 +15,10 @@ pub struct ScheduleError {
 
 #[must_use]
 pub fn schedule_hash(schedule: &Schedule) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    // SECURITY/AUDIT FIX: DefaultHasher is not guaranteed to be stable across
+    // Rust versions or platforms. Volta requires hard determinism.
+    // We use SipHasher13 with a fixed seed to guarantee consistent hashes.
+    let mut hasher = siphasher::sip128::SipHasher13::new_with_keys(0, 0);
     for node in &schedule.ordered_nodes {
         node.0.hash(&mut hasher);
     }

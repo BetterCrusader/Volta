@@ -1,7 +1,0 @@
-{
-  "backend_signature": "Cpu-Cuda-runtime-gateway-v1",
-  "determinism_level": "strict",
-  "device_capability_fingerprint": "any-sm89",
-  "max_abs_diff_budget": 1e-6,
-  "max_rel_diff_budget": 1e-6
-}

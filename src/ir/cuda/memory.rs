@@ -1,3 +1,4 @@
+#![allow(unsafe_code)]
 use std::collections::{BTreeMap, HashMap};
 use std::hash::{Hash, Hasher};
 

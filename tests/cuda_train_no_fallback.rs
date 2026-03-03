@@ -32,7 +32,7 @@ fn cuda_train_fails_explicitly_for_unsupported_graph_without_cpu_fallback() {
         };
 
         let cuda = CudaBackend;
-        let err = train_graph_with_backend(&graph, loss, params, &dataset, &cfg, &cuda)
+        let err = train_graph_with_backend(&graph, loss, None, params, &dataset, &[], &cfg, &cuda)
             .expect_err("unsupported CUDA train graph must fail explicitly");
 
         assert!(

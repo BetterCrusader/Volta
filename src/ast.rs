@@ -76,6 +76,12 @@ pub enum Stmt {
         path: String,
         span: Span,
     },
+    Infer {
+        model: String,
+        input_csv: String,
+        out_csv: String,
+        span: Span,
+    },
     Print {
         expr: Expr,
         span: Span,
@@ -119,7 +125,8 @@ impl Stmt {
             | Self::Function { span, .. }
             | Self::Return { span, .. }
             | Self::Loop { span, .. }
-            | Self::If { span, .. } => *span,
+            | Self::If { span, .. }
+            | Self::Infer { span, .. } => *span,
         }
     }
 }

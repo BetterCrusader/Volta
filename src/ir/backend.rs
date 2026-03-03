@@ -27,8 +27,8 @@ pub trait Backend {
 
     fn apply_gradients(
         &self,
-        parameters: &mut HashMap<String, Tensor>,
-        gradients: &HashMap<String, Tensor>,
+        parameters: &mut HashMap<crate::ir::node::ValueId, Tensor>,
+        gradients: &HashMap<crate::ir::node::ValueId, Tensor>,
         config: &OptimizerConfig,
         state: &mut OptimizerState,
         _determinism: DeterminismLevel,
@@ -178,8 +178,8 @@ impl Backend for CudaBackend {
 
     fn apply_gradients(
         &self,
-        parameters: &mut HashMap<String, Tensor>,
-        gradients: &HashMap<String, Tensor>,
+        parameters: &mut HashMap<crate::ir::node::ValueId, Tensor>,
+        gradients: &HashMap<crate::ir::node::ValueId, Tensor>,
         config: &OptimizerConfig,
         state: &mut OptimizerState,
         determinism: DeterminismLevel,

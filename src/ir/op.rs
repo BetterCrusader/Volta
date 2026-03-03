@@ -1,9 +1,36 @@
 use crate::ir::node::ValueId;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub enum ElementwiseUnaryOp {
+    LeakyRelu(f32),
     Neg,
     Relu,
+}
+
+impl PartialEq for ElementwiseUnaryOp {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::LeakyRelu(a), Self::LeakyRelu(b)) => a.to_bits() == b.to_bits(),
+            (Self::Neg, Self::Neg) => true,
+            (Self::Relu, Self::Relu) => true,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for ElementwiseUnaryOp {}
+
+impl std::hash::Hash for ElementwiseUnaryOp {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            Self::LeakyRelu(a) => {
+                0_u8.hash(state);
+                a.to_bits().hash(state);
+            }
+            Self::Neg => 1_u8.hash(state),
+            Self::Relu => 2_u8.hash(state),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +81,10 @@ pub enum Op {
     Gelu(ValueId),
     GeluExact(ValueId),
     GeluBackward(ValueId, ValueId),
+    SoftmaxCrossEntropyLossFromLogits {
+        logits: ValueId,
+        targets: ValueId,
+    },
     ReduceSum {
         input: ValueId,
         axis: Option<usize>,
@@ -147,6 +178,7 @@ impl Op {
             | Op::Parameter(_)
             | Op::Input(_)
             | Op::Removed => Vec::new(),
+            Op::SoftmaxCrossEntropyLossFromLogits { logits, targets } => vec![*logits, *targets],
         }
     }
 
@@ -217,6 +249,10 @@ impl Op {
             | Op::Parameter(_)
             | Op::Input(_)
             | Op::Removed => {}
+            Op::SoftmaxCrossEntropyLossFromLogits { logits, targets } => {
+                *logits = remap(*logits);
+                *targets = remap(*targets);
+            }
         }
     }
 }

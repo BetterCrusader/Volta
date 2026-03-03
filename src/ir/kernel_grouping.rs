@@ -89,6 +89,7 @@ fn classify_op(op: &Op) -> KernelKind {
         | Op::Output(_)
         | Op::Transpose(_) => KernelKind::Data,
         Op::Phi(_) | Op::Removed => KernelKind::Control,
+        Op::SoftmaxCrossEntropyLossFromLogits { .. } => KernelKind::Backward, // Or Elementwise, it's computed as a single kernel
     }
 }
 

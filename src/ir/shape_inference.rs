@@ -110,6 +110,20 @@ fn infer_shape_for_op(
         Op::Conv2D(input, weight) => infer_conv2d(*input, *weight, shapes),
         Op::Phi(values) => infer_phi(values, shapes),
         Op::Removed => Ok(ShapeFact::Unknown),
+        Op::SoftmaxCrossEntropyLossFromLogits { logits, targets } => {
+            let log_shape = shape_of(*logits, shapes);
+            let target_shape = shape_of(*targets, shapes);
+            match (log_shape, target_shape) {
+                (ShapeFact::Tensor(l), ShapeFact::Tensor(t)) => {
+                    if l != t {
+                        return Err(format!("Shape mismatch in SoftmaxCrossEntropy: {:?} and {:?}", l, t));
+                    }
+                    Ok(ShapeFact::Tensor(vec![1]))
+                }
+                (ShapeFact::Unknown, _) | (_, ShapeFact::Unknown) => Ok(ShapeFact::Unknown),
+                _ => Err("SoftmaxCrossEntropy expects tensor inputs".to_string())
+            }
+        }
     }
 }
 
@@ -129,7 +143,7 @@ fn infer_elementwise(
                 Err(format!("Shape mismatch in elementwise op: {a:?} vs {b:?}"))
             }
         }
-        (ShapeFact::Unknown, x) | (x, ShapeFact::Unknown) => Ok(x),
+        (ShapeFact::Unknown, _) | (_, ShapeFact::Unknown) => Ok(ShapeFact::Unknown),
         (ShapeFact::NonTensor, ShapeFact::Tensor(_))
         | (ShapeFact::Tensor(_), ShapeFact::NonTensor) => {
             Err("Type mismatch in elementwise op: tensor vs non-tensor".to_string())
@@ -164,10 +178,9 @@ fn infer_same_tensor(
                 Err(format!("Shape mismatch in {label}: {:?} vs {:?}", a, b))
             }
         }
-        (ShapeFact::Unknown, ShapeFact::Tensor(b)) | (ShapeFact::Tensor(b), ShapeFact::Unknown) => {
-            Ok(ShapeFact::Tensor(b))
+        (ShapeFact::Unknown, _) | (_, ShapeFact::Unknown) => {
+            Ok(ShapeFact::Unknown)
         }
-        (ShapeFact::Unknown, ShapeFact::Unknown) => Ok(ShapeFact::Unknown),
         (ShapeFact::NonTensor, _) | (_, ShapeFact::NonTensor) => {
             Err(format!("{label} expects tensor inputs"))
         }
@@ -471,7 +484,7 @@ fn infer_phi(
 
 fn unify_shape(current: ShapeFact, next: ShapeFact) -> Result<ShapeFact, String> {
     match (current, next) {
-        (ShapeFact::Unknown, x) | (x, ShapeFact::Unknown) => Ok(x),
+        (ShapeFact::Unknown, _) | (_, ShapeFact::Unknown) => Ok(ShapeFact::Unknown),
         (ShapeFact::NonTensor, ShapeFact::NonTensor) => Ok(ShapeFact::NonTensor),
         (ShapeFact::Tensor(a), ShapeFact::Tensor(b)) => {
             if a == b {

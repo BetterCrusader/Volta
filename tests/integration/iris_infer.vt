@@ -1,0 +1,8 @@
+// Test inference execution on real data
+model iris_net
+    layers 4 8 3
+    activation "softmax"
+
+// Read the iris dataset and just run a forward pass
+// This validates load_csv_inputs_only and exec_infer_stmt
+infer iris_net on "tests/data/iris.csv" as "out.csv"

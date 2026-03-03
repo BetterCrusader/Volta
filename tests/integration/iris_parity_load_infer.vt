@@ -1,0 +1,7 @@
+model iris_net
+    layers 4 8 3
+    activation "softmax"
+
+load iris_net as "tests/data/iris_model.vt"
+
+infer iris_net on "tests/data/iris.csv" as "tests/data/out.csv"

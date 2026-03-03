@@ -89,6 +89,7 @@ fn fold_tensor_op(op: &Op, known_tensors: &[Option<Tensor>]) -> Option<Op> {
                 tensor = match op {
                     ElementwiseUnaryOp::Neg => tensor.scale(-1.0).ok()?,
                     ElementwiseUnaryOp::Relu => tensor.relu().ok()?,
+                    ElementwiseUnaryOp::LeakyRelu(_) => return None,
                 };
             }
             const_tensor_op(tensor)
@@ -142,7 +143,8 @@ fn fold_tensor_op(op: &Op, known_tensors: &[Option<Tensor>]) -> Option<Op> {
         | Op::Input(_)
         | Op::Output(_)
         | Op::Phi(_)
-        | Op::Removed => None,
+        | Op::Removed
+        | Op::SoftmaxCrossEntropyLossFromLogits { .. } => None,
     }
 }
 

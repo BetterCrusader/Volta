@@ -1,0 +1,16 @@
+model iris_net
+    layers 4 8 3
+    seed 42
+    activation relu
+    optimizer sgd
+
+dataset iris_data
+    source "tests/data/iris.csv"
+    batch 4
+    val_split 0.2
+
+train iris_net on iris_data
+    epochs 50
+    lr 0.05
+
+save iris_net as "tests/data/iris_checkpoint.vt"

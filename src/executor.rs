@@ -8,6 +8,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::{BinaryOp, Expr, Program, Property, Span, Stmt};
+use crate::ir::tensor::Tensor;
 use crate::autopilot::{
     AutopilotContext, AutopilotEngine, DatasetAutopilotInput, ModelAutopilotInput,
     TrainAutopilotInput,
@@ -51,6 +52,10 @@ pub struct ModelState {
     pub precision: Option<String>,
     /// Optional memory layout tag, e.g. `"pinned"`.
     pub memory: Option<String>,
+    /// Optional random seed for deterministic initialization and shuffling.
+    pub seed: Option<i64>,
+    /// Trained weights, populated after a successful `train` call.
+    pub weights: Option<std::collections::HashMap<String, crate::ir::tensor::Tensor>>,
     /// Total number of epochs this model has been trained for across all `train` calls.
     pub trained_epochs: i64,
 }
@@ -62,6 +67,14 @@ pub struct DatasetState {
     pub batch: Option<i64>,
     /// Whether to shuffle the dataset before each epoch, if specified.
     pub shuffle: Option<bool>,
+    /// The source CSV file path for this dataset.
+    pub source: Option<String>,
+    /// The fraction of data to reserve for validation (e.g. 0.2).
+    pub val_split: Option<f64>,
+    /// 0-based column index of the class label (enables one-hot auto-encoding).
+    pub label_col: Option<usize>,
+    /// Number of output classes; required when `label_col` is set.
+    pub num_classes: Option<usize>,
 }
 
 /// A runtime error produced during execution of a Volta program.
@@ -281,15 +294,59 @@ impl Executor {
                 props,
                 span,
             } => self.exec_train_stmt(model, data, props, *span)?,
+            Stmt::Infer {
+                model,
+                input_csv,
+                out_csv,
+                span,
+            } => {
+                self.exec_infer_stmt(model, input_csv, out_csv, *span)?;
+            }
             Stmt::Save { model, path, span } => {
-                if !self.runtime.models.contains_key(model) {
-                    return Err(Self::error_with_hint(
+                let model_state = self.runtime.models.get(model).ok_or_else(|| {
+                    Self::error_with_hint(
                         format!("Undefined model: '{model}'"),
                         *span,
                         "Define the model before saving it in this run.".to_string(),
-                    ));
+                    )
+                })?;
+                let weights = model_state.weights.clone().ok_or_else(|| {
+                    Self::error(
+                        format!("Model '{model}' has no trained weights to save. Train it first."),
+                        *span,
+                    )
+                })?;
+
+                // Versioned binary format: magic + version + model name + weights list
+                let mut buf: Vec<u8> = Vec::new();
+                buf.extend_from_slice(b"VOLT");           // magic
+                buf.extend_from_slice(&1u32.to_le_bytes()); // format version
+                let name_bytes = model.as_bytes();
+                buf.extend_from_slice(&(name_bytes.len() as u32).to_le_bytes());
+                buf.extend_from_slice(name_bytes);
+
+                let entries: Vec<(&String, &Vec<f32>, &Vec<usize>)> =
+                    weights.iter().map(|(k, t)| (k, &t.data, &t.shape)).collect();
+                let n = entries.len() as u32;
+                buf.extend_from_slice(&n.to_le_bytes());
+                for (param_name, data, shape) in &entries {
+                    let kb = param_name.as_bytes();
+                    buf.extend_from_slice(&(kb.len() as u32).to_le_bytes());
+                    buf.extend_from_slice(kb);
+                    buf.extend_from_slice(&(shape.len() as u32).to_le_bytes());
+                    for &d in shape.iter() {
+                        buf.extend_from_slice(&(d as u32).to_le_bytes());
+                    }
+                    buf.extend_from_slice(&(data.len() as u32).to_le_bytes());
+                    for &f in data.iter() {
+                        buf.extend_from_slice(&f.to_le_bytes());
+                    }
                 }
-                println!("Saving model '{model}' to {path}");
+
+                std::fs::write(path, &buf).map_err(|e| {
+                    Self::error(format!("Failed to save model to '{path}': {e}"), *span)
+                })?;
+                println!("Saved model '{model}' → '{path}' ({} parameters)", entries.len());
             }
             Stmt::Load { model, path, span } => {
                 if !self.runtime.models.contains_key(model) {
@@ -299,7 +356,64 @@ impl Executor {
                         "Declare the model name first, then load weights into it.".to_string(),
                     ));
                 }
-                println!("Loading model '{model}' from {path}");
+                let buf = std::fs::read(path).map_err(|e| {
+                    Self::error(format!("Failed to read checkpoint '{path}': {e}"), *span)
+                })?;
+                if buf.len() < 8 || &buf[0..4] != b"VOLT" {
+                    return Err(Self::error(
+                        format!("File '{path}' is not a valid Volta checkpoint (bad magic)."),
+                        *span,
+                    ));
+                }
+                let version = u32::from_le_bytes(buf[4..8].try_into().unwrap());
+                if version != 1 {
+                    return Err(Self::error(
+                        format!("Checkpoint version {version} is not supported (expected 1)."),
+                        *span,
+                    ));
+                }
+                let mut pos = 8usize;
+                let read_u32 = |p: &mut usize, b: &[u8]| -> u32 {
+                    let v = u32::from_le_bytes(b[*p..*p + 4].try_into().unwrap());
+                    *p += 4;
+                    v
+                };
+                let read_str = |p: &mut usize, b: &[u8]| -> String {
+                    let len = u32::from_le_bytes(b[*p..*p + 4].try_into().unwrap()) as usize;
+                    *p += 4;
+                    let s = String::from_utf8_lossy(&b[*p..*p + len]).to_string();
+                    *p += len;
+                    s
+                };
+                let _saved_model_name = read_str(&mut pos, &buf);
+                let n_params = read_u32(&mut pos, &buf) as usize;
+                let mut loaded: std::collections::HashMap<String, crate::ir::tensor::Tensor> =
+                    std::collections::HashMap::with_capacity(n_params);
+                for _ in 0..n_params {
+                    let param_name = read_str(&mut pos, &buf);
+                    let ndim = read_u32(&mut pos, &buf) as usize;
+                    let mut shape = Vec::with_capacity(ndim);
+                    for _ in 0..ndim {
+                        shape.push(read_u32(&mut pos, &buf) as usize);
+                    }
+                    let nvals = read_u32(&mut pos, &buf) as usize;
+                    let mut data = Vec::with_capacity(nvals);
+                    for _ in 0..nvals {
+                        data.push(f32::from_le_bytes(buf[pos..pos + 4].try_into().unwrap()));
+                        pos += 4;
+                    }
+                    let tensor = crate::ir::tensor::Tensor::new(shape, data).map_err(|e| {
+                        Self::error(format!("Bad tensor in checkpoint: {}", e.message), *span)
+                    })?;
+                    loaded.insert(param_name, tensor);
+                }
+
+                let ms = self.runtime.models.get_mut(model).unwrap();
+                ms.weights = Some(loaded.clone());
+                println!(
+                    "Loaded model '{model}' from '{path}' ({} parameters)",
+                    loaded.len()
+                );
             }
         }
 
@@ -331,6 +445,156 @@ impl Executor {
             self.exec_block_with_scope(branch)?;
         }
 
+        Ok(())
+    }
+
+    fn exec_infer_stmt(
+        &mut self,
+        model_name: &str,
+        input_csv: &str,
+        out_csv: &str,
+        span: Span,
+    ) -> Result<(), RuntimeError> {
+        let model_state = self.runtime.models.get(model_name).ok_or_else(|| {
+            Self::error_with_hint(
+                format!("Undefined model: '{model_name}'"),
+                span,
+                format!("Declare model '{model_name}' before passing it to infer."),
+            )
+        })?;
+
+        if model_state.weights.is_none() {
+            return Err(Self::error(
+                format!("Model '{model_name}' has no weights. Train or load it before inference."),
+                span,
+            ));
+        }
+
+        let in_size = *model_state.layers.first().unwrap() as usize;
+
+        // 1. Load CSV data (inputs only, no targets, batch_size=32 as default inference chunk)
+        let batch_size = 32;
+        let iter_batches = self.load_csv_inputs_only(input_csv, batch_size, in_size, span)?;
+
+        // 2. Build inference graph
+        let mut lower_ctx = crate::ir::lowering::LoweringContext::new();
+        let input_node = lower_ctx.push_op(crate::ir::Op::Input("input".to_string())).unwrap();
+
+        // Lower the forward pass (without loss, but with activation)
+        let _logits_node = lower_ctx.lower_model_to_graph(
+            &model_state.layers,
+            &model_state.activation,
+            input_node,
+            true,
+        );
+
+        let mut graph = lower_ctx.into_graph();
+
+        // We bind dynamic shape for inference to handle the last partial batch
+        graph.bind_input_shape("input", vec![0, in_size]);
+
+        for w in model_state.layers.windows(2) {
+            let in_f = w[0] as usize;
+            let out_f = w[1] as usize;
+            graph.bind_parameter_shape(
+                &format!("weight_{in_f}_{out_f}"),
+                vec![in_f, out_f],
+            );
+            graph.bind_parameter_shape(&format!("bias_{out_f}"), vec![1, out_f]);
+        }
+
+        let execution_plan = crate::ir::execution_plan::build_execution_plan(
+            &graph,
+            &std::collections::HashSet::new(),
+        )
+        .map_err(|e| Self::error(format!("Execution plan error: {}", e.message), span))?;
+
+        let loaded_weights = model_state.weights.clone().unwrap();
+
+        let mut all_predictions: Vec<Vec<f32>> = Vec::new();
+
+        println!("Running inference on {} batches...", iter_batches.len());
+        let backend = crate::ir::backend::CpuBackend;
+
+        for batch_tensor in iter_batches {
+            let actual_batch_size = batch_tensor.shape[0];
+
+            let mut inputs = std::collections::HashMap::new();
+            inputs.insert("input".to_string(), batch_tensor.clone());
+
+            let mut context = crate::ir::interpreter::ExecutionContext {
+                inputs: std::collections::HashMap::new(),
+                parameters: std::collections::HashMap::new(),
+            };
+
+            // Populate parameters
+            for (k, tensor) in &loaded_weights {
+                context.parameters.insert(k.clone(), crate::ir::RuntimeValue::Tensor(std::sync::Arc::new(tensor.clone())));
+            }
+
+            // Populate inputs
+            for (k, tensor) in inputs {
+                context.inputs.insert(k, crate::ir::RuntimeValue::Tensor(std::sync::Arc::new(tensor)));
+            }
+
+            // Rebind the actual shape for this specific execution
+            let dynamic_plan = execution_plan.clone();
+            // dynamic_plan does not have a graph, the graph is what maps strings to values.
+            // We'll rely on interpreter ignoring dynamic shape changes mid-flight and trusting the buffer size.
+
+            // Execute terminal backend node
+            let result_tensors = crate::ir::execute_terminal_with_backend(
+                &graph,
+                &dynamic_plan,
+                &dynamic_plan.schedule.ordered_nodes,
+                &backend,
+                &context,
+            ).map_err(|e| {
+                Self::error(format!("Inference execution failed: {}", e.message), span)
+            })?;
+            
+            let Some(out_runtime) = result_tensors else {
+                return Err(Self::error("Inference did not return a tensor".to_string(), span));
+            };
+
+            let crate::ir::RuntimeValue::Tensor(out_tensor) = out_runtime else {
+                return Err(Self::error("Inference did not return a tensor".to_string(), span));
+            };
+
+            for i in 0..actual_batch_size {
+                let start = i * out_tensor.shape[1];
+                let end = start + out_tensor.shape[1];
+                let row = out_tensor.data[start..end].to_vec();
+                all_predictions.push(row);
+            }
+        }
+
+        // 4. Save to CSV
+        let mut wtr = csv::Writer::from_path(out_csv).map_err(|e| {
+            Self::error(format!("Failed to open output CSV '{out_csv}': {e}"), span)
+        })?;
+
+        // Write header (pred_0, pred_1, ...)
+        if !all_predictions.is_empty() {
+            let num_classes = all_predictions[0].len();
+            let headers: Vec<String> = (0..num_classes).map(|i| format!("pred_{i}")).collect();
+            wtr.write_record(&headers).map_err(|e| {
+                Self::error(format!("Failed to write CSV header: {e}"), span)
+            })?;
+        }
+
+        for row in all_predictions {
+            let string_row: Vec<String> = row.iter().map(|v| v.to_string()).collect();
+            wtr.write_record(&string_row).map_err(|e| {
+                Self::error(format!("Failed to write CSV row: {e}"), span)
+            })?;
+        }
+
+        wtr.flush().map_err(|e| {
+            Self::error(format!("Failed to flush CSV: {e}"), span)
+        })?;
+
+        println!("Inference complete. Results saved to '{}'", out_csv);
         Ok(())
     }
 
@@ -392,13 +656,6 @@ impl Executor {
             gpu_available: detect_gpu_available(),
         });
 
-        model_state.trained_epochs = model_state
-            .trained_epochs
-            .checked_add(resolved.epochs)
-            .ok_or_else(|| {
-                Self::error("Math overflow: trained_epochs overflow".to_string(), span)
-            })?;
-
         println!("Auto configuration:");
         for decision in &resolved.decisions {
             println!(
@@ -419,7 +676,505 @@ impl Executor {
             resolved.precision
         );
 
+        // --- AST to IR Lowering & Training ---
+
+        use crate::ir::lowering::LoweringContext;
+        use crate::ir::optimizer::*;
+        use crate::ir::tensor::Tensor;
+        use crate::ir::train::{TrainConfig, TrainSample, train_graph_with_backend};
+        use crate::ir::{Backend, CpuBackend, CudaBackend, Op};
+
+        let mut lower_ctx = LoweringContext::new();
+
+        // 1. Inputs and Labels for Training Graph
+        let input_node = lower_ctx.push_op(Op::Input("input".to_string())).unwrap();
+        let target_node = lower_ctx.push_op(Op::Input("target".to_string())).unwrap();
+
+        let logits = lower_ctx.lower_model_to_graph(
+            &model_state.layers,
+            &model_state.activation,
+            input_node,
+            false,
+        );
+
+        // 3. Loss node
+        let is_classification = model_state.activation == "softmax";
+        let loss_value = if is_classification {
+            lower_ctx.build_softmax_cross_entropy_loss(logits, target_node)
+        } else {
+            lower_ctx.build_mse_loss(logits, target_node)
+        };
+
+        let mut graph = lower_ctx.into_graph();
+
+        let in_size = *model_state.layers.first().unwrap() as usize;
+        let out_size = *model_state.layers.last().unwrap() as usize;
+        let batch_size = resolved.batch as usize;
+
+        // 3.5 Bind shapes for Autograd & Shape Inference
+        graph.bind_input_shape("input", vec![batch_size, in_size]);
+        graph.bind_input_shape("target", vec![batch_size, out_size]);
+
+        for w in model_state.layers.windows(2) {
+            let in_features = w[0] as usize;
+            let out_features = w[1] as usize;
+            graph.bind_parameter_shape(
+                &format!("weight_{in_features}_{out_features}"),
+                vec![in_features, out_features],
+            );
+            graph.bind_parameter_shape(&format!("bias_{out_features}"), vec![1, out_features]);
+        }
+
+        // 4. Initialize random weights using Xavier/Glorot uniform
+        let mut initial_parameters = std::collections::HashMap::new();
+
+        use rand::SeedableRng;
+        use rand::distr::{Distribution, Uniform};
+        let global_seed = model_state.seed.unwrap_or(42) as u64;
+        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(global_seed);
+        let unit_uniform = Uniform::new(-1.0f32, 1.0f32).unwrap();
+
+        for w in model_state.layers.windows(2) {
+            let in_features = w[0] as usize;
+            let out_features = w[1] as usize;
+
+            // Weights – Xavier/Glorot uniform
+            let weight_name = format!("weight_{in_features}_{out_features}");
+            let weight_size = in_features * out_features;
+            let weight_limit = (6.0_f32 / (in_features as f32 + out_features as f32)).sqrt();
+            let w_dist = Uniform::new(-weight_limit, weight_limit).unwrap();
+            let weight_data: Vec<f32> = (0..weight_size).map(|_| w_dist.sample(&mut rng)).collect();
+            initial_parameters.insert(
+                weight_name,
+                Tensor::new(vec![in_features, out_features], weight_data).unwrap(),
+            );
+
+            // Bias (zeros)
+            let bias_name = format!("bias_{out_features}");
+            let bias_data = vec![0.0_f32; out_features];
+            initial_parameters.insert(
+                bias_name,
+                Tensor::new(vec![1, out_features], bias_data).unwrap(),
+            );
+        }
+
+        let (dataset, val_dataset) = if let Some(source_path) = &dataset_state.source {
+            // Resolve effective output size: num_classes overrides out_size in label-col mode.
+            let effective_out = if let Some(nc) = dataset_state.num_classes {
+                if nc != out_size {
+                    return Err(Self::error(
+                        format!(
+                            "dataset.num_classes ({nc}) must match model output layer ({out_size}). \
+                             Fix 'layers' last value or 'num_classes'."
+                        ),
+                        span,
+                    ));
+                }
+                nc
+            } else {
+                out_size
+            };
+            self.load_csv_dataset(
+                source_path,
+                batch_size,
+                in_size,
+                effective_out,
+                dataset_state.val_split,
+                dataset_state.shuffle.unwrap_or(false),
+                global_seed,
+                dataset_state.label_col,
+                span,
+            )?
+        } else {
+            // 5. Generate a synthetic dataset block
+            let input_data: Vec<f32> = (0..batch_size * in_size).map(|_| unit_uniform.sample(&mut rng)).collect();
+            let _ = input_data.len(); // suppress unused warning
+            let target_data: Vec<f32> = (0..batch_size * out_size).map(|_| unit_uniform.sample(&mut rng)).collect();
+            let _ = target_data.len();
+
+            let sample = TrainSample {
+                inputs: [
+                    (
+                        "input".to_string(),
+                        Tensor::new(vec![batch_size, in_size], input_data).unwrap(),
+                    ),
+                    (
+                        "target".to_string(),
+                        Tensor::new(vec![batch_size, out_size], target_data).unwrap(),
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+            };
+
+            // For simulation, we'll train over exactly 1 sample over N epochs
+            (vec![sample], vec![])
+        };
+
+        // 6. Optimizer configuration
+        let mut opt_config = OptimizerConfig::Sgd {
+            lr: resolved.lr as f32,
+        };
+        if resolved.optimizer == "adam" {
+            opt_config = OptimizerConfig::Adam {
+                lr: resolved.lr as f32,
+                beta1: 0.9,
+                beta2: 0.999,
+                epsilon: 1e-8,
+            };
+        }
+
+        let train_config = TrainConfig {
+            epochs: resolved.epochs as usize,
+            optimizer: opt_config,
+        };
+
+        // 7. Select appropriate runtime execution backend
+        let (cpu, cuda);
+        let dyn_backend: &dyn Backend = if resolved.device == "cuda" {
+            cuda = CudaBackend;
+            &cuda
+        } else {
+            cpu = CpuBackend;
+            &cpu
+        };
+
+        // 8. Execute Backend Training Loop!
+        let logits_opt = if is_classification { Some(logits) } else { None };
+        match train_graph_with_backend(
+            &graph,
+            loss_value,
+            logits_opt,
+            initial_parameters,
+            &dataset,
+            &val_dataset,
+            &train_config,
+            dyn_backend,
+        ) {
+            Ok(result) => {
+                if let Some(val_loss) = result.final_val_loss {
+                    println!("Training completed. Final loss: {:.4}, Val loss: {:.4}", result.final_loss, val_loss);
+                } else {
+                    println!("Training completed. Final loss: {:.4}", result.final_loss);
+                }
+                // Store the trained weights in the model state for later Save/Load
+                if let Some(ms) = self.runtime.models.get_mut(model) {
+                    ms.weights = Some(result.final_parameters);
+                    ms.trained_epochs += resolved.epochs;
+                }
+            }
+            Err(e) => {
+                return Err(Self::error(
+                    format!("Training failed in graph execution: {}", e.message),
+                    span,
+                ));
+            }
+        }
+
         Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn load_csv_dataset(
+        &self,
+        source_path: &str,
+        batch_size: usize,
+        in_size: usize,
+        out_size: usize,
+        val_split: Option<f64>,
+        shuffle: bool,
+        seed: u64,
+        label_col: Option<usize>,
+        span: Span,
+    ) -> Result<(Vec<crate::ir::train::TrainSample>, Vec<crate::ir::train::TrainSample>), RuntimeError> {
+        let mut rdr = csv::ReaderBuilder::new()
+            .has_headers(true)
+            .from_path(source_path)
+            .map_err(|e| Self::error(format!("Failed to open CSV dataset: {e}"), span))?;
+
+        let mut samples = Vec::new();
+        for (i, result) in rdr.records().enumerate() {
+            let record = result.map_err(|e| Self::error(format!("CSV parsing error: {e}"), span))?;
+
+            let mut inputs = Vec::with_capacity(in_size);
+            let mut targets = Vec::with_capacity(out_size);
+
+            if let Some(lc) = label_col {
+                // ── label_col mode: one integer class index → one-hot ──────────────
+                if record.len() <= lc {
+                    return Err(Self::error(
+                        format!(
+                            "CSV row {} has {} columns but label_col={lc} is out of bounds.",
+                            i + 2, record.len()
+                        ),
+                        span,
+                    ));
+                }
+                // Features = all columns except label_col, left-to-right
+                let feature_cols = (0..record.len()).filter(|&c| c != lc);
+                let mut taken = 0usize;
+                for col in feature_cols {
+                    if taken == in_size { break; }
+                    let cell = record[col].trim();
+                    let val: f32 = cell.parse().map_err(|_| {
+                        Self::error(format!("Не вдалося перетворити значення '{cell}' на число у рядку {} (колонка {}).", i + 2, col + 1), span)
+                    })?;
+                    inputs.push(val);
+                    taken += 1;
+                }
+                if taken < in_size {
+                    return Err(Self::error(
+                        format!(
+                            "CSV row {} has only {taken} feature columns (excluding label), but model expects {in_size}.",
+                            i + 2
+                        ),
+                        span,
+                    ));
+                }
+                // Parse label
+                let cell = record[lc].trim();
+                if cell.is_empty() {
+                    return Err(Self::error(format!("Empty label at row {} (column {}).", i + 2, lc + 1), span));
+                }
+                let label_f: f32 = cell.parse().map_err(|_| {
+                    Self::error(format!("Invalid label '{cell}' at row {} (column {}). Expected an integer class index.", i + 2, lc + 1), span)
+                })?;
+                let label_i = label_f.round();
+                if label_i < 0.0 || label_i >= out_size as f32 {
+                    return Err(Self::error(
+                        format!("Label {label_i} at row {} is out of range [0, {out_size}). Set 'num_classes' correctly.", i + 2),
+                        span,
+                    ));
+                }
+                let mut one_hot = vec![0.0f32; out_size];
+                one_hot[label_i as usize] = 1.0;
+                targets.extend_from_slice(&one_hot);
+            } else {
+                // ── legacy mode: last out_size columns are float targets ────────────
+                if record.len() != in_size + out_size {
+                    return Err(Self::error(
+                        format!(
+                            "CSV data shape mismatch at row {}. Model requires {} columns ({} inputs + {} targets), but row has {}.",
+                            i + 2, in_size + out_size, in_size, out_size, record.len()
+                        ),
+                        span,
+                    ));
+                }
+                for j in 0..in_size {
+                    let val: f32 = record[j].trim().parse().map_err(|_| {
+                        Self::error(format!("Не вдалося перетворити значення '{}' на число у рядку {} (колонка {}).", &record[j], i + 2, j + 1), span)
+                    })?;
+                    inputs.push(val);
+                }
+                for j in 0..out_size {
+                    let val: f32 = record[in_size + j].trim().parse().map_err(|_| {
+                        Self::error(format!("Не вдалося перетворити значення '{}' на число у рядку {} (колонка {}).", &record[in_size + j], i + 2, in_size + j + 1), span)
+                    })?;
+                    targets.push(val);
+                }
+            }
+            samples.push((inputs, targets));
+        }
+
+        let total_samples = samples.len();
+        if total_samples == 0 {
+            return Err(Self::error("CSV dataset is empty".to_string(), span));
+        }
+
+        if shuffle {
+            use rand::SeedableRng;
+            use rand::seq::SliceRandom;
+            let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
+            samples.shuffle(&mut rng);
+        }
+
+        let train_samples_count = if let Some(ratio) = val_split {
+            let val_count = (total_samples as f64 * ratio).floor() as usize;
+            total_samples.saturating_sub(val_count)
+        } else {
+            total_samples
+        };
+
+        let train_samples = &samples[0..train_samples_count];
+        let val_samples = &samples[train_samples_count..];
+
+        // Train: DropLast — only full batches for stable gradients
+        #[allow(clippy::needless_range_loop)]
+        let make_train_batches = |data: &[(Vec<f32>, Vec<f32>)]| -> Vec<crate::ir::train::TrainSample> {
+            let num_batches = data.len() / batch_size;
+            let mut batches = Vec::with_capacity(num_batches);
+            for b in 0..num_batches {
+                let start = b * batch_size;
+                let end = start + batch_size;
+                let mut batch_inputs = Vec::with_capacity(batch_size * in_size);
+                let mut batch_targets = Vec::with_capacity(batch_size * out_size);
+                for k in start..end {
+                    batch_inputs.extend_from_slice(&data[k].0);
+                    batch_targets.extend_from_slice(&data[k].1);
+                }
+                let in_tensor = crate::ir::tensor::Tensor::new(vec![batch_size, in_size], batch_inputs).unwrap();
+                let out_tensor = crate::ir::tensor::Tensor::new(vec![batch_size, out_size], batch_targets).unwrap();
+                batches.push(crate::ir::train::TrainSample {
+                    inputs: [
+                        ("input".to_string(), in_tensor),
+                        ("target".to_string(), out_tensor),
+                    ].into_iter().collect(),
+                });
+            }
+            batches
+        };
+
+        // Val: keep remainder — every sample counts, even partial last batch
+        #[allow(clippy::needless_range_loop)]
+        let make_val_batches = |data: &[(Vec<f32>, Vec<f32>)]| -> Vec<crate::ir::train::TrainSample> {
+            if data.is_empty() {
+                return Vec::new();
+            }
+            let mut batches = Vec::new();
+            let mut offset = 0;
+            while offset < data.len() {
+                let actual = (data.len() - offset).min(batch_size);
+                let end = offset + actual;
+                let mut batch_inputs = Vec::with_capacity(actual * in_size);
+                let mut batch_targets = Vec::with_capacity(actual * out_size);
+                for k in offset..end {
+                    batch_inputs.extend_from_slice(&data[k].0);
+                    batch_targets.extend_from_slice(&data[k].1);
+                }
+                let in_tensor = crate::ir::tensor::Tensor::new(vec![actual, in_size], batch_inputs).unwrap();
+                let out_tensor = crate::ir::tensor::Tensor::new(vec![actual, out_size], batch_targets).unwrap();
+                batches.push(crate::ir::train::TrainSample {
+                    inputs: [
+                        ("input".to_string(), in_tensor),
+                        ("target".to_string(), out_tensor),
+                    ].into_iter().collect(),
+                });
+                offset = end;
+            }
+            batches
+        };
+
+        let train_batches = make_train_batches(train_samples);
+        let val_batches = make_val_batches(val_samples);
+
+        if train_batches.is_empty() {
+             return Err(Self::error(
+                 format!("Train set has {} samples, which is fewer than batch size {}", train_samples.len(), batch_size),
+                 span,
+             ));
+        }
+
+        if val_samples.is_empty() {
+            println!(
+                "Loaded {:<4} total samples from '{}'. Train: {} batches. Validation skipped: no samples after split.",
+                total_samples, source_path, train_batches.len()
+            );
+        } else {
+            let partial = if val_samples.len() % batch_size != 0 { " (incl. partial)" } else { "" };
+            println!(
+                "Loaded {:<4} total samples from '{}'. Train: {} batches, Val: {} batches{}.",
+                total_samples, source_path, train_batches.len(), val_batches.len(), partial
+            );
+        }
+
+        Ok((train_batches, val_batches))
+    }
+
+    fn load_csv_inputs_only(
+        &self,
+        path: &str,
+        batch_size: usize,
+        in_features: usize,
+        span: Span,
+    ) -> Result<Vec<Tensor>, RuntimeError> {
+        let mut rdr = csv::ReaderBuilder::new()
+            .has_headers(true)
+            .from_path(path)
+            .map_err(|e| {
+                Self::error(
+                    format!("Failed to open inference CSV dataset '{path}': {e}"),
+                    span,
+                )
+            })?;
+
+        let mut all_inputs = Vec::new();
+
+        for (row_idx, result) in rdr.records().enumerate() {
+            let record = match result {
+                Ok(r) => r,
+                Err(e) => {
+                    return Err(Self::error(
+                        format!("Failed to read CSV row {row_idx}: {e}"),
+                        span,
+                    ));
+                }
+            };
+
+            // Skip empty rows
+            if record.is_empty() {
+                continue;
+            }
+
+            if record.len() < in_features {
+                return Err(Self::error(
+                    format!(
+                        "Inference CSV row {} has {} columns, expected at least {} input features",
+                        row_idx + 1,
+                        record.len(),
+                        in_features
+                    ),
+                    span,
+                ));
+            }
+
+            for col_idx in 0..in_features {
+                let cell = &record[col_idx];
+                let val: f32 = cell.trim().parse().map_err(|_| {
+                    Self::error(
+                        format!(
+                            "Invalid float in inference CSV at row {}, column {}: '{}'",
+                            row_idx + 1,
+                            col_idx + 1,
+                            cell
+                        ),
+                        span,
+                    )
+                })?;
+                all_inputs.push(val);
+            }
+        }
+
+        let total_samples = all_inputs.len() / in_features;
+        if total_samples == 0 {
+            return Err(Self::error(
+                "Inference dataset is empty or invalid".to_string(),
+                span,
+            ));
+        }
+
+        let mut batches = Vec::new();
+        let mut offset = 0;
+
+        while offset < all_inputs.len() {
+            let remaining_samples = (all_inputs.len() - offset) / in_features;
+            let current_batch_size = remaining_samples.min(batch_size);
+
+            let chunk_size = current_batch_size * in_features;
+            let chunk_data = all_inputs[offset..offset + chunk_size].to_vec();
+
+            let batch_tensor = Tensor::new(vec![current_batch_size, in_features], chunk_data)
+                .map_err(|e| {
+                    Self::error(
+                        format!("Failed to create inference batch tensor: {:?}", e),
+                        span,
+                    )
+                })?;
+
+            batches.push(batch_tensor);
+            offset += chunk_size;
+        }
+
+        Ok(batches)
     }
 
     fn build_model_state(
@@ -461,6 +1216,19 @@ impl Executor {
         let precision = self.expect_single_symbol_optional(props, "precision", span)?;
         let memory = self.expect_single_symbol_optional(props, "memory", span)?;
 
+        let seed = match Self::find_prop(props, "seed") {
+            Some(values) => {
+                if values.len() != 1 {
+                    return Err(Self::error(
+                        "model.seed expects exactly one value".to_string(),
+                        span,
+                    ));
+                }
+                Some(self.expect_int_value(&values[0], "model.seed")?)
+            }
+            None => None,
+        };
+
         let _ = model_name;
 
         Ok(ModelState {
@@ -470,6 +1238,8 @@ impl Executor {
             optimizer_lr,
             precision,
             memory,
+            seed,
+            weights: None,
             trained_epochs: 0,
         })
     }
@@ -508,7 +1278,75 @@ impl Executor {
             None => None,
         };
 
-        Ok(DatasetState { batch, shuffle })
+        let source = match Self::find_prop(props, "source") {
+            Some(values) => {
+                if values.len() != 1 {
+                    return Err(Self::error(
+                        "dataset.source expects exactly one string value".to_string(),
+                        span,
+                    ));
+                }
+                Some(self.expect_symbol_value(&values[0], "dataset.source")?)
+            }
+            None => None,
+        };
+
+        let val_split = match Self::find_prop(props, "val_split") {
+            Some(values) => {
+                if values.len() != 1 {
+                    return Err(Self::error(
+                        "dataset.val_split expects exactly one number value".to_string(),
+                        span,
+                    ));
+                }
+                let ratio = self.expect_float_value(&values[0], "dataset.val_split")?;
+                if !(0.0..=1.0).contains(&ratio) {
+                    return Err(Self::error(
+                        "dataset.val_split must be between 0.0 and 1.0".to_string(),
+                        span,
+                    ));
+                }
+                Some(ratio)
+            }
+            None => None,
+        };
+
+        let label_col = match Self::find_prop(props, "label_col") {
+            Some(values) => {
+                if values.len() != 1 {
+                    return Err(Self::error("dataset.label_col expects one integer.".into(), span));
+                }
+                let v = self.expect_int_value(&values[0], "dataset.label_col")?;
+                if v < 0 {
+                    return Err(Self::error("dataset.label_col must be >= 0.".into(), span));
+                }
+                Some(v as usize)
+            }
+            None => None,
+        };
+
+        let num_classes = match Self::find_prop(props, "num_classes") {
+            Some(values) => {
+                if values.len() != 1 {
+                    return Err(Self::error("dataset.num_classes expects one integer.".into(), span));
+                }
+                let v = self.expect_int_value(&values[0], "dataset.num_classes")?;
+                if v < 2 {
+                    return Err(Self::error("dataset.num_classes must be >= 2.".into(), span));
+                }
+                Some(v as usize)
+            }
+            None => None,
+        };
+
+        if label_col.is_some() && num_classes.is_none() {
+            return Err(Self::error(
+                "'num_classes' is required when 'label_col' is set.".into(),
+                span,
+            ));
+        }
+
+        Ok(DatasetState { batch, shuffle, source, val_split, label_col, num_classes })
     }
 
     #[allow(clippy::too_many_lines)]
@@ -875,6 +1713,20 @@ impl Executor {
             other => Err(Self::error(
                 format!(
                     "Invalid property: {label} expects int, found {}",
+                    other.type_name()
+                ),
+                expr.span(),
+            )),
+        }
+    }
+
+    fn expect_float_value(&mut self, expr: &Expr, label: &str) -> Result<f64, RuntimeError> {
+        match self.eval_expr(expr)? {
+            Value::Float(v) => Ok(v),
+            Value::Int(v) => Ok(v as f64),
+            other => Err(Self::error(
+                format!(
+                    "Invalid property: {label} expects float, found {}",
                     other.type_name()
                 ),
                 expr.span(),

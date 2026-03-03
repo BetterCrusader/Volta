@@ -226,6 +226,12 @@ fn infer_type_for_op(
             Ok(current)
         }
         Op::Removed => Ok(ValueType::Unknown),
+        Op::SoftmaxCrossEntropyLossFromLogits { logits, targets } => {
+            let left = type_of(*logits, value_types);
+            let right = type_of(*targets, value_types);
+            let same = require_same_strict(left, right, node_id, "softmax cross entropy")?;
+            require_tensor_or_unknown(same, node_id, "softmax cross entropy")
+        }
     }
 }
 
