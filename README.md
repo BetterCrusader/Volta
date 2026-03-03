@@ -155,7 +155,7 @@ volta run <file.vt>          # Execute script
 volta check <file.vt>         # Check syntax without execution
 volta info <file.vt>          # Show model info
 volta doctor                  # Environment diagnostics
-volta init [dir]             # Initialize new project
+volta init [dir]              # Initialize new project
 ```
 
 ---
@@ -173,7 +173,7 @@ src/
 │   ├── tensor.rs    # Tensor mathematics
 │   ├── autograd.rs  # Automatic gradients
 │   ├── optimizer.rs # Optimizers (SGD, Adam)
-│   ├── train.rs    # Training loop
+│   ├── train.rs     # Training loop
 │   ├── scheduler.rs # Scheduler
 │   └── cuda/        # CUDA backend
 └── main.rs          # CLI
