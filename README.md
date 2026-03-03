@@ -1,47 +1,47 @@
 # Volta
 
-**Вольта** — це експериментальний ML-компілятор та рантайм, написаний на Rust, де головний пріоритет — це **детермінованість**.
+**Volta** is an experimental, deterministic-first Machine Learning compiler and runtime written in Rust.
 
-Більшість сучасних ML-фреймворків оптимізовані перш за все для швидкості розробки та гнучкості. PyTorch, TensorFlow, JAX — усі вони дають тобі неймовірну свободу, але жертвують головним: **якщо ти запустиш один і той самий код двічі — ти не отримаєш ідентичний результат**. Плаваюча кома, порядок операцій, паралелізм, random seed — усе це впливає на вихід, і часто найменші зміни призводять до абсолютно інших чисел на виході.
+Most modern ML frameworks optimize primarily for developer velocity and flexibility. PyTorch, TensorFlow, JAX — they all give you incredible freedom, but they sacrifice the most important thing: **if you run the same code twice, you won't get the same result**. Floating-point arithmetic, operation ordering, parallelism, random seeds — all of these affect the output, and often the smallest changes lead to completely different numbers.
 
-Вольта — це спроба вирішити цю проблему. Тут **детермінованість** — це не побажання, не опція, а **контракт**. Однакові вхідні дані, однакова модель, однакові параметри — ти отримаєш **точно такий самий результат** до останнього біта.
-
----
-
-## Що всередині
-
-Вольта — це не просто бібліотека. Це повноцінний стек з власними компонентами, кожен з яких я писав з нуля:
-
-- **Лексер та парсер** — власна мова для опису моделей та датасетів (`.vt` файли). Ніякого Python, YAML чи JSON. Простий, лаконічний синтаксис, який легко читати і парсити.
-- **IR (Intermediate Representation)** — власне проміжне представлення графа обчислень. Граф будується явним чином, кожна операція — це окремий вузол, який можна проаналізувати, оптимізувати або перетворити.
-- **Оптимізації графа** — купа класичних оптимізацій: constant folding, dead code elimination, common subexpression elimination, algebraic simplification. Але головне — все це зроблено так, щоб не порушувати детермінованість.
-- **Autograd** — власна система автоматичного диференціювання. Будує backward graph окремо від forward, не мутуючи оригінальний граф.
-- **Scheduler** — планувальник виконання, який будує детерміновану послідовність операцій. Жодних випадкових порядків, жодних "оцінок" часу виконання — все наперед відомо.
-- **Trainer** — повноцінний цикл навчання з підтримкою SGD та Adam оптимізаторів, validation, logging, gradient checkpointing.
+Volta is an attempt to solve this problem. Here, **determinism** is not a wish, not an option — it's a **contract**. Same inputs, same model, same parameters — you get **exactly the same result** down to the last bit.
 
 ---
 
-## Бекенди
+## What's Inside
+
+Volta is not just a library. It's a full-blown stack with its own components, each written from scratch:
+
+- **Lexer & Parser** — a custom language for describing models and datasets (`.vt` files). No Python, no YAML, no JSON. Simple, concise syntax that's easy to read and parse.
+- **IR (Intermediate Representation)** — a custom intermediate representation of the computation graph. The graph is built explicitly, each operation is a separate node that can be analyzed, optimized, or transformed.
+- **Graph Optimizations** — a bunch of classic optimizations: constant folding, dead code elimination, common subexpression elimination, algebraic simplification. But most importantly — all of this is done in a way that doesn't break determinism.
+- **Autograd** — a custom automatic differentiation system. It builds the backward graph separately from the forward graph, without mutating the original graph.
+- **Scheduler** — an execution planner that builds a deterministic sequence of operations. No random orders, no "guesses" about execution time — everything is known in advance.
+- **Trainer** — a full training loop with support for SGD and Adam optimizers, validation, logging, and gradient checkpointing.
+
+---
+
+## Backends
 
 ### CPU Backend
 
-Повністю детермінований sequential виконання. Кожна операція виконується строго по порядку, жодного паралелізму, жодних race conditions. Результат можна передбачити з математичною точністю.
+Fully deterministic sequential execution. Each operation executes strictly in order, no parallelism, no race conditions. The result can be predicted with mathematical precision.
 
-Опціонально можна увімкнути багатопотоковість через `rayon`, але тоді **детермінованість на рівні бітів може бути порушена** через різний порядок операцій з плаваючою комою. Тому ця опція позначена як `unsafe` на рівні детермінованого контракту.
+Multi-threading can be optionally enabled via `rayon`, but then **bit-level determinism may be broken** due to different floating-point operation orders. This option is therefore marked as `unsafe` at the deterministic contract level.
 
 ### CUDA Backend
 
-GPU-прискорення через `cudarc`. Тут все набагато складніше, бо CUDA за своєю природою недетермінована. Але я зробив усе можливе:
+GPU acceleration via `cudarc`. This is much more complex because CUDA is inherently non-deterministic. But I've done everything possible:
 
-- Спеціальні кастомні ядра, які мінімізують недетермінованість.
-- Strict mode — якщо операція не може бути гарантовано детермінованою, Вольта просто відмовиться її виконувати, замість того щоб "тихо" використовувати недетермінований бекенд.
-- Determinism policy — можна вибирати рівень детермінованості: від "дозволити все" до "тільки перевірені операції".
+- Special custom kernels that minimize non-determinism.
+- **Strict mode** — if an operation cannot be guaranteed to be deterministic, Volta will simply refuse to execute it, instead of "quietly" using a non-deterministic backend.
+- **Determinism policy** — you can choose the level of determinism: from "allow everything" to "only verified operations".
 
 ---
 
-## Мова (.vt файли)
+## The Language (.vt files)
 
-Вольта має власну мову для опису моделей. Вона проста, читабельна, і головне — поєднує опис моделі, дані та тренування в одному місці:
+Volta has its own language for describing models. It's simple, readable, and most importantly — combines model description, data, and training in one place:
 
 ```vt
 lr 0.001
@@ -60,139 +60,139 @@ train brain on mnist
     device auto
 ```
 
-Ніяких класів, жодних Python-функцій, жодного OOP. Просто декларативний опис: ось модель, ось дані, ось параметри тренування.
+No classes, no Python functions, no OOP. Just declarative description: here's the model, here's the data, here are the training parameters.
 
-Підтримуються:
-- Лінійні шари (Dense/Linear)
+Supported:
+- Linear/Dense layers
 - Activation functions: ReLU, Sigmoid, Softmax, GELU
-- Оптимізатори: SGD, Adam
-- Датасети з CSV (з підтримкою split на train/val)
-- Save/Load моделей у власному бінарному форматі
-- Інференс з експортом результатів у CSV
-- Кастомні функції
-- Умовні конструкції (if/elif/else)
-- Цикли
+- Optimizers: SGD, Adam
+- CSV datasets (with train/val split support)
+- Save/Load models in custom binary format
+- Inference with CSV export
+- Custom functions
+- Conditional constructs (if/elif/else)
+- Loops
 
 ---
 
-## Тестування
+## Testing
 
-Вольта має понад **250 тестів**, які перевіряють:
+Volta has over **250 tests** that verify:
 
-- Парсинг та семантику мови
-- Оптимізації графа (чи не порушують вони семантику)
-- Правильність autograd (gradcheck — чи правильно рахуються градієнти)
-- Детермінованість (запускаємо 100 разів — отримуємо ідентичний результат)
-- CPU vs CUDA parity (чи дає GPU той самий результат, що і CPU)
-- Edge cases та помилки (некоректні вхідні дані, несумісні форми тензорів, division by zero, etc.)
-
----
-
-## Чому саме Rust
-
-Rust дає кілька переваг, які критично важливі для детермінованого ML:
-
-1. **Memory safety без garbage collector** — жодних pause-the-world моментів, жодних непередбачуваних затримок. Пам'ять контролюється явним чином.
-
-2. **Zero-cost abstractions** — абстракції не коштують runtime. Можна писати високорівневий код, який компілюється в ефективний машинний код.
-
-3. **Thread safety** — borrow checker гарантує, що немає data races. Для детермінованого паралелізму це критично.
-
-4. **No hidden state** — у Rust немає "магічних" глобальних станів, немає неявних кешів, немає undefined behavior.
+- Parsing and language semantics
+- Graph optimizations (whether they preserve semantics)
+- Autograd correctness (gradcheck — are gradients computed correctly)
+- Determinism (run 100 times — get identical result)
+- CPU vs CUDA parity (does GPU give the same result as CPU)
+- Edge cases and errors (invalid input data, incompatible tensor shapes, division by zero, etc.)
 
 ---
 
-## Обмеження та застереження
+## Why Rust
 
-Вольта — це **експериментальний проєкт**. Це не PyTorch, не TensorFlow, і не збирається ними бути.
+Rust gives several advantages that are critically important for deterministic ML:
 
-**Що працює:**
-- Невеликі моделі (Dense, неглибокі нейромережі)
-- CPU та CUDA бекенди
-- Базова оптимізація графа
-- Детерміноване тренування та інференс
+1. **Memory safety without garbage collector** — no pause-the-world moments, no unpredictable delays. Memory is controlled explicitly.
 
-**Що НЕ працює або потребує доробки:**
-- Convolutional layers (часткова підтримка)
-- RNN/LSTM/Transformer архітектури (часткова підтримка через tiny transformer приклад)
-- ONNX імпорт/експорт (частковий, експериментальний)
-- Дистрибутивні обчислення
-- Модельний зоопарк таpretrained weights
+2. **Zero-cost abstractions** — abstractions don't cost at runtime. You can write high-level code that compiles to efficient machine code.
 
-**Головне застереження:** Я роблю цей проєкт у вільний час. Тут можуть бути баги, недопрацьовані частини, і речі, які просто ще не імплементовані. Це не production-ready софт. Це технологічний експеримент, який показує, що детермінований ML можливий, і показує, як це може виглядати.
+3. **Thread safety** — the borrow checker guarantees no data races. For deterministic parallelism, this is critical.
+
+4. **No hidden state** — Rust has no "magical" global states, no implicit caches, no undefined behavior.
 
 ---
 
-## Як зібрати та запустити
+## Limitations and Disclaimers
+
+Volta is an **experimental project**. It's not PyTorch, not TensorFlow, and doesn't intend to become one.
+
+**What works:**
+- Small models (Dense, shallow neural networks)
+- CPU and CUDA backends
+- Basic graph optimization
+- Deterministic training and inference
+
+**What DOESN'T work or needs work:**
+- Convolutional layers (partial support)
+- RNN/LSTM/Transformer architectures (partial support via tiny transformer example)
+- ONNX import/export (partial, experimental)
+- Distributed computing
+- Model zoo and pretrained weights
+
+**Main disclaimer:** I work on this project in my spare time. There may be bugs, unfinished parts, and things that simply aren't implemented yet. This is not production-ready software. It's a technological experiment that shows that deterministic ML is possible, and demonstrates what it might look like.
+
+---
+
+## How to Build and Run
 
 ```bash
-# Клонуємо
+# Clone
 git clone https://github.com/BetterCrusader/Volta.git
 cd Volta
 
-# Перевіряємо, чи компілюється
+# Check if it compiles
 cargo check
 
-# Запускаємо тести (CPU)
+# Run tests (CPU)
 cargo test --workspace
 
-# Якщо є NVIDIA GPU та CUDA Toolkit — запускаємо з CUDA
+# If you have NVIDIA GPU and CUDA Toolkit — run with CUDA
 cargo test --workspace --features cuda
 
-# Білдимо CLI
+# Build CLI
 cargo build --release
 
-# Запускаємо приклад
+# Run example
 volta run examples/xor.vt
 ```
 
 ---
 
-## CLI команди
+## CLI Commands
 
 ```
-volta run <file.vt>          # Виконати скрипт
-volta check <file.vt>         # Перевірити синтаксис без виконання
-volta info <file.vt>         # Показати інформацію про модель
-volta doctor                 # Діагностика середовища
-volta init [dir]             # Ініціалізувати новий проєкт
+volta run <file.vt>          # Execute script
+volta check <file.vt>         # Check syntax without execution
+volta info <file.vt>          # Show model info
+volta doctor                  # Environment diagnostics
+volta init [dir]             # Initialize new project
 ```
 
 ---
 
-## Структура проєкту
+## Project Structure
 
 ```
 src/
-├── lexer.rs          # Лексер .vt мови
-├── parser.rs        # Парсер (AST)
-├── semantic.rs      # Семантичний аналізатор
-├── executor.rs      # Runtime виконання
+├── lexer.rs          # .vt language lexer
+├── parser.rs        # Parser (AST)
+├── semantic.rs      # Semantic analyzer
+├── executor.rs      # Runtime execution
 ├── ir/              # Intermediate Representation
-│   ├── graph.rs     # Граф обчислень
-│   ├── tensor.rs    # Тензорна математика
-│   ├── autograd.rs  # Автоматичні градієнти
-│   ├── optimizer.rs # Оптимізатори (SGD, Adam)
-│   ├── train.rs     # Цикл тренування
-│   ├── scheduler.rs # Планувальник
-│   └── cuda/        # CUDA бекенд
+│   ├── graph.rs     # Computation graph
+│   ├── tensor.rs    # Tensor mathematics
+│   ├── autograd.rs  # Automatic gradients
+│   ├── optimizer.rs # Optimizers (SGD, Adam)
+│   ├── train.rs    # Training loop
+│   ├── scheduler.rs # Scheduler
+│   └── cuda/        # CUDA backend
 └── main.rs          # CLI
 ```
 
 ---
 
-## Ліцензія
+## License
 
-MIT. Роби з цим що хочеш.
-
----
-
-## Контакти
-
-Якщо хочеш зв'язатися — GitHub issues, pull requests, або просто форкни і зміни під себе. Це open source, і я буду радий, якщо комусь це буде корисно.
-
-Або якщо ти вмієш у ML і хочеш допомогти з розробкою — welcomes, пиши, обговорюємо.
+MIT. Do whatever you want with it.
 
 ---
 
-**P.S.** Якщо ти дочитав до сюди — дякую. Цей проєкт робився з душею, і я сподіваюся, що хоча б ідея детермінованого ML є цікавою для когось ще, окрім мене.
+## Contact
+
+Want to get in touch? GitHub issues, pull requests, or just fork and change it for yourself. This is open source, and I'll be happy if it's useful to someone else.
+
+Or if you're into ML and want to help with development — welcome, let's discuss.
+
+---
+
+**P.S.** If you read this far — thank you. This project was made with soul, and I hope that the idea of deterministic ML is interesting to someone else besides me.
