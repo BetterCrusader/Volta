@@ -134,6 +134,40 @@ pub enum IrOpContract {
         ends: Vec<usize>,
         axes: Vec<usize>,
     },
+    Conv2D {
+        input: String,
+        weight: String,
+    },
+    MaxPool {
+        input: String,
+        kernel_shape: Vec<usize>,
+        strides: Vec<usize>,
+        pads: Vec<usize>,
+    },
+    AvgPool {
+        input: String,
+        kernel_shape: Vec<usize>,
+        strides: Vec<usize>,
+        pads: Vec<usize>,
+    },
+    BatchNorm {
+        input: String,
+        weight: String,
+        bias: String,
+        mean: String,
+        var: String,
+    },
+    Flatten {
+        input: String,
+        axis: usize,
+    },
+    Dropout {
+        input: String,
+        ratio: f32,
+    },
+    Identity {
+        input: String,
+    },
     Output {
         value: String,
     },
@@ -667,6 +701,24 @@ impl IrGraphContract {
                         .map_err(|err| InteropError::new(err.message))?;
                     value
                 }
+                IrOpContract::Conv2D { input, weight } => {
+                    let input = resolve_value(&ids, input)?;
+                    let weight = resolve_value(&ids, weight)?;
+                    let (_, value) = graph
+                        .add_op(block, Op::Conv2D(input, weight))
+                        .map_err(|err| InteropError::new(err.message))?;
+                    value
+                }
+                IrOpContract::MaxPool { .. }
+                | IrOpContract::AvgPool { .. }
+                | IrOpContract::BatchNorm { .. }
+                | IrOpContract::Flatten { .. }
+                | IrOpContract::Dropout { .. }
+                | IrOpContract::Identity { .. } => {
+                    return Err(InteropError::new(format!(
+                        "op not yet implemented in IR contract compiler"
+                    )));
+                }
             };
             ids.insert(node.id.clone(), value);
         }
@@ -743,6 +795,13 @@ fn op_inputs(op: &IrOpContract) -> Vec<&str> {
             }
             out
         }
+        IrOpContract::Conv2D { input, weight } => vec![input.as_str(), weight.as_str()],
+        IrOpContract::MaxPool { input, .. }
+        | IrOpContract::AvgPool { input, .. }
+        | IrOpContract::BatchNorm { input, .. }
+        | IrOpContract::Flatten { input, .. }
+        | IrOpContract::Dropout { input, .. }
+        | IrOpContract::Identity { input } => vec![input.as_str()],
     }
 }
 

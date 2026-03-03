@@ -113,6 +113,40 @@ pub enum OnnxOpStub {
         alpha: f32,
         beta: f32,
     },
+    Conv2D {
+        input: String,
+        weight: String,
+    },
+    MaxPool {
+        input: String,
+        kernel_shape: Vec<usize>,
+        strides: Vec<usize>,
+        pads: Vec<usize>,
+    },
+    AvgPool {
+        input: String,
+        kernel_shape: Vec<usize>,
+        strides: Vec<usize>,
+        pads: Vec<usize>,
+    },
+    BatchNorm {
+        input: String,
+        weight: String,
+        bias: String,
+        mean: String,
+        var: String,
+    },
+    Flatten {
+        input: String,
+        axis: usize,
+    },
+    Dropout {
+        input: String,
+        ratio: f32,
+    },
+    Identity {
+        input: String,
+    },
     Output {
         value: String,
     },
@@ -286,6 +320,56 @@ impl OnnxImporter {
                     beta: *beta,
                     trans_a: false,
                     trans_b: false,
+                },
+                OnnxOpStub::Conv2D { input, weight } => IrOpContract::Conv2D {
+                    input: input.clone(),
+                    weight: weight.clone(),
+                },
+                OnnxOpStub::MaxPool {
+                    input,
+                    kernel_shape,
+                    strides,
+                    pads,
+                } => IrOpContract::MaxPool {
+                    input: input.clone(),
+                    kernel_shape: kernel_shape.clone(),
+                    strides: strides.clone(),
+                    pads: pads.clone(),
+                },
+                OnnxOpStub::AvgPool {
+                    input,
+                    kernel_shape,
+                    strides,
+                    pads,
+                } => IrOpContract::AvgPool {
+                    input: input.clone(),
+                    kernel_shape: kernel_shape.clone(),
+                    strides: strides.clone(),
+                    pads: pads.clone(),
+                },
+                OnnxOpStub::BatchNorm {
+                    input,
+                    weight,
+                    bias,
+                    mean,
+                    var,
+                } => IrOpContract::BatchNorm {
+                    input: input.clone(),
+                    weight: weight.clone(),
+                    bias: bias.clone(),
+                    mean: mean.clone(),
+                    var: var.clone(),
+                },
+                OnnxOpStub::Flatten { input, axis } => IrOpContract::Flatten {
+                    input: input.clone(),
+                    axis: *axis,
+                },
+                OnnxOpStub::Dropout { input, ratio } => IrOpContract::Dropout {
+                    input: input.clone(),
+                    ratio: *ratio,
+                },
+                OnnxOpStub::Identity { input } => IrOpContract::Identity {
+                    input: input.clone(),
                 },
                 OnnxOpStub::Output { value } => IrOpContract::Output {
                     value: value.clone(),
@@ -907,6 +991,75 @@ fn map_proto_op(
                 trans_b: trans_b_raw == 1,
             }
         }
+        "Conv" => {
+            let input = require_input(node, 0)?.to_string();
+            let weight = require_input(node, 1)?.to_string();
+            IrOpContract::Conv2D { input, weight }
+        }
+        "MaxPool" => {
+            let input = require_input(node, 0)?.to_string();
+            let kernel_shape = attribute_i64s(node, "kernel_shape")
+                .map(|v| v.into_iter().map(|x| x as usize).collect())
+                .unwrap_or_default();
+            let strides = attribute_i64s(node, "strides")
+                .map(|v| v.into_iter().map(|x| x as usize).collect())
+                .unwrap_or_default();
+            let pads = attribute_i64s(node, "pads")
+                .map(|v| v.into_iter().map(|x| x as usize).collect())
+                .unwrap_or_default();
+            IrOpContract::MaxPool {
+                input,
+                kernel_shape,
+                strides,
+                pads,
+            }
+        }
+        "AveragePool" | "AvgPool" => {
+            let input = require_input(node, 0)?.to_string();
+            let kernel_shape = attribute_i64s(node, "kernel_shape")
+                .map(|v| v.into_iter().map(|x| x as usize).collect())
+                .unwrap_or_default();
+            let strides = attribute_i64s(node, "strides")
+                .map(|v| v.into_iter().map(|x| x as usize).collect())
+                .unwrap_or_default();
+            let pads = attribute_i64s(node, "pads")
+                .map(|v| v.into_iter().map(|x| x as usize).collect())
+                .unwrap_or_default();
+            IrOpContract::AvgPool {
+                input,
+                kernel_shape,
+                strides,
+                pads,
+            }
+        }
+        "BatchNormalization" => {
+            let input = require_input(node, 0)?.to_string();
+            let weight = require_input(node, 1).unwrap_or("").to_string();
+            let bias = require_input(node, 2).unwrap_or("").to_string();
+            let mean = require_input(node, 3).unwrap_or("").to_string();
+            let var = require_input(node, 4).unwrap_or("").to_string();
+            IrOpContract::BatchNorm {
+                input,
+                weight,
+                bias,
+                mean,
+                var,
+            }
+        }
+        "Flatten" => {
+            let input = require_input(node, 0)?.to_string();
+            let axis = attribute_i64(node, "axis").unwrap_or(1) as usize;
+            IrOpContract::Flatten { input, axis }
+        }
+        "Dropout" => {
+            let input = require_input(node, 0)?.to_string();
+            let ratio = attribute_f32(node, "ratio").unwrap_or(0.5);
+            IrOpContract::Dropout { input, ratio }
+        }
+        "Identity" => {
+            let input = require_input(node, 0)?.to_string();
+            IrOpContract::Identity { input }
+        }
         unsupported => {
             return Err(InteropError::new(format!(
                 "unsupported ONNX op '{unsupported}' in Wave 2 importer"
@@ -1252,6 +1405,13 @@ fn op_kind(op: &OnnxOpStub) -> &'static str {
         OnnxOpStub::Gather { .. } => "Gather",
         OnnxOpStub::Slice { .. } => "Slice",
         OnnxOpStub::Gemm { .. } => "Gemm",
+        OnnxOpStub::Conv2D { .. } => "Conv2D",
+        OnnxOpStub::MaxPool { .. } => "MaxPool",
+        OnnxOpStub::AvgPool { .. } => "AvgPool",
+        OnnxOpStub::BatchNorm { .. } => "BatchNorm",
+        OnnxOpStub::Flatten { .. } => "Flatten",
+        OnnxOpStub::Dropout { .. } => "Dropout",
+        OnnxOpStub::Identity { .. } => "Identity",
         OnnxOpStub::Output { .. } => "Output",
     }
 }
@@ -1284,6 +1444,13 @@ fn op_kind_from_contract(op: &IrOpContract) -> &'static str {
         IrOpContract::Concat { .. } => "Concat",
         IrOpContract::Gather { .. } => "Gather",
         IrOpContract::Slice { .. } => "Slice",
+        IrOpContract::Conv2D { .. } => "Conv2D",
+        IrOpContract::MaxPool { .. } => "MaxPool",
+        IrOpContract::AvgPool { .. } => "AvgPool",
+        IrOpContract::BatchNorm { .. } => "BatchNorm",
+        IrOpContract::Flatten { .. } => "Flatten",
+        IrOpContract::Dropout { .. } => "Dropout",
+        IrOpContract::Identity { .. } => "Identity",
         IrOpContract::Output { .. } => "Output",
     }
 }
@@ -1330,7 +1497,11 @@ fn inferred_output_rank(op: &IrOpContract, value_ranks: &HashMap<String, usize>)
             keepdims,
         } => value_ranks.get(input).copied().map(|rank| {
             if *keepdims {
-                if axis.is_some() { rank } else { rank.max(1) }
+                if axis.is_some() {
+                    rank
+                } else {
+                    rank.max(1)
+                }
             } else if axis.is_some() {
                 rank.saturating_sub(1)
             } else {
@@ -1343,5 +1514,12 @@ fn inferred_output_rank(op: &IrOpContract, value_ranks: &HashMap<String, usize>)
             .and_then(|name| value_ranks.get(name).copied()),
         IrOpContract::Gather { input, .. } => value_ranks.get(input).copied(),
         IrOpContract::Slice { input, .. } => value_ranks.get(input).copied(),
+        IrOpContract::Conv2D { input, .. } => value_ranks.get(input).copied(),
+        IrOpContract::MaxPool { input, .. }
+        | IrOpContract::AvgPool { input, .. }
+        | IrOpContract::BatchNorm { input, .. }
+        | IrOpContract::Flatten { input, .. }
+        | IrOpContract::Dropout { input, .. }
+        | IrOpContract::Identity { input, .. } => value_ranks.get(input).copied(),
     }
 }
