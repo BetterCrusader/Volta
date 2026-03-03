@@ -174,6 +174,11 @@ fn evaluate_node_cuda(
                             }
                         })?;
                     }
+                    ElementwiseUnaryOp::LeakyRelu(_) => {
+                        return Err(CudaExecutionError {
+                            message: "CUDA leaky_relu kernel is not implemented yet".to_string(),
+                        });
+                    }
                 }
             }
             Ok(RuntimeValue::Tensor(std::sync::Arc::new(
@@ -600,6 +605,9 @@ fn evaluate_node_cuda(
         }),
         Op::Removed => Err(CudaExecutionError {
             message: "Removed node cannot be executed".to_string(),
+        }),
+        Op::SoftmaxCrossEntropyLossFromLogits { .. } => Err(CudaExecutionError {
+            message: "CUDA SoftmaxCrossEntropyLoss execution is not implemented".to_string(),
         }),
     }
 }

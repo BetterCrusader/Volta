@@ -1,0 +1,15 @@
+model iris_net
+    layers 4 8 3
+    seed 42
+    activation "softmax"
+    optimizer "sgd"
+
+dataset iris_data
+    source "tests/data/iris_indexed.csv"
+    batch 4
+    label_col 4
+    num_classes 3
+
+train iris_net on iris_data
+    epochs 50
+    lr 0.05

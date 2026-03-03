@@ -156,8 +156,10 @@ pub fn train_with_backend<D: Dataset>(
     let result = train_graph_with_backend(
         &model.graph,
         loss,
+        None,
         parameters,
         &samples,
+        &[],
         &TrainConfig {
             epochs: config.epochs,
             optimizer: config.optimizer.clone(),

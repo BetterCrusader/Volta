@@ -104,7 +104,8 @@ fn simplify_op(op: &Op, known: &[Option<NumericConst>]) -> Option<Op> {
         | Op::Input(_)
         | Op::Output(_)
         | Op::Phi(_)
-        | Op::Removed => None,
+        | Op::Removed
+        | Op::SoftmaxCrossEntropyLossFromLogits { .. } => None,
     }
 }
 

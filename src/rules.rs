@@ -1,13 +1,26 @@
 pub const MODEL_REQUIRED_PROPERTIES: &[&str] = &["layers"];
 pub const TRAIN_REQUIRED_PROPERTIES: &[&str] = &[];
 
-pub const MODEL_KNOWN_PROPERTIES: &[&str] =
-    &["layers", "activation", "optimizer", "precision", "memory"];
-pub const DATASET_KNOWN_PROPERTIES: &[&str] = &["batch", "shuffle"];
+pub const MODEL_KNOWN_PROPERTIES: &[&str] = &[
+    "layers",
+    "activation",
+    "optimizer",
+    "precision",
+    "memory",
+    "seed",
+];
+pub const DATASET_KNOWN_PROPERTIES: &[&str] = &[
+    "batch",
+    "shuffle",
+    "source",
+    "val_split",
+    "label_col",
+    "num_classes",
+];
 pub const TRAIN_KNOWN_PROPERTIES: &[&str] =
     &["epochs", "device", "optimizer", "lr", "batch", "precision"];
 
-pub const ACTIVATIONS: &[&str] = &["relu", "sigmoid", "tanh"];
+pub const ACTIVATIONS: &[&str] = &["relu", "sigmoid", "tanh", "softmax"];
 pub const OPTIMIZERS: &[&str] = &["adam", "adamw", "sgd"];
 pub const DEVICES: &[&str] = &["cpu", "gpu", "auto"];
 

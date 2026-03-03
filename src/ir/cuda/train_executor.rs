@@ -21,8 +21,10 @@ pub fn train_graph_cuda(
     train_graph_with_backend(
         forward_graph,
         loss_value,
+        None,
         initial_parameters,
         dataset,
+        &[],
         config,
         &backend,
     )

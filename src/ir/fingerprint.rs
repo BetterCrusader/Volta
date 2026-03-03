@@ -141,6 +141,10 @@ fn hash_op(op: &Op, hasher: &mut DefaultHasher) {
         Op::Parameter(name) | Op::Input(name) => name.hash(hasher),
         Op::Phi(values) => values.iter().for_each(|v| v.0.hash(hasher)),
         Op::Removed => {}
+        Op::SoftmaxCrossEntropyLossFromLogits { logits, targets } => {
+            logits.0.hash(hasher);
+            targets.0.hash(hasher);
+        }
     }
 }
 

@@ -65,6 +65,7 @@ impl Parser {
             TokenKind::Train => self.parse_train(),
             TokenKind::Save => self.parse_save(),
             TokenKind::Load => self.parse_load(),
+            TokenKind::Infer => self.parse_infer(),
             TokenKind::Print => self.parse_print(),
             TokenKind::Fn => self.parse_function(),
             TokenKind::Return => self.parse_return(),
@@ -200,12 +201,53 @@ impl Parser {
     fn parse_load(&mut self) -> Result<Stmt, ParseError> {
         let load_token = self.expect(TokenKind::Load)?;
         let (model, model_span) = self.expect_ident("Missing model name in load statement")?;
+
+        if !self.match_kind(&TokenKind::As) {
+            return Err(self.error_here_with_hint(
+                "Invalid load syntax: expected 'as'",
+                "Use: load <model_name> as \"path.vt\"",
+            ));
+        }
+
         let (path, path_span) = self.expect_string("Missing string path in load statement")?;
         self.require_stmt_terminator()?;
         Ok(Stmt::Load {
             model,
             path,
             span: Span::merge(token_span(&load_token), end_span(model_span, path_span)),
+        })
+    }
+
+    fn parse_infer(&mut self) -> Result<Stmt, ParseError> {
+        let infer_token = self.expect(TokenKind::Infer)?;
+        let (model, model_span) = self.expect_ident("Missing model name in infer statement")?;
+
+        if !self.match_kind(&TokenKind::On) {
+            return Err(self.error_here_with_hint(
+                "Invalid infer syntax: expected 'on'",
+                "Use: infer <model_name> on \"data.csv\" as \"out.csv\"",
+            ));
+        }
+
+        let (input_csv, _in_span) =
+            self.expect_string("Missing input CSV path in infer statement")?;
+
+        if !self.match_kind(&TokenKind::As) {
+            return Err(self.error_here_with_hint(
+                "Invalid infer syntax: expected 'as'",
+                "Use: infer <model_name> on \"data.csv\" as \"out.csv\"",
+            ));
+        }
+
+        let (out_csv, out_span) =
+            self.expect_string("Missing output CSV path in infer statement")?;
+        self.require_stmt_terminator()?;
+
+        Ok(Stmt::Infer {
+            model,
+            input_csv,
+            out_csv,
+            span: Span::merge(token_span(&infer_token), end_span(model_span, out_span)),
         })
     }
 
@@ -873,6 +915,7 @@ fn suggest_top_level_keyword(candidate: &str) -> Option<&'static str> {
 
 fn token_kind_label(kind: &TokenKind) -> String {
     match kind {
+        TokenKind::Infer => "'infer' keyword".to_string(),
         TokenKind::Model => "'model' keyword".to_string(),
         TokenKind::Dataset => "'dataset' keyword".to_string(),
         TokenKind::Train => "'train' keyword".to_string(),

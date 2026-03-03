@@ -147,9 +147,9 @@ mod tests {
             optimizer: OptimizerConfig::Sgd { lr: 0.01 },
         };
 
-        let a = crate::ir::train_graph(&graph, loss, params.clone(), &dataset, &cfg)
+        let a = crate::ir::train_graph(&graph, loss, params.clone(), &dataset, &[], &cfg)
             .expect("train should pass");
-        let b = crate::ir::train_graph(&graph, loss, params, &dataset, &cfg)
+        let b = crate::ir::train_graph(&graph, loss, params, &dataset, &[], &cfg)
             .expect("train should pass");
 
         assert!((a.final_loss - b.final_loss).abs() < 1e-9);
@@ -234,7 +234,7 @@ mod tests {
             iter_sig.sort();
             assert_eq!(allocation_signature, iter_sig.join(";"));
 
-            let result = crate::ir::train_graph(&graph, loss, params.clone(), &dataset, &cfg)
+            let result = crate::ir::train_graph(&graph, loss, params.clone(), &dataset, &[], &cfg)
                 .expect("train should pass");
             match baseline {
                 None => baseline = Some(result.final_loss),

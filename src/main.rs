@@ -1,14 +1,3 @@
-#![allow(
-    clippy::missing_errors_doc,
-    clippy::must_use_candidate,
-    clippy::unused_self,
-    clippy::uninlined_format_args,
-    clippy::too_many_lines,
-    clippy::match_same_arms,
-    clippy::manual_let_else,
-    clippy::needless_pass_by_value
-)]
-
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -680,6 +669,7 @@ fn collect_stats(stmt: &Stmt, stats: &mut ProgramStats) {
         Stmt::Train { .. } => stats.train += 1,
         Stmt::Save { .. } => stats.save += 1,
         Stmt::Load { .. } => stats.load += 1,
+        Stmt::Infer { .. } => {}
         Stmt::Print { .. } => stats.print += 1,
         Stmt::Return { .. } => stats.return_stmt += 1,
         Stmt::Function { body, .. } => {

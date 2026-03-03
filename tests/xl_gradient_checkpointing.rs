@@ -43,10 +43,13 @@ fn checkpoint_plan_rejects_zero_interval() {
 
 #[test]
 fn strict_training_with_and_without_checkpointing_produces_identical_result() {
-    if !cuda_helpers::cuda_runtime_available() {
+    if !cuda_helpers::safe_cuda_device().is_some() {
         eprintln!(
             "[SKIP] strict_training_with_and_without_checkpointing_produces_identical_result — no CUDA device available"
         );
+        return;
+    }
+    if !cuda_helpers::safe_cuda_device().is_some() {
         return;
     }
     cuda_helpers::with_determinism("strict", || {

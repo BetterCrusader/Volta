@@ -24,6 +24,7 @@ pub struct TrainConfig {
 pub struct TrainResult {
     pub final_parameters: HashMap<String, Tensor>,
     pub final_loss: f32,
+    pub final_val_loss: Option<f32>,
     pub optimizer_state: OptimizerState,
 }
 
@@ -45,14 +46,17 @@ pub fn train_graph(
     loss_value: ValueId,
     initial_parameters: HashMap<String, Tensor>,
     dataset: &[TrainSample],
+    val_dataset: &[TrainSample],
     config: &TrainConfig,
 ) -> Result<TrainResult, TrainError> {
     let backend = CpuBackend;
     train_graph_with_backend(
         forward_graph,
         loss_value,
+        None,
         initial_parameters,
         dataset,
+        val_dataset,
         config,
         &backend,
     )
@@ -67,11 +71,14 @@ pub fn train_graph(
 /// Returns [`TrainError`] when graph verification fails, backward graph
 /// construction fails, execution fails on the selected backend, or optimizer
 /// updates cannot be applied.
+#[allow(clippy::too_many_arguments)]
 pub fn train_graph_with_backend(
     forward_graph: &Graph,
     loss_value: ValueId,
+    logits_value: Option<ValueId>,
     initial_parameters: HashMap<String, Tensor>,
     dataset: &[TrainSample],
+    val_dataset: &[TrainSample],
     config: &TrainConfig,
     backend: &dyn Backend,
 ) -> Result<TrainResult, TrainError> {
@@ -85,20 +92,18 @@ pub fn train_graph_with_backend(
     let determinism = CompilerFlags::from_env().determinism;
 
     let parameter_values = collect_parameter_values(forward_graph);
-    let parameter_names = collect_parameter_names(forward_graph);
 
-    let mut parameter_tensors = initial_parameters;
+    let mut parameter_tensors = HashMap::new();
+    let mut tracked_params = Vec::new();
+
+    for (name, initial_tensor) in initial_parameters {
+        if let Some(value_id) = parameter_values.get(&name).copied() {
+            parameter_tensors.insert(value_id, initial_tensor);
+            tracked_params.push((name, value_id));
+        }
+    }
+
     let mut optimizer_state = OptimizerState::default();
-
-    let tracked_params = parameter_names
-        .iter()
-        .filter_map(|name| {
-            parameter_values
-                .get(name)
-                .copied()
-                .map(|value| (name.clone(), value))
-        })
-        .collect::<Vec<_>>();
     let param_value_ids = tracked_params.iter().map(|(_, v)| *v).collect::<Vec<_>>();
 
     let gradient_graph =
@@ -122,9 +127,14 @@ pub fn train_graph_with_backend(
             }
         })?;
 
-    for _ in 0..config.epochs {
+    let mut final_val_loss_out = None;
+
+    for epoch in 0..config.epochs {
+        let mut epoch_loss_sum = 0.0;
+        let mut train_batches = 0;
+
         for sample in dataset {
-            let mut context = build_context(sample, &parameter_tensors);
+            let mut context = build_context_with_ids(sample, &parameter_tensors, &tracked_params);
             let loss_value_runtime = execute_terminal_with_backend(
                 forward_graph,
                 &forward_plan,
@@ -140,10 +150,15 @@ pub fn train_graph_with_backend(
                     message: "Forward graph produced no loss output".to_string(),
                 });
             };
+
+            epoch_loss_sum +=
+                scalar_from_runtime(loss_runtime.clone()).map_err(|e| TrainError { message: e })?;
+            train_batches += 1;
+
             let seed = ones_like(&loss_runtime).map_err(|e| TrainError { message: e })?;
             context.inputs.insert("__loss_grad".to_string(), seed);
 
-            let mut gradients_by_name = HashMap::new();
+            let mut gradients_by_id = HashMap::new();
             for (name, value_id) in &tracked_params {
                 let Some(grad_value_id) = gradient_graph.gradients.get(value_id).copied() else {
                     continue;
@@ -162,13 +177,13 @@ pub fn train_graph_with_backend(
                 let grad_tensor = runtime_to_tensor(grad_runtime).map_err(|e| TrainError {
                     message: format!("Gradient for '{name}' is invalid: {e}"),
                 })?;
-                gradients_by_name.insert(name.clone(), grad_tensor);
+                gradients_by_id.insert(*value_id, grad_tensor);
             }
 
             backend
                 .apply_gradients(
                     &mut parameter_tensors,
-                    &gradients_by_name,
+                    &gradients_by_id,
                     &config.optimizer,
                     &mut optimizer_state,
                     determinism,
@@ -177,10 +192,108 @@ pub fn train_graph_with_backend(
                     message: format!("Optimizer step failed: {}", e.message),
                 })?;
         }
+
+        let epoch_train_loss = if train_batches > 0 {
+            epoch_loss_sum / train_batches as f32
+        } else {
+            0.0
+        };
+
+        if !val_dataset.is_empty() {
+            let mut val_loss_sum = 0.0;
+            let mut val_correct = 0;
+            let mut val_total = 0;
+
+            for sample in val_dataset {
+                let context = build_context_with_ids(sample, &parameter_tensors, &tracked_params);
+                let loss_value_runtime = execute_terminal_with_backend(
+                    forward_graph,
+                    &forward_plan,
+                    &forward_plan.schedule.ordered_nodes,
+                    backend,
+                    &context,
+                )
+                .map_err(|e| TrainError {
+                    message: format!("Validation forward execute failed: {}", e.message),
+                })?;
+                let Some(loss_runtime) = loss_value_runtime else {
+                    return Err(TrainError {
+                        message: "Forward graph produced no loss output during validation"
+                            .to_string(),
+                    });
+                };
+                val_loss_sum +=
+                    scalar_from_runtime(loss_runtime).map_err(|e| TrainError { message: e })?;
+
+                // Compute accuracy if logits are available
+                #[allow(clippy::collapsible_if)]
+                if let Some(logits_id) = logits_value {
+                    if let Ok(logits_rt) = execute_value_with_backend(
+                        forward_graph,
+                        &forward_plan,
+                        logits_id,
+                        &forward_plan.schedule.ordered_nodes,
+                        backend,
+                        &context,
+                    ) {
+                        if let Ok(logits_t) = runtime_to_tensor(logits_rt) {
+                            if let Ok(predictions) = logits_t.argmax_axis_1() {
+                                // Extract targets from context (assuming it's keyed as "target")
+                                if let Some(target_rt) = context.inputs.get("target") {
+                                    if let Ok(target_t) = runtime_to_tensor(target_rt.clone()) {
+                                        if let Ok(targets_argmax) = target_t.argmax_axis_1() {
+                                            for (p, t) in
+                                                predictions.iter().zip(targets_argmax.iter())
+                                            {
+                                                if p == t {
+                                                    val_correct += 1;
+                                                }
+                                                val_total += 1;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            let avg_val_loss = val_loss_sum / val_dataset.len() as f32;
+            final_val_loss_out = Some(avg_val_loss);
+
+            if (epoch + 1) % 10 == 0 || epoch == config.epochs - 1 {
+                if val_total > 0 {
+                    let acc = (val_correct as f32 / val_total as f32) * 100.0;
+                    println!(
+                        "Epoch {:>3}/{} - loss: {:.4} - val_loss: {:.4} - val_acc: {:.1}%",
+                        epoch + 1,
+                        config.epochs,
+                        epoch_train_loss,
+                        avg_val_loss,
+                        acc
+                    );
+                } else {
+                    println!(
+                        "Epoch {:>3}/{} - loss: {:.4} - val_loss: {:.4}",
+                        epoch + 1,
+                        config.epochs,
+                        epoch_train_loss,
+                        avg_val_loss
+                    );
+                }
+            }
+        } else if (epoch + 1) % 10 == 0 || epoch == config.epochs - 1 {
+            println!(
+                "Epoch {:>3}/{} - loss: {:.4}",
+                epoch + 1,
+                config.epochs,
+                epoch_train_loss
+            );
+        }
     }
 
     let final_loss = if let Some(sample) = dataset.last() {
-        let context = build_context(sample, &parameter_tensors);
+        let context = build_context_with_ids(sample, &parameter_tensors, &tracked_params);
         let loss_runtime = execute_terminal_with_backend(
             forward_graph,
             &forward_plan,
@@ -201,21 +314,19 @@ pub fn train_graph_with_backend(
         0.0
     };
 
-    Ok(TrainResult {
-        final_parameters: parameter_tensors,
-        final_loss,
-        optimizer_state,
-    })
-}
-
-fn collect_parameter_names(graph: &Graph) -> Vec<String> {
-    let mut names = Vec::new();
-    for node in &graph.nodes {
-        if let Op::Parameter(name) = &node.op {
-            names.push(name.clone());
+    let mut final_parameters = HashMap::new();
+    for (name, value_id) in tracked_params {
+        if let Some(tensor) = parameter_tensors.remove(&value_id) {
+            final_parameters.insert(name, tensor);
         }
     }
-    names
+
+    Ok(TrainResult {
+        final_parameters,
+        final_loss,
+        final_val_loss: final_val_loss_out,
+        optimizer_state,
+    })
 }
 
 fn collect_parameter_values(graph: &Graph) -> HashMap<String, ValueId> {
@@ -228,7 +339,11 @@ fn collect_parameter_values(graph: &Graph) -> HashMap<String, ValueId> {
     values
 }
 
-fn build_context(sample: &TrainSample, parameters: &HashMap<String, Tensor>) -> ExecutionContext {
+fn build_context_with_ids(
+    sample: &TrainSample,
+    parameter_tensors: &HashMap<ValueId, Tensor>,
+    tracked_params: &[(String, ValueId)],
+) -> ExecutionContext {
     let mut context = ExecutionContext::default();
     for (name, tensor) in &sample.inputs {
         context.inputs.insert(
@@ -236,11 +351,13 @@ fn build_context(sample: &TrainSample, parameters: &HashMap<String, Tensor>) -> 
             RuntimeValue::Tensor(std::sync::Arc::new(tensor.clone())),
         );
     }
-    for (name, tensor) in parameters {
-        context.parameters.insert(
-            name.clone(),
-            RuntimeValue::Tensor(std::sync::Arc::new(tensor.clone())),
-        );
+    for (name, value_id) in tracked_params {
+        if let Some(tensor) = parameter_tensors.get(value_id) {
+            context.parameters.insert(
+                name.clone(),
+                RuntimeValue::Tensor(std::sync::Arc::new(tensor.clone())),
+            );
+        }
     }
     context
 }
@@ -305,6 +422,7 @@ mod tests {
             loss,
             params,
             &dataset,
+            &[],
             &TrainConfig {
                 epochs: 200,
                 optimizer: OptimizerConfig::Sgd { lr: 0.01 },
@@ -336,6 +454,7 @@ mod tests {
             loss,
             params,
             &dataset,
+            &[],
             &TrainConfig {
                 epochs: 100,
                 optimizer: OptimizerConfig::Adam {

@@ -18,8 +18,8 @@ pub enum OptimizerConfig {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct OptimizerState {
     pub(crate) step: usize,
-    pub(crate) adam_m: HashMap<String, Tensor>,
-    pub(crate) adam_v: HashMap<String, Tensor>,
+    pub(crate) adam_m: HashMap<crate::ir::node::ValueId, Tensor>,
+    pub(crate) adam_v: HashMap<crate::ir::node::ValueId, Tensor>,
 }
 
 #[derive(Debug, Clone)]
@@ -36,8 +36,8 @@ impl From<crate::ir::tensor::TensorError> for OptimizerError {
 }
 
 pub fn apply_gradients(
-    parameters: &mut HashMap<String, Tensor>,
-    gradients: &HashMap<String, Tensor>,
+    parameters: &mut HashMap<crate::ir::node::ValueId, Tensor>,
+    gradients: &HashMap<crate::ir::node::ValueId, Tensor>,
     config: &OptimizerConfig,
     state: &mut OptimizerState,
 ) -> Result<(), OptimizerError> {
@@ -55,8 +55,8 @@ pub fn apply_gradients(
 }
 
 fn apply_sgd(
-    parameters: &mut HashMap<String, Tensor>,
-    gradients: &HashMap<String, Tensor>,
+    parameters: &mut HashMap<crate::ir::node::ValueId, Tensor>,
+    gradients: &HashMap<crate::ir::node::ValueId, Tensor>,
     lr: f32,
 ) -> Result<(), OptimizerError> {
     // BUG FIX: a NaN or non-positive lr would silently corrupt all parameters
@@ -67,15 +67,15 @@ fn apply_sgd(
         });
     }
 
-    for (name, parameter) in parameters {
-        let Some(gradient) = gradients.get(name) else {
+    for (value_id, parameter) in parameters {
+        let Some(gradient) = gradients.get(value_id) else {
             continue;
         };
         if parameter.shape != gradient.shape {
             return Err(OptimizerError {
                 message: format!(
-                    "Shape mismatch in SGD for '{name}': {:?} vs {:?}",
-                    parameter.shape, gradient.shape
+                    "Shape mismatch in SGD for ValueId {}: {:?} vs {:?}",
+                    value_id.0, parameter.shape, gradient.shape
                 ),
             });
         }
@@ -87,8 +87,8 @@ fn apply_sgd(
 }
 
 fn apply_adam(
-    parameters: &mut HashMap<String, Tensor>,
-    gradients: &HashMap<String, Tensor>,
+    parameters: &mut HashMap<crate::ir::node::ValueId, Tensor>,
+    gradients: &HashMap<crate::ir::node::ValueId, Tensor>,
     lr: f32,
     beta1: f32,
     beta2: f32,
@@ -141,32 +141,32 @@ fn apply_adam(
         });
     }
 
-    for (name, parameter) in parameters {
-        let Some(gradient) = gradients.get(name) else {
+    for (value_id, parameter) in parameters {
+        let Some(gradient) = gradients.get(value_id) else {
             continue;
         };
         if parameter.shape != gradient.shape {
             return Err(OptimizerError {
                 message: format!(
-                    "Shape mismatch in Adam for '{name}': {:?} vs {:?}",
-                    parameter.shape, gradient.shape
+                    "Shape mismatch in Adam for ValueId {}: {:?} vs {:?}",
+                    value_id.0, parameter.shape, gradient.shape
                 ),
             });
         }
 
-        let m = state.adam_m.entry(name.clone()).or_insert(
+        let m = state.adam_m.entry(*value_id).or_insert(
             Tensor::zeros(parameter.shape.clone()).map_err(|err| OptimizerError {
                 message: format!(
-                    "Failed to initialize Adam m buffer for '{name}': {}",
-                    err.message
+                    "Failed to initialize Adam m buffer for ValueId {}: {}",
+                    value_id.0, err.message
                 ),
             })?,
         );
-        let v = state.adam_v.entry(name.clone()).or_insert(
+        let v = state.adam_v.entry(*value_id).or_insert(
             Tensor::zeros(parameter.shape.clone()).map_err(|err| OptimizerError {
                 message: format!(
-                    "Failed to initialize Adam v buffer for '{name}': {}",
-                    err.message
+                    "Failed to initialize Adam v buffer for ValueId {}: {}",
+                    value_id.0, err.message
                 ),
             })?,
         );
@@ -195,20 +195,25 @@ fn apply_adam(
 mod tests {
     use std::collections::HashMap;
 
+    use crate::ir::node::ValueId;
     use crate::ir::optimizer::{OptimizerConfig, OptimizerState, apply_gradients};
     use crate::ir::tensor::Tensor;
+
+    fn vid(n: usize) -> ValueId {
+        ValueId(n)
+    }
 
     #[test]
     fn sgd_updates_parameter_values() {
         let mut params = HashMap::new();
         params.insert(
-            "w".to_string(),
+            vid(0),
             Tensor::new(vec![1], vec![1.0]).expect("valid tensor"),
         );
 
         let mut grads = HashMap::new();
         grads.insert(
-            "w".to_string(),
+            vid(0),
             Tensor::new(vec![1], vec![0.5]).expect("valid tensor"),
         );
 
@@ -221,7 +226,7 @@ mod tests {
         )
         .expect("sgd update should succeed");
 
-        let w = params.get("w").expect("param exists");
+        let w = params.get(&vid(0)).expect("param exists");
         assert!((w.data[0] - 0.95).abs() < 1e-6);
     }
 
@@ -229,15 +234,14 @@ mod tests {
 
     #[test]
     fn sgd_rejects_non_positive_learning_rate() {
-        // BUG FIX: SGD with lr=0 or negative silently corrupts parameters.
         let mut params = HashMap::new();
         params.insert(
-            "w".to_string(),
+            vid(0),
             Tensor::new(vec![1], vec![1.0]).expect("valid tensor"),
         );
         let mut grads = HashMap::new();
         grads.insert(
-            "w".to_string(),
+            vid(0),
             Tensor::new(vec![1], vec![1.0]).expect("valid tensor"),
         );
         let mut state = OptimizerState::default();
@@ -260,15 +264,14 @@ mod tests {
 
     #[test]
     fn adam_rejects_beta_equal_to_one() {
-        // BUG FIX: beta1=1.0 → bias1=0 → m_hat=m/0=NaN propagated silently.
         let mut params = HashMap::new();
         params.insert(
-            "w".to_string(),
+            vid(0),
             Tensor::new(vec![1], vec![1.0]).expect("valid tensor"),
         );
         let mut grads = HashMap::new();
         grads.insert(
-            "w".to_string(),
+            vid(0),
             Tensor::new(vec![1], vec![1.0]).expect("valid tensor"),
         );
         let mut state = OptimizerState::default();
@@ -278,7 +281,7 @@ mod tests {
             &grads,
             &OptimizerConfig::Adam {
                 lr: 0.001,
-                beta1: 1.0, // invalid – bias1 = 0
+                beta1: 1.0,
                 beta2: 0.999,
                 epsilon: 1e-8,
             },
@@ -294,15 +297,14 @@ mod tests {
 
     #[test]
     fn adam_rejects_non_positive_epsilon() {
-        // BUG FIX: epsilon <= 0 makes the denominator reach 0 → Inf update.
         let mut params = HashMap::new();
         params.insert(
-            "w".to_string(),
+            vid(0),
             Tensor::new(vec![1], vec![1.0]).expect("valid tensor"),
         );
         let mut grads = HashMap::new();
         grads.insert(
-            "w".to_string(),
+            vid(0),
             Tensor::new(vec![1], vec![1.0]).expect("valid tensor"),
         );
         let mut state = OptimizerState::default();
@@ -314,7 +316,7 @@ mod tests {
                 lr: 0.001,
                 beta1: 0.9,
                 beta2: 0.999,
-                epsilon: 0.0, // invalid
+                epsilon: 0.0,
             },
             &mut state,
         )

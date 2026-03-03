@@ -20,14 +20,11 @@ fn should_par(n: usize) -> bool {
 
 /// Dense f32 tensor.
 ///
-/// `data` is a plain `Vec<f32>` for full backwards-compatibility with all
-/// call-sites.  All compute methods (add, matmul, relu, …) use `rayon`
-/// parallel iterators so they saturate every available CPU core automatically.
+/// `data` is a plain `Vec<f32>`, meaning that operations like `reshape()`
+/// clone the underlying data in O(N) time.
 ///
-/// `reshape()` is now O(1): instead of cloning data it returns a view that
-/// shares the same `Arc`-backed buffer.  When the caller only reads from the
-/// reshaped tensor, zero bytes are copied.  If the reshaped tensor is then
-/// mutated, the copy happens lazily (copy-on-write via `Arc::make_mut`).
+/// All compute methods (add, matmul, relu, …) use `rayon` parallel iterators
+/// when the `parallel` feature is enabled so they saturate every available CPU core automatically.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tensor {
     pub shape: Vec<usize>,
@@ -720,6 +717,47 @@ impl Tensor {
         };
         Self::new(self.shape.clone(), out)
     }
+
+    /// Returns the indices of the maximum values along axis 1 (typically the class indices).
+    /// Used for Accuracy metric computation without needing Autograd.
+    pub fn argmax_axis_1(&self) -> Result<Vec<usize>, TensorError> {
+        if self.shape.len() != 2 {
+            return Err(TensorError {
+                message: format!(
+                    "argmax_axis_1 expects rank-2 tensor, got rank {}",
+                    self.shape.len()
+                ),
+            });
+        }
+
+        let batch_size = self.shape[0];
+        let num_classes = self.shape[1];
+
+        if num_classes == 0 {
+            return Err(TensorError {
+                message: "argmax_axis_1 expects axis 1 to have size > 0".to_string(),
+            });
+        }
+
+        let mut out = Vec::with_capacity(batch_size);
+        for i in 0..batch_size {
+            let start = i * num_classes;
+            let end = start + num_classes;
+            let row = &self.data[start..end];
+
+            let mut max_idx = 0;
+            let mut max_val = row[0];
+            for (j, &val) in row.iter().enumerate().skip(1) {
+                if val > max_val {
+                    max_val = val;
+                    max_idx = j;
+                }
+            }
+            out.push(max_idx);
+        }
+
+        Ok(out)
+    }
 }
 
 // ── Reduce ops ───────────────────────────────────────────────────────────────
@@ -915,45 +953,72 @@ impl Tensor {
     /// Currently supports 1-D tensors only (the most common use-case for
     /// attention logits and cross-entropy loss).
     pub fn softmax(&self) -> Result<Self, TensorError> {
-        if self.shape.len() != 1 {
-            return Err(TensorError {
-                message: format!("softmax expects a 1-D tensor, got shape {:?}", self.shape),
-            });
-        }
-        if self.data.is_empty() {
-            return Err(TensorError {
-                message: "softmax expects non-empty tensor".to_string(),
-            });
-        }
+        if self.shape.len() == 1 {
+            if self.data.is_empty() {
+                return Err(TensorError {
+                    message: "softmax expects non-empty tensor".to_string(),
+                });
+            }
 
-        // Step 1: max for numeric stability.
-        // SAFETY: is_empty() check above guarantees at least one element.
-        let max = self.data.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let max = self.data.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let mut exps = Vec::with_capacity(self.data.len());
+            let mut sum = 0.0_f32;
+            for &x in &self.data {
+                let e = (x - max).exp();
+                exps.push(e);
+                sum += e;
+            }
 
-        // Step 2+3: shifted exp + sum.
-        let mut exps = Vec::with_capacity(self.data.len());
-        let mut sum = 0.0_f32;
-        for &x in &self.data {
-            let e = (x - max).exp();
-            exps.push(e);
-            sum += e;
-        }
+            if !sum.is_finite() || sum <= 0.0 {
+                return Err(TensorError {
+                    message: format!(
+                        "softmax numeric instability: sum = {sum} (all inputs may be -inf)"
+                    ),
+                });
+            }
 
-        if !sum.is_finite() || sum <= 0.0 {
-            return Err(TensorError {
+            let inv_sum = 1.0 / sum;
+            for v in &mut exps {
+                *v *= inv_sum;
+            }
+
+            Self::new(self.shape.clone(), exps)
+        } else if self.shape.len() == 2 {
+            let row_len = self.shape[1];
+            if row_len == 0 {
+                return Err(TensorError {
+                    message: "softmax expects non-empty row".to_string(),
+                });
+            }
+            let mut out = Vec::with_capacity(self.data.len());
+            for row in self.data.chunks(row_len) {
+                let max = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                let mut sum = 0.0_f32;
+                let mut row_exps = Vec::with_capacity(row_len);
+                for &x in row {
+                    let e = (x - max).exp();
+                    row_exps.push(e);
+                    sum += e;
+                }
+                if !sum.is_finite() || sum <= 0.0 {
+                    return Err(TensorError {
+                        message: "softmax numeric instability in 2D".to_string(),
+                    });
+                }
+                let inv_sum = 1.0 / sum;
+                for e in row_exps {
+                    out.push(e * inv_sum);
+                }
+            }
+            Self::new(self.shape.clone(), out)
+        } else {
+            Err(TensorError {
                 message: format!(
-                    "softmax numeric instability: sum = {sum} (all inputs may be -inf)"
+                    "softmax expects a 1D or 2D tensor, got shape {:?}",
+                    self.shape
                 ),
-            });
+            })
         }
-
-        // Step 4: normalise.
-        let inv_sum = 1.0 / sum;
-        for v in &mut exps {
-            *v *= inv_sum;
-        }
-
-        Self::new(self.shape.clone(), exps)
     }
 
     pub fn mean(&self) -> Result<Self, TensorError> {

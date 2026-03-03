@@ -80,6 +80,10 @@ enum CseKey {
         keepdims: bool,
     },
     Conv2D(ValueId, ValueId),
+    SoftmaxCrossEntropyLossFromLogits {
+        logits: ValueId,
+        targets: ValueId,
+    },
 }
 
 #[derive(Default)]
@@ -246,6 +250,12 @@ fn key_of(op: &Op) -> Option<CseKey> {
         }),
         Op::Conv2D(input, weight) => Some(CseKey::Conv2D(*input, *weight)),
         Op::Parameter(_) | Op::Input(_) | Op::Output(_) | Op::Phi(_) | Op::Removed => None,
+        Op::SoftmaxCrossEntropyLossFromLogits { logits, targets } => {
+            Some(CseKey::SoftmaxCrossEntropyLossFromLogits {
+                logits: *logits,
+                targets: *targets,
+            })
+        }
     }
 }
 

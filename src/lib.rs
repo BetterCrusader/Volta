@@ -37,26 +37,7 @@
 //! Executor::new().execute(&program).unwrap();
 //! ```
 
-#![allow(
-    clippy::missing_errors_doc,
-    clippy::must_use_candidate,
-    clippy::unused_self,
-    clippy::uninlined_format_args,
-    clippy::too_many_lines,
-    clippy::match_same_arms,
-    clippy::manual_let_else,
-    clippy::needless_pass_by_value,
-    clippy::implicit_hasher,
-    clippy::cast_possible_truncation,
-    clippy::cast_precision_loss,
-    clippy::unnecessary_wraps,
-    clippy::missing_panics_doc,
-    clippy::needless_continue,
-    clippy::similar_names,
-    clippy::doc_markdown,
-    clippy::struct_excessive_bools,
-    clippy::items_after_statements
-)]
+#![deny(unsafe_code)]
 
 pub mod ast;
 pub mod autopilot;

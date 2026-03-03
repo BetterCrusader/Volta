@@ -1,3 +1,4 @@
+#![allow(unsafe_code)]
 use crate::ir::DeterminismLevel;
 use crate::ir::NodeId;
 use crate::ir::cuda::device::CudaDevice;
