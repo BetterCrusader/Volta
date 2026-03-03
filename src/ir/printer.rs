@@ -163,7 +163,11 @@ fn format_op(op: &Op) -> String {
         }
         Op::Removed => "removed".to_string(),
         Op::SoftmaxCrossEntropyLossFromLogits { logits, targets } => {
-            format!("softmax_cross_entropy {} {}", fmt_value(*logits), fmt_value(*targets))
+            format!(
+                "softmax_cross_entropy {} {}",
+                fmt_value(*logits),
+                fmt_value(*targets)
+            )
         }
     }
 }

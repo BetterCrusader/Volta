@@ -92,7 +92,9 @@ fn test_missing_checkpoint_rejected() {
 
     assert_ne!(code, 0, "Expected non-zero exit for missing checkpoint");
     assert!(
-        output.contains("Failed to read") || output.contains("No such file") || output.contains("cannot find"),
+        output.contains("Failed to read")
+            || output.contains("No such file")
+            || output.contains("cannot find"),
         "Expected file-not-found error, got:\n{output}"
     );
 }
@@ -112,7 +114,10 @@ impl Drop for TempDir {
 
 fn tempdir() -> TempDir {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().subsec_nanos();
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .subsec_nanos();
     let path = std::env::temp_dir().join(format!("volta_test_{ts}"));
     std::fs::create_dir_all(&path).unwrap();
     TempDir(path)

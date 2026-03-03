@@ -116,12 +116,15 @@ fn infer_shape_for_op(
             match (log_shape, target_shape) {
                 (ShapeFact::Tensor(l), ShapeFact::Tensor(t)) => {
                     if l != t {
-                        return Err(format!("Shape mismatch in SoftmaxCrossEntropy: {:?} and {:?}", l, t));
+                        return Err(format!(
+                            "Shape mismatch in SoftmaxCrossEntropy: {:?} and {:?}",
+                            l, t
+                        ));
                     }
                     Ok(ShapeFact::Tensor(vec![1]))
                 }
                 (ShapeFact::Unknown, _) | (_, ShapeFact::Unknown) => Ok(ShapeFact::Unknown),
-                _ => Err("SoftmaxCrossEntropy expects tensor inputs".to_string())
+                _ => Err("SoftmaxCrossEntropy expects tensor inputs".to_string()),
             }
         }
     }
@@ -178,9 +181,7 @@ fn infer_same_tensor(
                 Err(format!("Shape mismatch in {label}: {:?} vs {:?}", a, b))
             }
         }
-        (ShapeFact::Unknown, _) | (_, ShapeFact::Unknown) => {
-            Ok(ShapeFact::Unknown)
-        }
+        (ShapeFact::Unknown, _) | (_, ShapeFact::Unknown) => Ok(ShapeFact::Unknown),
         (ShapeFact::NonTensor, _) | (_, ShapeFact::NonTensor) => {
             Err(format!("{label} expects tensor inputs"))
         }

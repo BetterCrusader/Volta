@@ -199,15 +199,23 @@ mod tests {
     use crate::ir::optimizer::{OptimizerConfig, OptimizerState, apply_gradients};
     use crate::ir::tensor::Tensor;
 
-    fn vid(n: usize) -> ValueId { ValueId(n) }
+    fn vid(n: usize) -> ValueId {
+        ValueId(n)
+    }
 
     #[test]
     fn sgd_updates_parameter_values() {
         let mut params = HashMap::new();
-        params.insert(vid(0), Tensor::new(vec![1], vec![1.0]).expect("valid tensor"));
+        params.insert(
+            vid(0),
+            Tensor::new(vec![1], vec![1.0]).expect("valid tensor"),
+        );
 
         let mut grads = HashMap::new();
-        grads.insert(vid(0), Tensor::new(vec![1], vec![0.5]).expect("valid tensor"));
+        grads.insert(
+            vid(0),
+            Tensor::new(vec![1], vec![0.5]).expect("valid tensor"),
+        );
 
         let mut state = OptimizerState::default();
         apply_gradients(
@@ -227,9 +235,15 @@ mod tests {
     #[test]
     fn sgd_rejects_non_positive_learning_rate() {
         let mut params = HashMap::new();
-        params.insert(vid(0), Tensor::new(vec![1], vec![1.0]).expect("valid tensor"));
+        params.insert(
+            vid(0),
+            Tensor::new(vec![1], vec![1.0]).expect("valid tensor"),
+        );
         let mut grads = HashMap::new();
-        grads.insert(vid(0), Tensor::new(vec![1], vec![1.0]).expect("valid tensor"));
+        grads.insert(
+            vid(0),
+            Tensor::new(vec![1], vec![1.0]).expect("valid tensor"),
+        );
         let mut state = OptimizerState::default();
 
         for bad_lr in [0.0_f32, -0.01, f32::NAN, f32::INFINITY] {
@@ -251,9 +265,15 @@ mod tests {
     #[test]
     fn adam_rejects_beta_equal_to_one() {
         let mut params = HashMap::new();
-        params.insert(vid(0), Tensor::new(vec![1], vec![1.0]).expect("valid tensor"));
+        params.insert(
+            vid(0),
+            Tensor::new(vec![1], vec![1.0]).expect("valid tensor"),
+        );
         let mut grads = HashMap::new();
-        grads.insert(vid(0), Tensor::new(vec![1], vec![1.0]).expect("valid tensor"));
+        grads.insert(
+            vid(0),
+            Tensor::new(vec![1], vec![1.0]).expect("valid tensor"),
+        );
         let mut state = OptimizerState::default();
 
         let err = apply_gradients(
@@ -268,15 +288,25 @@ mod tests {
             &mut state,
         )
         .expect_err("beta1=1.0 must be rejected");
-        assert!(err.message.contains("beta1"), "expected beta1 rejection, got: {}", err.message);
+        assert!(
+            err.message.contains("beta1"),
+            "expected beta1 rejection, got: {}",
+            err.message
+        );
     }
 
     #[test]
     fn adam_rejects_non_positive_epsilon() {
         let mut params = HashMap::new();
-        params.insert(vid(0), Tensor::new(vec![1], vec![1.0]).expect("valid tensor"));
+        params.insert(
+            vid(0),
+            Tensor::new(vec![1], vec![1.0]).expect("valid tensor"),
+        );
         let mut grads = HashMap::new();
-        grads.insert(vid(0), Tensor::new(vec![1], vec![1.0]).expect("valid tensor"));
+        grads.insert(
+            vid(0),
+            Tensor::new(vec![1], vec![1.0]).expect("valid tensor"),
+        );
         let mut state = OptimizerState::default();
 
         let err = apply_gradients(
@@ -291,6 +321,10 @@ mod tests {
             &mut state,
         )
         .expect_err("epsilon=0 must be rejected");
-        assert!(err.message.contains("epsilon"), "expected epsilon rejection, got: {}", err.message);
+        assert!(
+            err.message.contains("epsilon"),
+            "expected epsilon rejection, got: {}",
+            err.message
+        );
     }
 }

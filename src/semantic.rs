@@ -573,7 +573,8 @@ impl SemanticAnalyzer {
                 if !matches!(split_ty, ValueType::Float | ValueType::Int) {
                     return Err(Self::error(
                         format!(
-                            "Property 'val_split' in dataset block must be a number, found {:?}", split_ty
+                            "Property 'val_split' in dataset block must be a number, found {:?}",
+                            split_ty
                         ),
                         prop.values[0].span(),
                     ));

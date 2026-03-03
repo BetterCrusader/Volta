@@ -49,7 +49,10 @@ fn strict_training_with_and_without_checkpointing_produces_identical_result() {
         );
         return;
     }
-    if !cuda_helpers::safe_cuda_device().is_some() { return; } cuda_helpers::with_determinism("strict", || {
+    if !cuda_helpers::safe_cuda_device().is_some() {
+        return;
+    }
+    cuda_helpers::with_determinism("strict", || {
         let (model, dataset, mut config, _infer_input) = build_tiny_transformer_fixture_for_tests();
         let cuda = CudaBackend;
 

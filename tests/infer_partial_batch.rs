@@ -18,14 +18,21 @@ fn volta_bin() -> String {
 /// Minimal tempdir helper (no extra crates needed)
 struct TempDir(std::path::PathBuf);
 impl TempDir {
-    fn path(&self) -> &std::path::Path { &self.0 }
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
 }
 impl Drop for TempDir {
-    fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
 }
 fn tempdir() -> TempDir {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().subsec_nanos();
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .subsec_nanos();
     let path = std::env::temp_dir().join(format!("volta_infer_partial_{ts}"));
     std::fs::create_dir_all(&path).unwrap();
     TempDir(path)
@@ -34,7 +41,11 @@ fn tempdir() -> TempDir {
 fn count_csv_data_rows(path: &str) -> usize {
     let content = std::fs::read_to_string(path).expect("Failed to read output CSV");
     // Skip header line
-    content.lines().filter(|l| !l.trim().is_empty()).count().saturating_sub(1)
+    content
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .count()
+        .saturating_sub(1)
 }
 
 #[test]
@@ -56,12 +67,15 @@ fn test_infer_all_samples_including_partial_batch() {
         // Header (features only, no label column for inference)
         writeln!(f, "f0,f1,f2,f3").unwrap();
         for i in 0..13usize {
-            writeln!(f, "{:.2},{:.2},{:.2},{:.2}",
+            writeln!(
+                f,
+                "{:.2},{:.2},{:.2},{:.2}",
                 5.0 + i as f64 * 0.1,
                 3.0 + i as f64 * 0.05,
                 1.5 + i as f64 * 0.2,
                 0.3 + i as f64 * 0.03
-            ).unwrap();
+            )
+            .unwrap();
         }
     }
 
@@ -87,10 +101,7 @@ fn test_infer_all_samples_including_partial_batch() {
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(
-        out.status.success(),
-        "Inference script failed:\n{combined}"
-    );
+    assert!(out.status.success(), "Inference script failed:\n{combined}");
 
     let out_csv_str = output_csv.to_string_lossy().to_string();
     let row_count = count_csv_data_rows(&out_csv_str);

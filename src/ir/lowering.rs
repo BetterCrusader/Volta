@@ -154,7 +154,11 @@ impl LoweringContext {
 
     /// Constructs a Softmax Cross Entropy loss metric.
     /// Expects raw logits and one-hot target labels.
-    pub fn build_softmax_cross_entropy_loss(&mut self, logits: ValueId, target_labels: ValueId) -> ValueId {
+    pub fn build_softmax_cross_entropy_loss(
+        &mut self,
+        logits: ValueId,
+        target_labels: ValueId,
+    ) -> ValueId {
         self.push_op(Op::SoftmaxCrossEntropyLossFromLogits {
             logits,
             targets: target_labels,

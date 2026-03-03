@@ -314,28 +314,34 @@ fn evaluate_op(
         Op::SoftmaxCrossEntropyLossFromLogits { logits, targets } => {
             let logits_t = read_tensor(values, *logits, node_id)?;
             let targets_t = read_tensor(values, *targets, node_id)?;
-            
+
             if logits_t.shape != targets_t.shape {
                 return Err(error(
-                    format!("Shape mismatch in SoftmaxCrossEntropyLossFromLogits: logits {:?}, targets {:?}", logits_t.shape, targets_t.shape),
+                    format!(
+                        "Shape mismatch in SoftmaxCrossEntropyLossFromLogits: logits {:?}, targets {:?}",
+                        logits_t.shape, targets_t.shape
+                    ),
                     Some(node_id),
                 ));
             }
 
             let batch_size = logits_t.shape[0];
             let num_classes = logits_t.shape[1];
-            
+
             let mut loss_sum = 0.0_f32;
 
             for i in 0..batch_size {
                 let start = i * num_classes;
                 let end = start + num_classes;
-                
+
                 let logits_slice = &logits_t.data[start..end];
                 let targets_slice = &targets_t.data[start..end];
 
                 // 1. Stable log_softmax
-                let max_logit = logits_slice.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                let max_logit = logits_slice
+                    .iter()
+                    .copied()
+                    .fold(f32::NEG_INFINITY, f32::max);
                 let mut sum_exp = 0.0_f32;
                 for &l in logits_slice {
                     sum_exp += (l - max_logit).exp();
@@ -348,15 +354,15 @@ fn evaluate_op(
                     let log_prob = logits_slice[j] - log_sum_exp;
                     sample_loss -= targets_slice[j] * log_prob;
                 }
-                
+
                 loss_sum += sample_loss;
             }
 
             // Mean over batch
             let mean_loss = loss_sum / (batch_size as f32);
-            
+
             Ok(RuntimeValue::Tensor(Arc::new(
-                Tensor::new(vec![], vec![mean_loss]).unwrap()
+                Tensor::new(vec![], vec![mean_loss]).unwrap(),
             )))
         }
         Op::ReduceSum {
@@ -463,9 +469,16 @@ fn read_tensor(
 fn softmax(tensor: &Tensor, node: NodeId) -> Result<RuntimeValue, InterpreterError> {
     if tensor.shape.len() == 1 {
         if tensor.data.is_empty() {
-            return Err(error("Softmax expects non-empty tensor".to_string(), Some(node)));
+            return Err(error(
+                "Softmax expects non-empty tensor".to_string(),
+                Some(node),
+            ));
         }
-        let max = tensor.data.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let max = tensor
+            .data
+            .iter()
+            .copied()
+            .fold(f32::NEG_INFINITY, f32::max);
         let mut exps = Vec::with_capacity(tensor.data.len());
         let mut sum = 0.0_f32;
         for &value in &tensor.data {
@@ -474,16 +487,24 @@ fn softmax(tensor: &Tensor, node: NodeId) -> Result<RuntimeValue, InterpreterErr
             sum += exp_value;
         }
         if !sum.is_finite() || sum <= 0.0 {
-            return Err(error("Softmax numeric instability: invalid sum".to_string(), Some(node)));
+            return Err(error(
+                "Softmax numeric instability: invalid sum".to_string(),
+                Some(node),
+            ));
         }
         for v in &mut exps {
             *v /= sum;
         }
-        Ok(RuntimeValue::Tensor(Arc::new(Tensor::new(tensor.shape.clone(), exps).unwrap())))
+        Ok(RuntimeValue::Tensor(Arc::new(
+            Tensor::new(tensor.shape.clone(), exps).unwrap(),
+        )))
     } else if tensor.shape.len() == 2 {
         let row_len = tensor.shape[1];
         if row_len == 0 {
-            return Err(error("Softmax expects non-empty row".to_string(), Some(node)));
+            return Err(error(
+                "Softmax expects non-empty row".to_string(),
+                Some(node),
+            ));
         }
         let mut out = Vec::with_capacity(tensor.data.len());
         for row in tensor.data.chunks(row_len) {
@@ -496,16 +517,27 @@ fn softmax(tensor: &Tensor, node: NodeId) -> Result<RuntimeValue, InterpreterErr
                 sum += exp_value;
             }
             if !sum.is_finite() || sum <= 0.0 {
-                return Err(error("Softmax numeric instability in 2D".to_string(), Some(node)));
+                return Err(error(
+                    "Softmax numeric instability in 2D".to_string(),
+                    Some(node),
+                ));
             }
             let inv_sum = 1.0 / sum;
             for e in row_exps {
                 out.push(e * inv_sum);
             }
         }
-        Ok(RuntimeValue::Tensor(Arc::new(Tensor::new(tensor.shape.clone(), out).unwrap())))
+        Ok(RuntimeValue::Tensor(Arc::new(
+            Tensor::new(tensor.shape.clone(), out).unwrap(),
+        )))
     } else {
-        Err(error(format!("Softmax expects 1D or 2D tensor, got shape {:?}", tensor.shape), Some(node)))
+        Err(error(
+            format!(
+                "Softmax expects 1D or 2D tensor, got shape {:?}",
+                tensor.shape
+            ),
+            Some(node),
+        ))
     }
 }
 

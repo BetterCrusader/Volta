@@ -80,7 +80,10 @@ enum CseKey {
         keepdims: bool,
     },
     Conv2D(ValueId, ValueId),
-    SoftmaxCrossEntropyLossFromLogits { logits: ValueId, targets: ValueId },
+    SoftmaxCrossEntropyLossFromLogits {
+        logits: ValueId,
+        targets: ValueId,
+    },
 }
 
 #[derive(Default)]

@@ -151,7 +151,8 @@ pub fn train_graph_with_backend(
                 });
             };
 
-            epoch_loss_sum += scalar_from_runtime(loss_runtime.clone()).map_err(|e| TrainError { message: e })?;
+            epoch_loss_sum +=
+                scalar_from_runtime(loss_runtime.clone()).map_err(|e| TrainError { message: e })?;
             train_batches += 1;
 
             let seed = ones_like(&loss_runtime).map_err(|e| TrainError { message: e })?;
@@ -217,10 +218,12 @@ pub fn train_graph_with_backend(
                 })?;
                 let Some(loss_runtime) = loss_value_runtime else {
                     return Err(TrainError {
-                        message: "Forward graph produced no loss output during validation".to_string(),
+                        message: "Forward graph produced no loss output during validation"
+                            .to_string(),
                     });
                 };
-                val_loss_sum += scalar_from_runtime(loss_runtime).map_err(|e| TrainError { message: e })?;
+                val_loss_sum +=
+                    scalar_from_runtime(loss_runtime).map_err(|e| TrainError { message: e })?;
 
                 // Compute accuracy if logits are available
                 #[allow(clippy::collapsible_if)]
@@ -239,7 +242,9 @@ pub fn train_graph_with_backend(
                                 if let Some(target_rt) = context.inputs.get("target") {
                                     if let Ok(target_t) = runtime_to_tensor(target_rt.clone()) {
                                         if let Ok(targets_argmax) = target_t.argmax_axis_1() {
-                                            for (p, t) in predictions.iter().zip(targets_argmax.iter()) {
+                                            for (p, t) in
+                                                predictions.iter().zip(targets_argmax.iter())
+                                            {
                                                 if p == t {
                                                     val_correct += 1;
                                                 }
@@ -259,13 +264,31 @@ pub fn train_graph_with_backend(
             if (epoch + 1) % 10 == 0 || epoch == config.epochs - 1 {
                 if val_total > 0 {
                     let acc = (val_correct as f32 / val_total as f32) * 100.0;
-                    println!("Epoch {:>3}/{} - loss: {:.4} - val_loss: {:.4} - val_acc: {:.1}%", epoch + 1, config.epochs, epoch_train_loss, avg_val_loss, acc);
+                    println!(
+                        "Epoch {:>3}/{} - loss: {:.4} - val_loss: {:.4} - val_acc: {:.1}%",
+                        epoch + 1,
+                        config.epochs,
+                        epoch_train_loss,
+                        avg_val_loss,
+                        acc
+                    );
                 } else {
-                    println!("Epoch {:>3}/{} - loss: {:.4} - val_loss: {:.4}", epoch + 1, config.epochs, epoch_train_loss, avg_val_loss);
+                    println!(
+                        "Epoch {:>3}/{} - loss: {:.4} - val_loss: {:.4}",
+                        epoch + 1,
+                        config.epochs,
+                        epoch_train_loss,
+                        avg_val_loss
+                    );
                 }
             }
         } else if (epoch + 1) % 10 == 0 || epoch == config.epochs - 1 {
-            println!("Epoch {:>3}/{} - loss: {:.4}", epoch + 1, config.epochs, epoch_train_loss);
+            println!(
+                "Epoch {:>3}/{} - loss: {:.4}",
+                epoch + 1,
+                config.epochs,
+                epoch_train_loss
+            );
         }
     }
 

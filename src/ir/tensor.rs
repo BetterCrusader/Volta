@@ -723,13 +723,16 @@ impl Tensor {
     pub fn argmax_axis_1(&self) -> Result<Vec<usize>, TensorError> {
         if self.shape.len() != 2 {
             return Err(TensorError {
-                message: format!("argmax_axis_1 expects rank-2 tensor, got rank {}", self.shape.len()),
+                message: format!(
+                    "argmax_axis_1 expects rank-2 tensor, got rank {}",
+                    self.shape.len()
+                ),
             });
         }
-        
+
         let batch_size = self.shape[0];
         let num_classes = self.shape[1];
-        
+
         if num_classes == 0 {
             return Err(TensorError {
                 message: "argmax_axis_1 expects axis 1 to have size > 0".to_string(),
@@ -741,7 +744,7 @@ impl Tensor {
             let start = i * num_classes;
             let end = start + num_classes;
             let row = &self.data[start..end];
-            
+
             let mut max_idx = 0;
             let mut max_val = row[0];
             for (j, &val) in row.iter().enumerate().skip(1) {
@@ -752,7 +755,7 @@ impl Tensor {
             }
             out.push(max_idx);
         }
-        
+
         Ok(out)
     }
 }
@@ -1010,7 +1013,10 @@ impl Tensor {
             Self::new(self.shape.clone(), out)
         } else {
             Err(TensorError {
-                message: format!("softmax expects a 1D or 2D tensor, got shape {:?}", self.shape),
+                message: format!(
+                    "softmax expects a 1D or 2D tensor, got shape {:?}",
+                    self.shape
+                ),
             })
         }
     }

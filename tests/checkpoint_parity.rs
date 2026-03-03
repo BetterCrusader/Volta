@@ -45,7 +45,10 @@ fn test_save_load_infer_parity() {
 
     // Capture predictions from first run
     let predictions_first = parse_csv_floats("tests/data/out.csv");
-    assert!(!predictions_first.is_empty(), "First inference produced no rows");
+    assert!(
+        !predictions_first.is_empty(),
+        "First inference produced no rows"
+    );
 
     // Step 2: Load saved weights → infer again (no retrain)
     let (code2, out2) = run(&["tests/integration/iris_parity_load_infer.vt"]);
@@ -60,8 +63,16 @@ fn test_save_load_infer_parity() {
 
     // Step 3: Compare float-by-float within tolerance
     const TOLERANCE: f32 = 1e-5;
-    for (row_idx, (row1, row2)) in predictions_first.iter().zip(predictions_second.iter()).enumerate() {
-        assert_eq!(row1.len(), row2.len(), "Column count mismatch at row {row_idx}");
+    for (row_idx, (row1, row2)) in predictions_first
+        .iter()
+        .zip(predictions_second.iter())
+        .enumerate()
+    {
+        assert_eq!(
+            row1.len(),
+            row2.len(),
+            "Column count mismatch at row {row_idx}"
+        );
         for (col_idx, (a, b)) in row1.iter().zip(row2.iter()).enumerate() {
             let diff = (a - b).abs();
             assert!(

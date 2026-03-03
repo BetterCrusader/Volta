@@ -47,12 +47,28 @@ fn cpu_and_cuda_optimizers_match_state_in_strict_mode() {
             let cpu = CpuBackend;
             let cuda = CudaBackend;
 
-            let cpu_result =
-                train_graph_with_backend(&graph, loss, None, params_cpu, &dataset, &[], &config, &cpu)
-                    .expect("cpu training should pass");
-            let cuda_result =
-                train_graph_with_backend(&graph, loss, None, params_cuda, &dataset, &[], &config, &cuda)
-                    .expect("cuda training should pass");
+            let cpu_result = train_graph_with_backend(
+                &graph,
+                loss,
+                None,
+                params_cpu,
+                &dataset,
+                &[],
+                &config,
+                &cpu,
+            )
+            .expect("cpu training should pass");
+            let cuda_result = train_graph_with_backend(
+                &graph,
+                loss,
+                None,
+                params_cuda,
+                &dataset,
+                &[],
+                &config,
+                &cuda,
+            )
+            .expect("cuda training should pass");
 
             assert_eq!(cpu_result.final_parameters, cuda_result.final_parameters);
             assert_eq!(cpu_result.optimizer_state, cuda_result.optimizer_state);

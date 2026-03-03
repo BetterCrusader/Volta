@@ -8,12 +8,12 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::{BinaryOp, Expr, Program, Property, Span, Stmt};
-use crate::ir::tensor::Tensor;
 use crate::autopilot::{
     AutopilotContext, AutopilotEngine, DatasetAutopilotInput, ModelAutopilotInput,
     TrainAutopilotInput,
 };
 use crate::diagnostics::best_suggestion;
+use crate::ir::tensor::Tensor;
 use crate::rules::{
     ACTIVATIONS, AUTOPILOT_DEFAULT_ACTIVATION, DEVICES, FLOAT_EPSILON, MAX_SAFE_INT_F64, OPTIMIZERS,
 };
@@ -319,14 +319,16 @@ impl Executor {
 
                 // Versioned binary format: magic + version + model name + weights list
                 let mut buf: Vec<u8> = Vec::new();
-                buf.extend_from_slice(b"VOLT");           // magic
+                buf.extend_from_slice(b"VOLT"); // magic
                 buf.extend_from_slice(&1u32.to_le_bytes()); // format version
                 let name_bytes = model.as_bytes();
                 buf.extend_from_slice(&(name_bytes.len() as u32).to_le_bytes());
                 buf.extend_from_slice(name_bytes);
 
-                let entries: Vec<(&String, &Vec<f32>, &Vec<usize>)> =
-                    weights.iter().map(|(k, t)| (k, &t.data, &t.shape)).collect();
+                let entries: Vec<(&String, &Vec<f32>, &Vec<usize>)> = weights
+                    .iter()
+                    .map(|(k, t)| (k, &t.data, &t.shape))
+                    .collect();
                 let n = entries.len() as u32;
                 buf.extend_from_slice(&n.to_le_bytes());
                 for (param_name, data, shape) in &entries {
@@ -346,7 +348,10 @@ impl Executor {
                 std::fs::write(path, &buf).map_err(|e| {
                     Self::error(format!("Failed to save model to '{path}': {e}"), *span)
                 })?;
-                println!("Saved model '{model}' → '{path}' ({} parameters)", entries.len());
+                println!(
+                    "Saved model '{model}' → '{path}' ({} parameters)",
+                    entries.len()
+                );
             }
             Stmt::Load { model, path, span } => {
                 if !self.runtime.models.contains_key(model) {
@@ -478,7 +483,9 @@ impl Executor {
 
         // 2. Build inference graph
         let mut lower_ctx = crate::ir::lowering::LoweringContext::new();
-        let input_node = lower_ctx.push_op(crate::ir::Op::Input("input".to_string())).unwrap();
+        let input_node = lower_ctx
+            .push_op(crate::ir::Op::Input("input".to_string()))
+            .unwrap();
 
         // Lower the forward pass (without loss, but with activation)
         let _logits_node = lower_ctx.lower_model_to_graph(
@@ -496,10 +503,7 @@ impl Executor {
         for w in model_state.layers.windows(2) {
             let in_f = w[0] as usize;
             let out_f = w[1] as usize;
-            graph.bind_parameter_shape(
-                &format!("weight_{in_f}_{out_f}"),
-                vec![in_f, out_f],
-            );
+            graph.bind_parameter_shape(&format!("weight_{in_f}_{out_f}"), vec![in_f, out_f]);
             graph.bind_parameter_shape(&format!("bias_{out_f}"), vec![1, out_f]);
         }
 
@@ -529,12 +533,18 @@ impl Executor {
 
             // Populate parameters
             for (k, tensor) in &loaded_weights {
-                context.parameters.insert(k.clone(), crate::ir::RuntimeValue::Tensor(std::sync::Arc::new(tensor.clone())));
+                context.parameters.insert(
+                    k.clone(),
+                    crate::ir::RuntimeValue::Tensor(std::sync::Arc::new(tensor.clone())),
+                );
             }
 
             // Populate inputs
             for (k, tensor) in inputs {
-                context.inputs.insert(k, crate::ir::RuntimeValue::Tensor(std::sync::Arc::new(tensor)));
+                context.inputs.insert(
+                    k,
+                    crate::ir::RuntimeValue::Tensor(std::sync::Arc::new(tensor)),
+                );
             }
 
             // Rebind the actual shape for this specific execution
@@ -549,16 +559,21 @@ impl Executor {
                 &dynamic_plan.schedule.ordered_nodes,
                 &backend,
                 &context,
-            ).map_err(|e| {
-                Self::error(format!("Inference execution failed: {}", e.message), span)
-            })?;
-            
+            )
+            .map_err(|e| Self::error(format!("Inference execution failed: {}", e.message), span))?;
+
             let Some(out_runtime) = result_tensors else {
-                return Err(Self::error("Inference did not return a tensor".to_string(), span));
+                return Err(Self::error(
+                    "Inference did not return a tensor".to_string(),
+                    span,
+                ));
             };
 
             let crate::ir::RuntimeValue::Tensor(out_tensor) = out_runtime else {
-                return Err(Self::error("Inference did not return a tensor".to_string(), span));
+                return Err(Self::error(
+                    "Inference did not return a tensor".to_string(),
+                    span,
+                ));
             };
 
             for i in 0..actual_batch_size {
@@ -578,21 +593,18 @@ impl Executor {
         if !all_predictions.is_empty() {
             let num_classes = all_predictions[0].len();
             let headers: Vec<String> = (0..num_classes).map(|i| format!("pred_{i}")).collect();
-            wtr.write_record(&headers).map_err(|e| {
-                Self::error(format!("Failed to write CSV header: {e}"), span)
-            })?;
+            wtr.write_record(&headers)
+                .map_err(|e| Self::error(format!("Failed to write CSV header: {e}"), span))?;
         }
 
         for row in all_predictions {
             let string_row: Vec<String> = row.iter().map(|v| v.to_string()).collect();
-            wtr.write_record(&string_row).map_err(|e| {
-                Self::error(format!("Failed to write CSV row: {e}"), span)
-            })?;
+            wtr.write_record(&string_row)
+                .map_err(|e| Self::error(format!("Failed to write CSV row: {e}"), span))?;
         }
 
-        wtr.flush().map_err(|e| {
-            Self::error(format!("Failed to flush CSV: {e}"), span)
-        })?;
+        wtr.flush()
+            .map_err(|e| Self::error(format!("Failed to flush CSV: {e}"), span))?;
 
         println!("Inference complete. Results saved to '{}'", out_csv);
         Ok(())
@@ -787,9 +799,13 @@ impl Executor {
             )?
         } else {
             // 5. Generate a synthetic dataset block
-            let input_data: Vec<f32> = (0..batch_size * in_size).map(|_| unit_uniform.sample(&mut rng)).collect();
+            let input_data: Vec<f32> = (0..batch_size * in_size)
+                .map(|_| unit_uniform.sample(&mut rng))
+                .collect();
             let _ = input_data.len(); // suppress unused warning
-            let target_data: Vec<f32> = (0..batch_size * out_size).map(|_| unit_uniform.sample(&mut rng)).collect();
+            let target_data: Vec<f32> = (0..batch_size * out_size)
+                .map(|_| unit_uniform.sample(&mut rng))
+                .collect();
             let _ = target_data.len();
 
             let sample = TrainSample {
@@ -840,7 +856,11 @@ impl Executor {
         };
 
         // 8. Execute Backend Training Loop!
-        let logits_opt = if is_classification { Some(logits) } else { None };
+        let logits_opt = if is_classification {
+            Some(logits)
+        } else {
+            None
+        };
         match train_graph_with_backend(
             &graph,
             loss_value,
@@ -853,7 +873,10 @@ impl Executor {
         ) {
             Ok(result) => {
                 if let Some(val_loss) = result.final_val_loss {
-                    println!("Training completed. Final loss: {:.4}, Val loss: {:.4}", result.final_loss, val_loss);
+                    println!(
+                        "Training completed. Final loss: {:.4}, Val loss: {:.4}",
+                        result.final_loss, val_loss
+                    );
                 } else {
                     println!("Training completed. Final loss: {:.4}", result.final_loss);
                 }
@@ -886,7 +909,13 @@ impl Executor {
         seed: u64,
         label_col: Option<usize>,
         span: Span,
-    ) -> Result<(Vec<crate::ir::train::TrainSample>, Vec<crate::ir::train::TrainSample>), RuntimeError> {
+    ) -> Result<
+        (
+            Vec<crate::ir::train::TrainSample>,
+            Vec<crate::ir::train::TrainSample>,
+        ),
+        RuntimeError,
+    > {
         let mut rdr = csv::ReaderBuilder::new()
             .has_headers(true)
             .from_path(source_path)
@@ -894,7 +923,8 @@ impl Executor {
 
         let mut samples = Vec::new();
         for (i, result) in rdr.records().enumerate() {
-            let record = result.map_err(|e| Self::error(format!("CSV parsing error: {e}"), span))?;
+            let record =
+                result.map_err(|e| Self::error(format!("CSV parsing error: {e}"), span))?;
 
             let mut inputs = Vec::with_capacity(in_size);
             let mut targets = Vec::with_capacity(out_size);
@@ -905,7 +935,8 @@ impl Executor {
                     return Err(Self::error(
                         format!(
                             "CSV row {} has {} columns but label_col={lc} is out of bounds.",
-                            i + 2, record.len()
+                            i + 2,
+                            record.len()
                         ),
                         span,
                     ));
@@ -914,7 +945,9 @@ impl Executor {
                 let feature_cols = (0..record.len()).filter(|&c| c != lc);
                 let mut taken = 0usize;
                 for col in feature_cols {
-                    if taken == in_size { break; }
+                    if taken == in_size {
+                        break;
+                    }
                     let cell = record[col].trim();
                     let val: f32 = cell.parse().map_err(|_| {
                         Self::error(format!("Не вдалося перетворити значення '{cell}' на число у рядку {} (колонка {}).", i + 2, col + 1), span)
@@ -934,7 +967,10 @@ impl Executor {
                 // Parse label
                 let cell = record[lc].trim();
                 if cell.is_empty() {
-                    return Err(Self::error(format!("Empty label at row {} (column {}).", i + 2, lc + 1), span));
+                    return Err(Self::error(
+                        format!("Empty label at row {} (column {}).", i + 2, lc + 1),
+                        span,
+                    ));
                 }
                 let label_f: f32 = cell.parse().map_err(|_| {
                     Self::error(format!("Invalid label '{cell}' at row {} (column {}). Expected an integer class index.", i + 2, lc + 1), span)
@@ -942,7 +978,10 @@ impl Executor {
                 let label_i = label_f.round();
                 if label_i < 0.0 || label_i >= out_size as f32 {
                     return Err(Self::error(
-                        format!("Label {label_i} at row {} is out of range [0, {out_size}). Set 'num_classes' correctly.", i + 2),
+                        format!(
+                            "Label {label_i} at row {} is out of range [0, {out_size}). Set 'num_classes' correctly.",
+                            i + 2
+                        ),
                         span,
                     ));
                 }
@@ -955,7 +994,11 @@ impl Executor {
                     return Err(Self::error(
                         format!(
                             "CSV data shape mismatch at row {}. Model requires {} columns ({} inputs + {} targets), but row has {}.",
-                            i + 2, in_size + out_size, in_size, out_size, record.len()
+                            i + 2,
+                            in_size + out_size,
+                            in_size,
+                            out_size,
+                            record.len()
                         ),
                         span,
                     ));
@@ -1000,80 +1043,108 @@ impl Executor {
 
         // Train: DropLast — only full batches for stable gradients
         #[allow(clippy::needless_range_loop)]
-        let make_train_batches = |data: &[(Vec<f32>, Vec<f32>)]| -> Vec<crate::ir::train::TrainSample> {
-            let num_batches = data.len() / batch_size;
-            let mut batches = Vec::with_capacity(num_batches);
-            for b in 0..num_batches {
-                let start = b * batch_size;
-                let end = start + batch_size;
-                let mut batch_inputs = Vec::with_capacity(batch_size * in_size);
-                let mut batch_targets = Vec::with_capacity(batch_size * out_size);
-                for k in start..end {
-                    batch_inputs.extend_from_slice(&data[k].0);
-                    batch_targets.extend_from_slice(&data[k].1);
+        let make_train_batches =
+            |data: &[(Vec<f32>, Vec<f32>)]| -> Vec<crate::ir::train::TrainSample> {
+                let num_batches = data.len() / batch_size;
+                let mut batches = Vec::with_capacity(num_batches);
+                for b in 0..num_batches {
+                    let start = b * batch_size;
+                    let end = start + batch_size;
+                    let mut batch_inputs = Vec::with_capacity(batch_size * in_size);
+                    let mut batch_targets = Vec::with_capacity(batch_size * out_size);
+                    for k in start..end {
+                        batch_inputs.extend_from_slice(&data[k].0);
+                        batch_targets.extend_from_slice(&data[k].1);
+                    }
+                    let in_tensor =
+                        crate::ir::tensor::Tensor::new(vec![batch_size, in_size], batch_inputs)
+                            .unwrap();
+                    let out_tensor =
+                        crate::ir::tensor::Tensor::new(vec![batch_size, out_size], batch_targets)
+                            .unwrap();
+                    batches.push(crate::ir::train::TrainSample {
+                        inputs: [
+                            ("input".to_string(), in_tensor),
+                            ("target".to_string(), out_tensor),
+                        ]
+                        .into_iter()
+                        .collect(),
+                    });
                 }
-                let in_tensor = crate::ir::tensor::Tensor::new(vec![batch_size, in_size], batch_inputs).unwrap();
-                let out_tensor = crate::ir::tensor::Tensor::new(vec![batch_size, out_size], batch_targets).unwrap();
-                batches.push(crate::ir::train::TrainSample {
-                    inputs: [
-                        ("input".to_string(), in_tensor),
-                        ("target".to_string(), out_tensor),
-                    ].into_iter().collect(),
-                });
-            }
-            batches
-        };
+                batches
+            };
 
         // Val: keep remainder — every sample counts, even partial last batch
         #[allow(clippy::needless_range_loop)]
-        let make_val_batches = |data: &[(Vec<f32>, Vec<f32>)]| -> Vec<crate::ir::train::TrainSample> {
-            if data.is_empty() {
-                return Vec::new();
-            }
-            let mut batches = Vec::new();
-            let mut offset = 0;
-            while offset < data.len() {
-                let actual = (data.len() - offset).min(batch_size);
-                let end = offset + actual;
-                let mut batch_inputs = Vec::with_capacity(actual * in_size);
-                let mut batch_targets = Vec::with_capacity(actual * out_size);
-                for k in offset..end {
-                    batch_inputs.extend_from_slice(&data[k].0);
-                    batch_targets.extend_from_slice(&data[k].1);
+        let make_val_batches =
+            |data: &[(Vec<f32>, Vec<f32>)]| -> Vec<crate::ir::train::TrainSample> {
+                if data.is_empty() {
+                    return Vec::new();
                 }
-                let in_tensor = crate::ir::tensor::Tensor::new(vec![actual, in_size], batch_inputs).unwrap();
-                let out_tensor = crate::ir::tensor::Tensor::new(vec![actual, out_size], batch_targets).unwrap();
-                batches.push(crate::ir::train::TrainSample {
-                    inputs: [
-                        ("input".to_string(), in_tensor),
-                        ("target".to_string(), out_tensor),
-                    ].into_iter().collect(),
-                });
-                offset = end;
-            }
-            batches
-        };
+                let mut batches = Vec::new();
+                let mut offset = 0;
+                while offset < data.len() {
+                    let actual = (data.len() - offset).min(batch_size);
+                    let end = offset + actual;
+                    let mut batch_inputs = Vec::with_capacity(actual * in_size);
+                    let mut batch_targets = Vec::with_capacity(actual * out_size);
+                    for k in offset..end {
+                        batch_inputs.extend_from_slice(&data[k].0);
+                        batch_targets.extend_from_slice(&data[k].1);
+                    }
+                    let in_tensor =
+                        crate::ir::tensor::Tensor::new(vec![actual, in_size], batch_inputs)
+                            .unwrap();
+                    let out_tensor =
+                        crate::ir::tensor::Tensor::new(vec![actual, out_size], batch_targets)
+                            .unwrap();
+                    batches.push(crate::ir::train::TrainSample {
+                        inputs: [
+                            ("input".to_string(), in_tensor),
+                            ("target".to_string(), out_tensor),
+                        ]
+                        .into_iter()
+                        .collect(),
+                    });
+                    offset = end;
+                }
+                batches
+            };
 
         let train_batches = make_train_batches(train_samples);
         let val_batches = make_val_batches(val_samples);
 
         if train_batches.is_empty() {
-             return Err(Self::error(
-                 format!("Train set has {} samples, which is fewer than batch size {}", train_samples.len(), batch_size),
-                 span,
-             ));
+            return Err(Self::error(
+                format!(
+                    "Train set has {} samples, which is fewer than batch size {}",
+                    train_samples.len(),
+                    batch_size
+                ),
+                span,
+            ));
         }
 
         if val_samples.is_empty() {
             println!(
                 "Loaded {:<4} total samples from '{}'. Train: {} batches. Validation skipped: no samples after split.",
-                total_samples, source_path, train_batches.len()
+                total_samples,
+                source_path,
+                train_batches.len()
             );
         } else {
-            let partial = if val_samples.len() % batch_size != 0 { " (incl. partial)" } else { "" };
+            let partial = if val_samples.len() % batch_size != 0 {
+                " (incl. partial)"
+            } else {
+                ""
+            };
             println!(
                 "Loaded {:<4} total samples from '{}'. Train: {} batches, Val: {} batches{}.",
-                total_samples, source_path, train_batches.len(), val_batches.len(), partial
+                total_samples,
+                source_path,
+                train_batches.len(),
+                val_batches.len(),
+                partial
             );
         }
 
@@ -1314,7 +1385,10 @@ impl Executor {
         let label_col = match Self::find_prop(props, "label_col") {
             Some(values) => {
                 if values.len() != 1 {
-                    return Err(Self::error("dataset.label_col expects one integer.".into(), span));
+                    return Err(Self::error(
+                        "dataset.label_col expects one integer.".into(),
+                        span,
+                    ));
                 }
                 let v = self.expect_int_value(&values[0], "dataset.label_col")?;
                 if v < 0 {
@@ -1328,11 +1402,17 @@ impl Executor {
         let num_classes = match Self::find_prop(props, "num_classes") {
             Some(values) => {
                 if values.len() != 1 {
-                    return Err(Self::error("dataset.num_classes expects one integer.".into(), span));
+                    return Err(Self::error(
+                        "dataset.num_classes expects one integer.".into(),
+                        span,
+                    ));
                 }
                 let v = self.expect_int_value(&values[0], "dataset.num_classes")?;
                 if v < 2 {
-                    return Err(Self::error("dataset.num_classes must be >= 2.".into(), span));
+                    return Err(Self::error(
+                        "dataset.num_classes must be >= 2.".into(),
+                        span,
+                    ));
                 }
                 Some(v as usize)
             }
@@ -1346,7 +1426,14 @@ impl Executor {
             ));
         }
 
-        Ok(DatasetState { batch, shuffle, source, val_split, label_col, num_classes })
+        Ok(DatasetState {
+            batch,
+            shuffle,
+            source,
+            val_split,
+            label_col,
+            num_classes,
+        })
     }
 
     #[allow(clippy::too_many_lines)]

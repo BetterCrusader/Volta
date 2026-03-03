@@ -437,41 +437,57 @@ pub fn build_reverse_graph(
                 let (_, sm) = backward
                     .add_op(block, Op::Softmax(logits_m))
                     .map_err(|err| AutogradError {
-                        message: format!("Failed to build softmax for cross_entropy grad: {}", err.message),
+                        message: format!(
+                            "Failed to build softmax for cross_entropy grad: {}",
+                            err.message
+                        ),
                     })?;
 
                 // 2. Subtract targets: softmax(logits) - targets
                 let (_, diff) = backward
                     .add_op(block, Op::Sub(sm, targets_m))
                     .map_err(|err| AutogradError {
-                        message: format!("Failed to build diff for cross_entropy grad: {}", err.message),
+                        message: format!(
+                            "Failed to build diff for cross_entropy grad: {}",
+                            err.message
+                        ),
                     })?;
 
                 // 3. Divide by batch_size. Shape of logits is [batch_size, num_classes]
                 let logits_shape = tensor_shape_for(&shape_facts, *logits)?;
                 let batch_size = logits_shape[0] as f32;
-                
+
                 let bs_const = backward
-                    .add_op(block, Op::ConstTensor {
-                        shape: vec![],
-                        data: vec![batch_size],
-                    })
+                    .add_op(
+                        block,
+                        Op::ConstTensor {
+                            shape: vec![],
+                            data: vec![batch_size],
+                        },
+                    )
                     .map_err(|err| AutogradError {
-                        message: format!("Failed to build batch_size const: {}", err.message)
+                        message: format!("Failed to build batch_size const: {}", err.message),
                     })?
                     .1;
 
-                let (_, grad_unscaled) = backward
-                    .add_op(block, Op::Div(diff, bs_const))
-                    .map_err(|err| AutogradError {
-                        message: format!("Failed to build div for cross_entropy grad: {}", err.message)
-                    })?;
+                let (_, grad_unscaled) =
+                    backward
+                        .add_op(block, Op::Div(diff, bs_const))
+                        .map_err(|err| AutogradError {
+                            message: format!(
+                                "Failed to build div for cross_entropy grad: {}",
+                                err.message
+                            ),
+                        })?;
 
                 // 4. Multiply by upstream gradient (usually 1.0 for loss)
                 let (_, grad) = backward
                     .add_op(block, Op::Mul(grad_unscaled, upstream))
                     .map_err(|err| AutogradError {
-                        message: format!("Failed to build mul upstream for cross_entropy grad: {}", err.message)
+                        message: format!(
+                            "Failed to build mul upstream for cross_entropy grad: {}",
+                            err.message
+                        ),
                     })?;
 
                 accumulate_grad(&mut backward, block, &mut grad_map, logits_m, grad)?;

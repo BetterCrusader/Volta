@@ -229,7 +229,8 @@ impl Parser {
             ));
         }
 
-        let (input_csv, _in_span) = self.expect_string("Missing input CSV path in infer statement")?;
+        let (input_csv, _in_span) =
+            self.expect_string("Missing input CSV path in infer statement")?;
 
         if !self.match_kind(&TokenKind::As) {
             return Err(self.error_here_with_hint(
@@ -238,7 +239,8 @@ impl Parser {
             ));
         }
 
-        let (out_csv, out_span) = self.expect_string("Missing output CSV path in infer statement")?;
+        let (out_csv, out_span) =
+            self.expect_string("Missing output CSV path in infer statement")?;
         self.require_stmt_terminator()?;
 
         Ok(Stmt::Infer {
