@@ -36,6 +36,20 @@ pub struct MlpTopology {
     pub use_layernorm: bool,
 }
 
+const TARGET_CPU_NATIVE_RUSTFLAG: &str = "-C target-cpu=native";
+
+fn merged_rustflags(existing: Option<&str>) -> String {
+    let Some(existing) = existing.map(str::trim).filter(|flags| !flags.is_empty()) else {
+        return TARGET_CPU_NATIVE_RUSTFLAG.to_string();
+    };
+
+    if existing.contains("target-cpu=") {
+        return existing.to_string();
+    }
+
+    format!("{existing} {TARGET_CPU_NATIVE_RUSTFLAG}")
+}
+
 /// Compile a Rust-based training DLL using gemm crate.
 /// Requires: rustc in PATH, gemm crate compiled as rlib in target/release/deps/.
 pub fn compile_mlp_train_rust_dll(
@@ -73,6 +87,7 @@ pub fn compile_mlp_train_rust_dll(
     // Resolve crate_dir to absolute path for --target-dir
     let abs_crate_dir = std::fs::canonicalize(&crate_dir).unwrap_or_else(|_| crate_dir.clone());
     let target_dir = abs_crate_dir.join("target");
+    let rustflags = merged_rustflags(std::env::var("RUSTFLAGS").ok().as_deref());
 
     // Run cargo build --release in the mini crate
     let status = std::process::Command::new("cargo")
@@ -81,7 +96,7 @@ pub fn compile_mlp_train_rust_dll(
         .arg("--target-dir")
         .arg(&target_dir)
         .current_dir(&crate_dir)
-        .env("RUSTFLAGS", "-C target-cpu=native")
+        .env("RUSTFLAGS", rustflags)
         .status()
         .map_err(|e| RustTrainCodegenError {
             message: format!("cargo: {e}"),
@@ -174,6 +189,69 @@ fn generate_rust_source(
     // Uses beta=1 (accumulate into W) and alpha=-lr, skipping intermediate dw buffer
     s.push_str("fn sgd_fused_tn(W: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize, lr: f32) {\n");
     s.push_str("    unsafe { gemm::gemm(m,n,k, W,1isize,n as isize, true, A,m as isize,1isize, B,1isize,n as isize, 1f32,-lr, false,false,false, par(m,k,n)); }\n");
+    s.push_str("}\n\n");
+    // Adam weight update: dw already computed, update m/v/w in-place with AVX2+Rayon
+    // Threshold: parallelize when n >= 1<<17 (128K elements)
+    s.push_str("fn adam_update(w: *mut f32, mw: *mut f32, vw: *mut f32, dw: *const f32, n: usize, b1: f32, b2: f32, bc1: f32, bc2: f32, lr: f32, eps: f32, wd: f32) {\n");
+    s.push_str("    if n >= 1 << 17 {\n");
+    s.push_str("        use rayon::prelude::*;\n");
+    s.push_str("        let chunk = 1 << 13usize;\n");
+    s.push_str("        let w_s = w as usize; let mw_s = mw as usize; let vw_s = vw as usize; let dw_s = dw as usize;\n");
+    s.push_str("        (0..n).into_par_iter().step_by(chunk).for_each(|base| {\n");
+    s.push_str("            let end = (base + chunk).min(n);\n");
+    s.push_str("            unsafe { adam_update_slice((w_s + base*4) as *mut f32, (mw_s + base*4) as *mut f32, (vw_s + base*4) as *mut f32, (dw_s + base*4) as *const f32, 0, end - base, b1, b2, bc1, bc2, lr, eps, wd); }\n");
+    s.push_str("        });\n");
+    s.push_str("    } else {\n");
+    s.push_str("        unsafe { adam_update_slice(w, mw, vw, dw, 0, n, b1, b2, bc1, bc2, lr, eps, wd); }\n");
+    s.push_str("    }\n");
+    s.push_str("}\n\n");
+    s.push_str("#[cfg(target_arch = \"x86_64\")]\n");
+    s.push_str("#[target_feature(enable = \"avx2\")]\n");
+    s.push_str("unsafe fn adam_update_slice(w: *mut f32, mw: *mut f32, vw: *mut f32, dw: *const f32, start: usize, end: usize, b1: f32, b2: f32, bc1: f32, bc2: f32, lr: f32, eps: f32, wd: f32) {\n");
+    s.push_str("    use std::arch::x86_64::*;\n");
+    s.push_str("    let vb1 = _mm256_set1_ps(b1); let v1mb1 = _mm256_set1_ps(1.0 - b1);\n");
+    s.push_str("    let vb2 = _mm256_set1_ps(b2); let v1mb2 = _mm256_set1_ps(1.0 - b2);\n");
+    s.push_str("    let vbc1 = _mm256_set1_ps(bc1); let vbc2 = _mm256_set1_ps(bc2);\n");
+    s.push_str("    let vlr = _mm256_set1_ps(lr); let veps = _mm256_set1_ps(eps);\n");
+    s.push_str("    let vwd = _mm256_set1_ps(wd);\n");
+    s.push_str("    let mut i = start;\n");
+    s.push_str("    while i + 8 <= end {\n");
+    s.push_str("        let g = _mm256_loadu_ps(dw.add(i));\n");
+    s.push_str("        let m0 = _mm256_loadu_ps(mw.add(i));\n");
+    s.push_str("        let v0 = _mm256_loadu_ps(vw.add(i));\n");
+    s.push_str(
+        "        let m1 = _mm256_add_ps(_mm256_mul_ps(vb1, m0), _mm256_mul_ps(v1mb1, g));\n",
+    );
+    s.push_str("        let v1 = _mm256_add_ps(_mm256_mul_ps(vb2, v0), _mm256_mul_ps(v1mb2, _mm256_mul_ps(g, g)));\n");
+    s.push_str("        _mm256_storeu_ps(mw.add(i), m1);\n");
+    s.push_str("        _mm256_storeu_ps(vw.add(i), v1);\n");
+    s.push_str("        let mhat = _mm256_div_ps(m1, vbc1);\n");
+    s.push_str("        let vhat = _mm256_div_ps(v1, vbc2);\n");
+    s.push_str("        let denom = _mm256_add_ps(_mm256_sqrt_ps(vhat), veps);\n");
+    s.push_str("        let w0 = _mm256_loadu_ps(w.add(i));\n");
+    s.push_str("        // step = lr * (mhat/denom + wd*w)\n");
+    s.push_str("        let step = _mm256_mul_ps(vlr, _mm256_add_ps(_mm256_div_ps(mhat, denom), _mm256_mul_ps(vwd, w0)));\n");
+    s.push_str("        _mm256_storeu_ps(w.add(i), _mm256_sub_ps(w0, step));\n");
+    s.push_str("        i += 8;\n");
+    s.push_str("    }\n");
+    s.push_str("    while i < end {\n");
+    s.push_str("        let g = *dw.add(i); let m0 = *mw.add(i); let v0 = *vw.add(i);\n");
+    s.push_str("        let m1 = b1*m0 + (1.0-b1)*g; *mw.add(i) = m1;\n");
+    s.push_str("        let v1 = b2*v0 + (1.0-b2)*g*g; *vw.add(i) = v1;\n");
+    s.push_str("        let w0 = *w.add(i);\n");
+    s.push_str("        *w.add(i) = w0 - lr * ((m1/bc1) / ((v1/bc2).sqrt() + eps) + wd * w0);\n");
+    s.push_str("        i += 1;\n");
+    s.push_str("    }\n");
+    s.push_str("}\n");
+    s.push_str("#[cfg(not(target_arch = \"x86_64\"))]\n");
+    s.push_str("unsafe fn adam_update_slice(w: *mut f32, mw: *mut f32, vw: *mut f32, dw: *const f32, start: usize, end: usize, b1: f32, b2: f32, bc1: f32, bc2: f32, lr: f32, eps: f32, wd: f32) {\n");
+    s.push_str("    for i in start..end {\n");
+    s.push_str("        let g = *dw.add(i); let m0 = *mw.add(i); let v0 = *vw.add(i);\n");
+    s.push_str("        let m1 = b1*m0 + (1.0-b1)*g; *mw.add(i) = m1;\n");
+    s.push_str("        let v1 = b2*v0 + (1.0-b2)*g*g; *vw.add(i) = v1;\n");
+    s.push_str("        let w0 = *w.add(i);\n");
+    s.push_str("        *w.add(i) = w0 - lr * ((m1/bc1) / ((v1/bc2).sqrt() + eps) + wd * w0);\n");
+    s.push_str("    }\n");
     s.push_str("}\n\n");
     // C[m×n] = A[m×k] @ B^T  where B stored as [n×k] row-major
     // B^T rhs strides: rhs_rs=b_cols (p-step), rhs_cs=1 (j-step)
@@ -751,38 +829,12 @@ fn generate_rust_source(
     for i in (0..n).rev() {
         let (r, c) = (layers[i], layers[i + 1]);
         if use_adam_any {
-            // Adam/AdamW weight update
+            // Adam/AdamW weight update — AVX2 + Rayon via adam_update()
+            let wd_val = if use_adamw { "wd" } else { "0.0f32" };
             s.push_str(&format!("    sgemm_tn((*h).dw{i}, (*h).act{i} as *const f32, (*h).delta{i} as *const f32, {r}, B, {c});\n"));
-            // W update
-            s.push_str(&format!("    for k in 0..{r}*{c} {{\n"));
-            s.push_str(&format!("        let g = *(*h).dw{i}.add(k);\n"));
-            s.push_str(&format!(
-                "        let m = b1 * *(*h).mw{i}.add(k) + (1.0-b1)*g; *(*h).mw{i}.add(k) = m;\n"
-            ));
-            s.push_str(&format!(
-                "        let v = b2 * *(*h).vw{i}.add(k) + (1.0-b2)*g*g; *(*h).vw{i}.add(k) = v;\n"
-            ));
-            if use_adamw {
-                s.push_str(&format!("        *(*h).w{i}.add(k) -= lr * ((m/bc1) / ((v/bc2).sqrt() + eps) + wd * *(*h).w{i}.add(k));\n"));
-            } else {
-                s.push_str(&format!(
-                    "        *(*h).w{i}.add(k) -= lr * (m/bc1) / ((v/bc2).sqrt() + eps);\n"
-                ));
-            }
-            s.push_str("    }\n");
-            // Bias update (no weight decay on biases)
-            s.push_str(&format!("    for k in 0..{c} {{\n"));
-            s.push_str(&format!("        let g = *(*h).db{i}.add(k);\n"));
-            s.push_str(&format!(
-                "        let m = b1 * *(*h).mb{i}.add(k) + (1.0-b1)*g; *(*h).mb{i}.add(k) = m;\n"
-            ));
-            s.push_str(&format!(
-                "        let v = b2 * *(*h).vb{i}.add(k) + (1.0-b2)*g*g; *(*h).vb{i}.add(k) = v;\n"
-            ));
-            s.push_str(&format!(
-                "        *(*h).b{i}.add(k) -= lr * (m/bc1) / ((v/bc2).sqrt() + eps);\n"
-            ));
-            s.push_str("    }\n");
+            s.push_str(&format!("    adam_update((*h).w{i}, (*h).mw{i}, (*h).vw{i}, (*h).dw{i} as *const f32, {r}*{c}, b1, b2, bc1, bc2, lr, eps, {wd_val});\n"));
+            // Bias update (no weight decay on biases, always wd=0)
+            s.push_str(&format!("    adam_update((*h).b{i}, (*h).mb{i}, (*h).vb{i}, (*h).db{i} as *const f32, {c}, b1, b2, bc1, bc2, lr, eps, 0.0f32);\n"));
         } else if use_adagrad {
             // Adagrad: G += g², p -= lr * g / sqrt(G + eps)
             // Use sqrt(G + eps) instead of sqrt(G) + eps for numerical stability:
@@ -813,4 +865,31 @@ fn generate_rust_source(
     s.push_str("}\n");
 
     Ok(s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::merged_rustflags;
+
+    #[test]
+    fn merged_rustflags_defaults_to_target_cpu_native() {
+        assert_eq!(merged_rustflags(None), "-C target-cpu=native");
+        assert_eq!(merged_rustflags(Some("   ")), "-C target-cpu=native");
+    }
+
+    #[test]
+    fn merged_rustflags_appends_target_cpu_native_when_missing() {
+        assert_eq!(
+            merged_rustflags(Some("-C opt-level=3")),
+            "-C opt-level=3 -C target-cpu=native"
+        );
+    }
+
+    #[test]
+    fn merged_rustflags_respects_existing_target_cpu_setting() {
+        assert_eq!(
+            merged_rustflags(Some("-C target-cpu=x86-64-v3 -C debuginfo=1")),
+            "-C target-cpu=x86-64-v3 -C debuginfo=1"
+        );
+    }
 }
