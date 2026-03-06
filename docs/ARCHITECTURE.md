@@ -186,6 +186,19 @@ Read at startup via `CompilerFlags::from_env()` in `compiler_flags.rs`:
 
 ---
 
+## Security limits
+
+All external-facing allocation paths enforce hard upper bounds to prevent OOM/DoS:
+
+| Guard | Location | Limit |
+|---|---|---|
+| `MAX_TENSOR_ELEMENTS` | `tensor.rs` | 512 Mi elements (2 GiB f32) |
+| `MAX_ONNX_FILE_BYTES` | `onnx.rs` | 2 GiB |
+
+These checks happen before any allocation. `Tensor::new`, `Tensor::zeros`, and `Tensor::ones` all return `TensorError` if the requested size exceeds the limit. `import_onnx_bytes` rejects oversized input before protobuf decoding begins.
+
+---
+
 ## Known bugs fixed (non-obvious)
 
 - `Op::Output` node was missing from the IR graph in `executor.rs` — required `lower_ctx.push_op(Op::Output(logits))`

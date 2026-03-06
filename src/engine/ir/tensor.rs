@@ -13,6 +13,10 @@ use crate::engine::ir::kernels::{
     activations, math, norm, reduce, utils,
 };
 
+/// Maximum number of elements allowed in a single tensor (512 Mi f32 = 2 GiB).
+/// Exceeding this limit returns a `TensorError` instead of attempting allocation.
+pub const MAX_TENSOR_ELEMENTS: usize = 1 << 29; // 536_870_912
+
 // ── Core types ────────────────────────────────────────────────────────────────
 
 /// Dense f32 tensor with support for arbitrary strides and offsets (Views).
@@ -54,6 +58,13 @@ impl Tensor {
         let expected = utils::element_count(&shape).ok_or_else(|| TensorError {
             message: "Invalid tensor shape: overflow while computing element count".to_string(),
         })?;
+        if expected > MAX_TENSOR_ELEMENTS {
+            return Err(TensorError {
+                message: format!(
+                    "Tensor too large: {expected} elements exceeds limit of {MAX_TENSOR_ELEMENTS}"
+                ),
+            });
+        }
         if expected != data.len() {
             return Err(TensorError {
                 message: format!(
@@ -75,6 +86,13 @@ impl Tensor {
         let count = utils::element_count(&shape).ok_or_else(|| TensorError {
             message: "Invalid tensor shape: overflow while computing element count".to_string(),
         })?;
+        if count > MAX_TENSOR_ELEMENTS {
+            return Err(TensorError {
+                message: format!(
+                    "Tensor too large: {count} elements exceeds limit of {MAX_TENSOR_ELEMENTS}"
+                ),
+            });
+        }
         Ok(Self {
             shape: shape.clone(),
             strides: utils::default_strides(&shape),
@@ -87,6 +105,13 @@ impl Tensor {
         let count = utils::element_count(&shape).ok_or_else(|| TensorError {
             message: "Invalid tensor shape: overflow while computing element count".to_string(),
         })?;
+        if count > MAX_TENSOR_ELEMENTS {
+            return Err(TensorError {
+                message: format!(
+                    "Tensor too large: {count} elements exceeds limit of {MAX_TENSOR_ELEMENTS}"
+                ),
+            });
+        }
         Ok(Self {
             shape: shape.clone(),
             strides: utils::default_strides(&shape),

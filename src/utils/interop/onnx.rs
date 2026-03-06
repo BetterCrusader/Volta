@@ -9,6 +9,9 @@ use std::path::Path;
 use tract_onnx::pb;
 
 const MAX_SUPPORTED_ONNX_OPSET: i64 = 18;
+/// Maximum ONNX file size accepted by `import_onnx_file` / `import_onnx_bytes`.
+/// Files larger than this limit are rejected before decoding (2 GiB).
+const MAX_ONNX_FILE_BYTES: usize = 2 * 1024 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum OnnxOpStub {
@@ -519,6 +522,13 @@ pub fn import_onnx_stub_graph(source: &OnnxGraphStub) -> Result<ImportedProgram,
 /// Returns [`InteropError`] when protobuf decoding fails or when the importer
 /// encounters unsupported operators, attributes, dtypes, or shape constraints.
 pub fn import_onnx_bytes(bytes: &[u8]) -> Result<ImportedProgram, InteropError> {
+    if bytes.len() > MAX_ONNX_FILE_BYTES {
+        return Err(InteropError::new(format!(
+            "ONNX input too large: {} bytes exceeds limit of {} bytes",
+            bytes.len(),
+            MAX_ONNX_FILE_BYTES
+        )));
+    }
     let model = pb::ModelProto::decode(bytes)
         .map_err(|err| InteropError::new(format!("failed to decode ONNX protobuf: {err}")))?;
     OnnxImporter::default().import_model_proto(&model)
