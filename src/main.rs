@@ -182,9 +182,7 @@ fn main() -> ExitCode {
                         return ExitCode::from(1);
                     }
                 }
-                match executor
-                    .compile_first_model_to_object(path, command.output_path.as_deref())
-                {
+                match executor.compile_first_model_to_object(path, command.output_path.as_deref()) {
                     Ok(exe_path) => {
                         println!("Compiled: {exe_path}");
                         ExitCode::SUCCESS
@@ -234,10 +232,7 @@ fn main() -> ExitCode {
                 }
             }
             let result = if command.use_rust {
-                executor.compile_first_model_to_train_rust_dll(
-                    path,
-                    command.output_path.as_deref(),
-                )
+                executor.compile_first_model_to_train_rust_dll(path, command.output_path.as_deref())
             } else {
                 executor.compile_first_model_to_train_dll(path, command.output_path.as_deref())
             };
