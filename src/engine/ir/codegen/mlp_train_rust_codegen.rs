@@ -1,16 +1,15 @@
-/// Rust-based MLP training codegen.
-///
-/// Generates a Rust source file that:
-/// - Uses `gemm` crate (already in Cargo.toml) for all matrix multiplications
-/// - Compiles with `rustc --crate-type cdylib` using the same gemm dependency
-/// - Provides the same C ABI as mlp_train_codegen (C version)
-///
-/// Advantage over C version: gemm crate uses Rayon for parallelism and
-/// achieves ~70-80% of MKL throughput vs our C tiled_gemm ~50%.
-///
-/// Strategy: emit a standalone .rs file that imports gemm via extern crate
-/// and compiles with the prebuilt gemm.rlib from the current cargo build.
-
+//! Rust-based MLP training codegen.
+//!
+//! Generates a Rust source file that:
+//! - Uses `gemm` crate (already in Cargo.toml) for all matrix multiplications
+//! - Compiles with `rustc --crate-type cdylib` using the same gemm dependency
+//! - Provides the same C ABI as mlp_train_codegen (C version)
+//!
+//! Advantage over C version: gemm crate uses Rayon for parallelism and
+//! achieves ~70-80% of MKL throughput vs our C tiled_gemm ~50%.
+//!
+//! Strategy: emit a standalone .rs file that imports gemm via extern crate
+//! and compiles with the prebuilt gemm.rlib from the current cargo build.
 use std::path::Path;
 
 #[derive(Debug)]
@@ -47,12 +46,14 @@ pub fn compile_mlp_train_rust_dll(
     // Create a temporary cargo crate directory next to out_dll
     let crate_dir = out_dll.with_extension("_rust_crate");
     let src_dir = crate_dir.join("src");
-    std::fs::create_dir_all(&src_dir)
-        .map_err(|e| RustTrainCodegenError { message: format!("mkdir: {e}") })?;
+    std::fs::create_dir_all(&src_dir).map_err(|e| RustTrainCodegenError {
+        message: format!("mkdir: {e}"),
+    })?;
 
     let code = generate_rust_source(topology, init_weights)?;
-    std::fs::write(src_dir.join("lib.rs"), &code)
-        .map_err(|e| RustTrainCodegenError { message: format!("write lib.rs: {e}") })?;
+    std::fs::write(src_dir.join("lib.rs"), &code).map_err(|e| RustTrainCodegenError {
+        message: format!("write lib.rs: {e}"),
+    })?;
 
     let gemm_version = "0.19";
 
@@ -63,23 +64,28 @@ pub fn compile_mlp_train_rust_dll(
         [profile.release]\npanic = \"abort\"\nopt-level = 3\n\n\
         [dependencies]\ngemm = {{ version = \"{gemm_version}\", features = [\"rayon\", \"x86-v4\"] }}\n"
     );
-    std::fs::write(crate_dir.join("Cargo.toml"), &cargo_toml)
-        .map_err(|e| RustTrainCodegenError { message: format!("write Cargo.toml: {e}") })?;
+    std::fs::write(crate_dir.join("Cargo.toml"), &cargo_toml).map_err(|e| {
+        RustTrainCodegenError {
+            message: format!("write Cargo.toml: {e}"),
+        }
+    })?;
 
     // Resolve crate_dir to absolute path for --target-dir
-    let abs_crate_dir = std::fs::canonicalize(&crate_dir)
-        .unwrap_or_else(|_| crate_dir.clone());
+    let abs_crate_dir = std::fs::canonicalize(&crate_dir).unwrap_or_else(|_| crate_dir.clone());
     let target_dir = abs_crate_dir.join("target");
 
     // Run cargo build --release in the mini crate
     let status = std::process::Command::new("cargo")
         .arg("build")
         .arg("--release")
-        .arg("--target-dir").arg(&target_dir)
+        .arg("--target-dir")
+        .arg(&target_dir)
         .current_dir(&crate_dir)
         .env("RUSTFLAGS", "-C target-cpu=native")
         .status()
-        .map_err(|e| RustTrainCodegenError { message: format!("cargo: {e}") })?;
+        .map_err(|e| RustTrainCodegenError {
+            message: format!("cargo: {e}"),
+        })?;
     if !status.success() {
         return Err(RustTrainCodegenError {
             message: format!("cargo build failed in {}", crate_dir.display()),
@@ -87,7 +93,8 @@ pub fn compile_mlp_train_rust_dll(
     }
 
     // Find the built DLL
-    let built_dll = target_dir.join("release")
+    let built_dll = target_dir
+        .join("release")
         .join(if cfg!(target_os = "windows") {
             "volta_train_rust.dll"
         } else {
@@ -100,8 +107,9 @@ pub fn compile_mlp_train_rust_dll(
         });
     }
 
-    std::fs::copy(&built_dll, out_dll)
-        .map_err(|e| RustTrainCodegenError { message: format!("copy DLL: {e}") })?;
+    std::fs::copy(&built_dll, out_dll).map_err(|e| RustTrainCodegenError {
+        message: format!("copy DLL: {e}"),
+    })?;
 
     Ok(())
 }
@@ -113,7 +121,9 @@ fn generate_rust_source(
     let layers = &topology.layers;
     let nl = layers.len();
     if nl < 2 {
-        return Err(RustTrainCodegenError { message: "need >= 2 layer sizes".into() });
+        return Err(RustTrainCodegenError {
+            message: "need >= 2 layer sizes".into(),
+        });
     }
     let n = nl - 1;
 
@@ -148,12 +158,16 @@ fn generate_rust_source(
     s.push_str("    gemm::Parallelism::None\n");
     s.push_str("}\n\n");
     // C = A[m×k] @ B[k×n]  (standard row-major)
-    s.push_str("fn sgemm(C: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize) {\n");
+    s.push_str(
+        "fn sgemm(C: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize) {\n",
+    );
     s.push_str("    unsafe { gemm::gemm(m,n,k, C,1isize,n as isize, false, A,1isize,k as isize, B,1isize,n as isize, 0f32,1f32, false,false,false, par(m,k,n)); }\n");
     s.push_str("}\n\n");
     // C[m×n] = A^T[m×k] @ B[k×n]  where A stored as [k×m] row-major
     // A^T[i,p] = A[p,i] = A_ptr[p*m + i]  → lhs_rs=1, lhs_cs=m
-    s.push_str("fn sgemm_tn(C: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize) {\n");
+    s.push_str(
+        "fn sgemm_tn(C: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize) {\n",
+    );
     s.push_str("    unsafe { gemm::gemm(m,n,k, C,1isize,n as isize, false, A,m as isize,1isize, B,1isize,n as isize, 0f32,1f32, false,false,false, par(m,k,n)); }\n");
     s.push_str("}\n\n");
     // W[m×n] -= lr * A^T[m×k] @ B[k×n]  — fused dW compute + SGD update
@@ -197,7 +211,9 @@ fn generate_rust_source(
     s.push_str("    _mm256_storeu_ps(dst.add((bj+6)*dst_rows+bi),o6); _mm256_storeu_ps(dst.add((bj+7)*dst_rows+bi),o7);\n");
     s.push_str("}\n\n");
     // scalar fallback for non-multiple-of-8 (handles remainder strips)
-    s.push_str("fn fast_transpose_scalar(dst: *mut f32, src: *const f32, rows: usize, cols: usize) {\n");
+    s.push_str(
+        "fn fast_transpose_scalar(dst: *mut f32, src: *const f32, rows: usize, cols: usize) {\n",
+    );
     s.push_str("    const T: usize = 32;\n");
     s.push_str("    let mut i = 0usize; while i < rows {\n");
     s.push_str("        let imax = if i+T<rows{i+T}else{rows}; let mut j=0usize; while j<cols {\n");
@@ -225,31 +241,57 @@ fn generate_rust_source(
 
     for i in 0..n {
         let (r, c) = (layers[i], layers[i + 1]);
-        field_decls.push_str(&format!("    w{i}: *mut f32, b{i}: *mut f32, dw{i}: *mut f32, db{i}: *mut f32,\n"));
+        field_decls.push_str(&format!(
+            "    w{i}: *mut f32, b{i}: *mut f32, dw{i}: *mut f32, db{i}: *mut f32,\n"
+        ));
         // tmp{i}: [r×batch] for W@delta_T output; dt{i}: [c×batch] transposed delta for dX GEMM
-        field_decls.push_str(&format!("    tmp{i}: *mut f32, dt{i}: *mut f32, delta{i}: *mut f32,\n"));
+        field_decls.push_str(&format!(
+            "    tmp{i}: *mut f32, dt{i}: *mut f32, delta{i}: *mut f32,\n"
+        ));
 
-        alloc_code.push_str(&format!("        w{i}: alloc_f32({r}*{c}), b{i}: alloc_f32({c}),\n"));
-        alloc_code.push_str(&format!("        dw{i}: alloc_f32({r}*{c}), db{i}: alloc_f32({c}),\n"));
+        alloc_code.push_str(&format!(
+            "        w{i}: alloc_f32({r}*{c}), b{i}: alloc_f32({c}),\n"
+        ));
+        alloc_code.push_str(&format!(
+            "        dw{i}: alloc_f32({r}*{c}), db{i}: alloc_f32({c}),\n"
+        ));
         alloc_code.push_str(&format!("        tmp{i}: alloc_f32({r}*batch), dt{i}: alloc_f32({c}*batch), delta{i}: alloc_f32(batch*{c}),\n"));
 
-        free_code.push_str(&format!("        free_f32(h.w{i},{r}*{c}); free_f32(h.b{i},{c});\n"));
-        free_code.push_str(&format!("        free_f32(h.dw{i},{r}*{c}); free_f32(h.db{i},{c});\n"));
+        free_code.push_str(&format!(
+            "        free_f32(h.w{i},{r}*{c}); free_f32(h.b{i},{c});\n"
+        ));
+        free_code.push_str(&format!(
+            "        free_f32(h.dw{i},{r}*{c}); free_f32(h.db{i},{c});\n"
+        ));
         free_code.push_str(&format!("        free_f32(h.tmp{i},{r}*h.batch); free_f32(h.dt{i},{c}*h.batch); free_f32(h.delta{i},h.batch*{c});\n"));
 
         // Adam/AdamW moment buffers
         if use_adam_any {
-            field_decls.push_str(&format!("    mw{i}: *mut f32, vw{i}: *mut f32, mb{i}: *mut f32, vb{i}: *mut f32,\n"));
-            alloc_code.push_str(&format!("        mw{i}: alloc_f32({r}*{c}), vw{i}: alloc_f32({r}*{c}),\n"));
-            alloc_code.push_str(&format!("        mb{i}: alloc_f32({c}), vb{i}: alloc_f32({c}),\n"));
-            free_code.push_str(&format!("        free_f32(h.mw{i},{r}*{c}); free_f32(h.vw{i},{r}*{c});\n"));
-            free_code.push_str(&format!("        free_f32(h.mb{i},{c}); free_f32(h.vb{i},{c});\n"));
+            field_decls.push_str(&format!(
+                "    mw{i}: *mut f32, vw{i}: *mut f32, mb{i}: *mut f32, vb{i}: *mut f32,\n"
+            ));
+            alloc_code.push_str(&format!(
+                "        mw{i}: alloc_f32({r}*{c}), vw{i}: alloc_f32({r}*{c}),\n"
+            ));
+            alloc_code.push_str(&format!(
+                "        mb{i}: alloc_f32({c}), vb{i}: alloc_f32({c}),\n"
+            ));
+            free_code.push_str(&format!(
+                "        free_f32(h.mw{i},{r}*{c}); free_f32(h.vw{i},{r}*{c});\n"
+            ));
+            free_code.push_str(&format!(
+                "        free_f32(h.mb{i},{c}); free_f32(h.vb{i},{c});\n"
+            ));
         }
         // Adagrad accumulated squared gradient buffers
         if use_adagrad {
             field_decls.push_str(&format!("    gw{i}: *mut f32, gb{i}: *mut f32,\n"));
-            alloc_code.push_str(&format!("        gw{i}: alloc_f32({r}*{c}), gb{i}: alloc_f32({c}),\n"));
-            free_code.push_str(&format!("        free_f32(h.gw{i},{r}*{c}); free_f32(h.gb{i},{c});\n"));
+            alloc_code.push_str(&format!(
+                "        gw{i}: alloc_f32({r}*{c}), gb{i}: alloc_f32({c}),\n"
+            ));
+            free_code.push_str(&format!(
+                "        free_f32(h.gw{i},{r}*{c}); free_f32(h.gb{i},{c});\n"
+            ));
         }
         // LayerNorm parameters and buffers (applied after each hidden activation)
         if use_layernorm && i < n - 1 {
@@ -258,23 +300,47 @@ fn generate_rust_source(
             field_decls.push_str(&format!("    ln_dg{i}: *mut f32, ln_db{i}: *mut f32,\n"));
             // mean and inverse std per sample per layer (B floats each)
             field_decls.push_str(&format!("    ln_mu{i}: *mut f32, ln_is{i}: *mut f32,\n"));
-            alloc_code.push_str(&format!("        ln_g{i}: alloc_f32({c}), ln_b{i}: alloc_f32({c}),\n"));
-            alloc_code.push_str(&format!("        ln_dg{i}: alloc_f32({c}), ln_db{i}: alloc_f32({c}),\n"));
-            alloc_code.push_str(&format!("        ln_mu{i}: alloc_f32(batch), ln_is{i}: alloc_f32(batch),\n"));
-            free_code.push_str(&format!("        free_f32(h.ln_g{i},{c}); free_f32(h.ln_b{i},{c});\n"));
-            free_code.push_str(&format!("        free_f32(h.ln_dg{i},{c}); free_f32(h.ln_db{i},{c});\n"));
-            free_code.push_str(&format!("        free_f32(h.ln_mu{i},h.batch); free_f32(h.ln_is{i},h.batch);\n"));
+            alloc_code.push_str(&format!(
+                "        ln_g{i}: alloc_f32({c}), ln_b{i}: alloc_f32({c}),\n"
+            ));
+            alloc_code.push_str(&format!(
+                "        ln_dg{i}: alloc_f32({c}), ln_db{i}: alloc_f32({c}),\n"
+            ));
+            alloc_code.push_str(&format!(
+                "        ln_mu{i}: alloc_f32(batch), ln_is{i}: alloc_f32(batch),\n"
+            ));
+            free_code.push_str(&format!(
+                "        free_f32(h.ln_g{i},{c}); free_f32(h.ln_b{i},{c});\n"
+            ));
+            free_code.push_str(&format!(
+                "        free_f32(h.ln_dg{i},{c}); free_f32(h.ln_db{i},{c});\n"
+            ));
+            free_code.push_str(&format!(
+                "        free_f32(h.ln_mu{i},h.batch); free_f32(h.ln_is{i},h.batch);\n"
+            ));
         }
     }
     for i in 0..=n {
         field_decls.push_str(&format!("    act{i}: *mut f32,\n"));
-        alloc_code.push_str(&format!("        act{i}: alloc_f32(batch*{}),\n", layers[i]));
-        free_code.push_str(&format!("        free_f32(h.act{i},h.batch*{});\n", layers[i]));
+        alloc_code.push_str(&format!(
+            "        act{i}: alloc_f32(batch*{}),\n",
+            layers[i]
+        ));
+        free_code.push_str(&format!(
+            "        free_f32(h.act{i},h.batch*{});\n",
+            layers[i]
+        ));
     }
     for i in 0..(n - 1) {
         field_decls.push_str(&format!("    pre{i}: *mut f32,\n"));
-        alloc_code.push_str(&format!("        pre{i}: alloc_f32(batch*{}),\n", layers[i + 1]));
-        free_code.push_str(&format!("        free_f32(h.pre{i},h.batch*{});\n", layers[i + 1]));
+        alloc_code.push_str(&format!(
+            "        pre{i}: alloc_f32(batch*{}),\n",
+            layers[i + 1]
+        ));
+        free_code.push_str(&format!(
+            "        free_f32(h.pre{i},h.batch*{});\n",
+            layers[i + 1]
+        ));
     }
     // Dropout mask buffers (u8: 1=keep, 0=drop), one per hidden layer
     if use_dropout {
@@ -298,7 +364,9 @@ fn generate_rust_source(
         // tanh'(y) = 1 - y^2  where y = tanh(x)
         s.push_str("#[inline(always)] fn act_bwd(y: f32) -> f32 { 1.0 - y * y }\n\n");
     } else if use_leaky_relu {
-        s.push_str("#[inline(always)] fn act_fwd(x: f32) -> f32 { if x > 0.0 { x } else { 0.01 * x } }\n");
+        s.push_str(
+            "#[inline(always)] fn act_fwd(x: f32) -> f32 { if x > 0.0 { x } else { 0.01 * x } }\n",
+        );
         // leaky_relu'(x) = 1 if x>0 else 0.01 — needs pre-activation for backward
         s.push_str("#[inline(always)] fn act_bwd_pre(pre: f32) -> f32 { if pre > 0.0 { 1.0 } else { 0.01 } }\n\n");
     } else if use_silu {
@@ -337,7 +405,9 @@ fn generate_rust_source(
     s.push_str("    alloc_zeroed(layout) as *mut f32\n");
     s.push_str("}\n\n");
     s.push_str("unsafe fn free_f32(p: *mut f32, n: usize) {\n");
-    s.push_str("    if !p.is_null() { dealloc(p as *mut u8, Layout::array::<f32>(n).unwrap()); }\n");
+    s.push_str(
+        "    if !p.is_null() { dealloc(p as *mut u8, Layout::array::<f32>(n).unwrap()); }\n",
+    );
     s.push_str("}\n\n");
     if use_dropout {
         s.push_str("unsafe fn alloc_u8(n: usize) -> *mut u8 {\n");
@@ -345,7 +415,9 @@ fn generate_rust_source(
         s.push_str("    alloc_zeroed(layout) as *mut u8\n");
         s.push_str("}\n\n");
         s.push_str("unsafe fn free_u8(p: *mut u8, n: usize) {\n");
-        s.push_str("    if !p.is_null() { dealloc(p as *mut u8, Layout::array::<u8>(n).unwrap()); }\n");
+        s.push_str(
+            "    if !p.is_null() { dealloc(p as *mut u8, Layout::array::<u8>(n).unwrap()); }\n",
+        );
         s.push_str("}\n\n");
     }
 
@@ -353,14 +425,17 @@ fn generate_rust_source(
     s.push_str("fn lcg_xavier_init(w: *mut f32, n: usize, r: usize, c: usize, rng: &mut u64) {\n");
     s.push_str("    let lim = (6.0f32 / (r as f32 + c as f32)).sqrt();\n");
     s.push_str("    unsafe { for i in 0..n {\n");
-    s.push_str("        *rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);\n");
+    s.push_str(
+        "        *rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);\n",
+    );
     s.push_str("        let f = ((*rng >> 11) & ((1u64<<53)-1)) as f32 / (1u64<<53) as f32;\n");
     s.push_str("        *w.add(i) = (f * 2.0 - 1.0) * lim;\n");
     s.push_str("    }}\n}\n\n");
 
-
     // volta_train_init
-    s.push_str("#[no_mangle]\npub unsafe extern \"C\" fn volta_train_init(batch: i32) -> *mut Handle {\n");
+    s.push_str(
+        "#[no_mangle]\npub unsafe extern \"C\" fn volta_train_init(batch: i32) -> *mut Handle {\n",
+    );
     s.push_str("    let batch = batch as usize;\n");
     s.push_str("    let h = Box::into_raw(Box::new(Handle {\n");
     if use_adam_any {
@@ -373,11 +448,15 @@ fn generate_rust_source(
     s.push_str("    let mut rng = 42u64;\n");
     for i in 0..n {
         let (r, c) = (layers[i], layers[i + 1]);
-        s.push_str(&format!("    lcg_xavier_init((*h).w{i}, {r}*{c}, {r}, {c}, &mut rng);\n"));
+        s.push_str(&format!(
+            "    lcg_xavier_init((*h).w{i}, {r}*{c}, {r}, {c}, &mut rng);\n"
+        ));
         // LayerNorm: init gamma=1, beta=0 (beta is already zero from alloc_zeroed)
         if use_layernorm && i < n - 1 {
             let c = layers[i + 1];
-            s.push_str(&format!("    for j in 0..{c} {{ *(*h).ln_g{i}.add(j) = 1.0f32; }}\n"));
+            s.push_str(&format!(
+                "    for j in 0..{c} {{ *(*h).ln_g{i}.add(j) = 1.0f32; }}\n"
+            ));
         }
     }
     s.push_str("    h\n}\n\n");
@@ -393,7 +472,9 @@ fn generate_rust_source(
     // volta_train_get_params
     s.push_str("#[no_mangle]\npub unsafe extern \"C\" fn volta_train_get_params(h: *mut Handle, wo: *mut *mut f32, bo: *mut *mut f32) {\n");
     for i in 0..n {
-        s.push_str(&format!("    *wo.add({i})=(*h).w{i}; *bo.add({i})=(*h).b{i};\n"));
+        s.push_str(&format!(
+            "    *wo.add({i})=(*h).w{i}; *bo.add({i})=(*h).b{i};\n"
+        ));
     }
     s.push_str("}\n\n");
 
@@ -415,12 +496,21 @@ fn generate_rust_source(
 
     // Forward
     s.push_str("    // FORWARD\n");
-    s.push_str(&format!("    std::ptr::copy_nonoverlapping(X, (*h).act0, B*{});\n", layers[0]));
+    s.push_str(&format!(
+        "    std::ptr::copy_nonoverlapping(X, (*h).act0, B*{});\n",
+        layers[0]
+    ));
     for i in 0..n {
         let (r, c) = (layers[i], layers[i + 1]);
         let is_last = i == n - 1;
-        let dst = if is_last { format!("(*h).act{n}") } else { format!("(*h).pre{i}") };
-        s.push_str(&format!("    sgemm({dst}, (*h).act{i} as *const f32, (*h).w{i} as *const f32, B, {r}, {c});\n"));
+        let dst = if is_last {
+            format!("(*h).act{n}")
+        } else {
+            format!("(*h).pre{i}")
+        };
+        s.push_str(&format!(
+            "    sgemm({dst}, (*h).act{i} as *const f32, (*h).w{i} as *const f32, B, {r}, {c});\n"
+        ));
         // bias add
         s.push_str(&format!("    for bi in 0..B {{ for j in 0..{c} {{ *{dst}.add(bi*{c}+j) += *(*h).b{i}.add(j); }} }}\n"));
         if !is_last {
@@ -436,7 +526,10 @@ fn generate_rust_source(
                 s.push_str(&format!("        let mut sum = 0.0f32;\n"));
                 s.push_str(&format!("        for j in 0..{c} {{ let e = (*(*h).pre{i}.add(base+j) - mx).exp(); *(*h).act{}.add(base+j) = e; sum += e; }}\n", i+1));
                 s.push_str(&format!("        let inv_sum = 1.0f32 / sum;\n"));
-                s.push_str(&format!("        for j in 0..{c} {{ *(*h).act{}.add(base+j) *= inv_sum; }}\n", i+1));
+                s.push_str(&format!(
+                    "        for j in 0..{c} {{ *(*h).act{}.add(base+j) *= inv_sum; }}\n",
+                    i + 1
+                ));
                 s.push_str("    }\n");
             } else {
                 s.push_str(&format!("    for k in 0..B*{c} {{ *(*h).act{}.add(k) = act_fwd(*(*h).pre{i}.add(k)); }}\n", i+1));
@@ -448,16 +541,24 @@ fn generate_rust_source(
                 s.push_str(&format!("    for bi in 0..B {{\n"));
                 s.push_str(&format!("        let base = bi*{c};\n"));
                 s.push_str(&format!("        let mut mu = 0.0f32;\n"));
-                s.push_str(&format!("        for j in 0..{c} {{ mu += *(*h).act{}.add(base+j); }}\n", i+1));
+                s.push_str(&format!(
+                    "        for j in 0..{c} {{ mu += *(*h).act{}.add(base+j); }}\n",
+                    i + 1
+                ));
                 s.push_str(&format!("        mu /= {c}f32;\n"));
                 s.push_str(&format!("        *(*h).ln_mu{i}.add(bi) = mu;\n"));
                 s.push_str(&format!("        let mut var = 0.0f32;\n"));
                 s.push_str(&format!("        for j in 0..{c} {{ let d = *(*h).act{}.add(base+j) - mu; var += d*d; }}\n", i+1));
                 s.push_str(&format!("        var /= {c}f32;\n"));
-                s.push_str(&format!("        let is = 1.0f32 / (var + 1e-5f32).sqrt();\n"));
+                s.push_str(&format!(
+                    "        let is = 1.0f32 / (var + 1e-5f32).sqrt();\n"
+                ));
                 s.push_str(&format!("        *(*h).ln_is{i}.add(bi) = is;\n"));
                 s.push_str(&format!("        for j in 0..{c} {{\n"));
-                s.push_str(&format!("            let xhat = (*(*h).act{}.add(base+j) - mu) * is;\n", i+1));
+                s.push_str(&format!(
+                    "            let xhat = (*(*h).act{}.add(base+j) - mu) * is;\n",
+                    i + 1
+                ));
                 s.push_str(&format!("            *(*h).act{}.add(base+j) = xhat * *(*h).ln_g{i}.add(j) + *(*h).ln_b{i}.add(j);\n", i+1));
                 s.push_str("        }\n");
                 s.push_str("    }\n");
@@ -468,9 +569,14 @@ fn generate_rust_source(
                 s.push_str(&format!("    for k in 0..B*{c} {{\n"));
                 s.push_str("        (*h).dropout_rng = (*h).dropout_rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);\n");
                 s.push_str("        let r = ((*h).dropout_rng >> 33) as f32 / 2147483648.0f32;\n");
-                s.push_str(&format!("        let keep = (r >= {dropout_p}f32) as u8;\n"));
+                s.push_str(&format!(
+                    "        let keep = (r >= {dropout_p}f32) as u8;\n"
+                ));
                 s.push_str(&format!("        *(*h).mask{i}.add(k) = keep;\n"));
-                s.push_str(&format!("        *(*h).act{}.add(k) *= keep as f32 * {keep_scale}f32;\n", i+1));
+                s.push_str(&format!(
+                    "        *(*h).act{}.add(k) *= keep as f32 * {keep_scale}f32;\n",
+                    i + 1
+                ));
                 s.push_str("    }\n");
             }
         }
@@ -478,7 +584,9 @@ fn generate_rust_source(
 
     // MSE loss
     let out_sz = layers[n];
-    s.push_str(&format!("\n    // MSE loss\n    let mut lacc = 0.0f32;\n    let nt = B*{out_sz};\n"));
+    s.push_str(&format!(
+        "\n    // MSE loss\n    let mut lacc = 0.0f32;\n    let nt = B*{out_sz};\n"
+    ));
     s.push_str(&format!("    for k in 0..nt {{ let d = *(*h).act{n}.add(k) - *Y.add(k); lacc += d*d; *(*h).delta{}.add(k) = 2.0*d/(nt as f32); }}\n", n-1));
     s.push_str("    (*h).last_loss = lacc / (nt as f32);\n\n");
 
@@ -521,30 +629,48 @@ fn generate_rust_source(
                 // Since we don't store xhat separately, recompute: xhat = (y - b) / g
                 // (assumes gamma != 0 which is true after init=1 and small updates)
                 s.push_str(&format!("    // LayerNorm backward layer {i}\n"));
-                s.push_str(&format!("    std::ptr::write_bytes((*h).ln_dg{i}, 0, {c});\n"));
-                s.push_str(&format!("    std::ptr::write_bytes((*h).ln_db{i}, 0, {c});\n"));
+                s.push_str(&format!(
+                    "    std::ptr::write_bytes((*h).ln_dg{i}, 0, {c});\n"
+                ));
+                s.push_str(&format!(
+                    "    std::ptr::write_bytes((*h).ln_db{i}, 0, {c});\n"
+                ));
                 s.push_str(&format!("    for bi in 0..B {{\n"));
                 s.push_str(&format!("        let base = bi*{c};\n"));
-                s.push_str(&format!("        let mu = *(*h).ln_mu{i}.add(bi); let is = *(*h).ln_is{i}.add(bi);\n"));
+                s.push_str(&format!(
+                    "        let mu = *(*h).ln_mu{i}.add(bi); let is = *(*h).ln_is{i}.add(bi);\n"
+                ));
                 // Note: act[i+1] now stores the LN output y = xhat*g + b
                 // We need xhat = (y - b) / g = (act[i+1] - ln_b) / ln_g
                 // Accumulate dgamma and dbeta
-                s.push_str(&format!("        let mut sum_d = 0.0f32; let mut sum_dxh = 0.0f32;\n"));
+                s.push_str(&format!(
+                    "        let mut sum_d = 0.0f32; let mut sum_dxh = 0.0f32;\n"
+                ));
                 s.push_str(&format!("        for j in 0..{c} {{\n"));
                 s.push_str(&format!("            let xh = (*(*h).act{}.add(base+j) - *(*h).ln_b{i}.add(j)) / (*(*h).ln_g{i}.add(j) + 1e-12f32);\n", i+1));
-                s.push_str(&format!("            let dout = *(*h).delta{i}.add(base+j);\n"));
-                s.push_str(&format!("            *(*h).ln_dg{i}.add(j) += dout * xh;\n"));
+                s.push_str(&format!(
+                    "            let dout = *(*h).delta{i}.add(base+j);\n"
+                ));
+                s.push_str(&format!(
+                    "            *(*h).ln_dg{i}.add(j) += dout * xh;\n"
+                ));
                 s.push_str(&format!("            *(*h).ln_db{i}.add(j) += dout;\n"));
                 // d_xhat[j] = dout * gamma[j]
                 // sum_d = mean(d_xhat) = (1/d) * sum(dout * gamma)
                 // sum_dxh = mean(d_xhat * xhat) = (1/d) * sum(dout * gamma * xhat)
-                s.push_str(&format!("            sum_d += dout * *(*h).ln_g{i}.add(j);\n"));
-                s.push_str(&format!("            sum_dxh += dout * *(*h).ln_g{i}.add(j) * xh;\n"));
+                s.push_str(&format!(
+                    "            sum_d += dout * *(*h).ln_g{i}.add(j);\n"
+                ));
+                s.push_str(&format!(
+                    "            sum_dxh += dout * *(*h).ln_g{i}.add(j) * xh;\n"
+                ));
                 s.push_str("        }\n");
                 s.push_str(&format!("        sum_d /= {c}f32; sum_dxh /= {c}f32;\n"));
                 s.push_str(&format!("        for j in 0..{c} {{\n"));
                 s.push_str(&format!("            let xh = (*(*h).act{}.add(base+j) - *(*h).ln_b{i}.add(j)) / (*(*h).ln_g{i}.add(j) + 1e-12f32);\n", i+1));
-                s.push_str(&format!("            let d_xhat = *(*h).delta{i}.add(base+j) * *(*h).ln_g{i}.add(j);\n"));
+                s.push_str(&format!(
+                    "            let d_xhat = *(*h).delta{i}.add(base+j) * *(*h).ln_g{i}.add(j);\n"
+                ));
                 s.push_str(&format!("            *(*h).delta{i}.add(base+j) = is * (d_xhat - sum_d - xh * sum_dxh);\n"));
                 s.push_str("        }\n");
                 s.push_str("    }\n");
@@ -585,9 +711,14 @@ fn generate_rust_source(
 
         // dX[B×r] = delta{i}[B×c] @ W{i}^T — compute BEFORE W is updated
         if i > 0 {
-            s.push_str(&format!("    fast_transpose((*h).dt{i}, (*h).delta{i} as *const f32, B, {c});\n"));
+            s.push_str(&format!(
+                "    fast_transpose((*h).dt{i}, (*h).delta{i} as *const f32, B, {c});\n"
+            ));
             s.push_str(&format!("    sgemm((*h).tmp{i}, (*h).w{i} as *const f32, (*h).dt{i} as *const f32, {r}, {c}, B);\n"));
-            s.push_str(&format!("    fast_transpose((*h).delta{}, (*h).tmp{i} as *const f32, {r}, B);\n", i-1));
+            s.push_str(&format!(
+                "    fast_transpose((*h).delta{}, (*h).tmp{i} as *const f32, {r}, B);\n",
+                i - 1
+            ));
         }
 
         // db[c] = sum over batch of delta{i}
@@ -597,11 +728,15 @@ fn generate_rust_source(
 
     // Optional gradient clipping by global norm
     if use_clip {
-        s.push_str(&format!("\n    // Gradient clipping (max_norm = {clip_val})\n"));
+        s.push_str(&format!(
+            "\n    // Gradient clipping (max_norm = {clip_val})\n"
+        ));
         s.push_str("    let mut _gnorm_sq = 0.0f32;\n");
         for i in 0..n {
             let (_r, c) = (layers[i], layers[i + 1]);
-            s.push_str(&format!("    for k in 0..B*{c} {{ let v = *(*h).delta{i}.add(k); _gnorm_sq += v*v; }}\n"));
+            s.push_str(&format!(
+                "    for k in 0..B*{c} {{ let v = *(*h).delta{i}.add(k); _gnorm_sq += v*v; }}\n"
+            ));
         }
         s.push_str(&format!("    let _gnorm = _gnorm_sq.sqrt();\n"));
         s.push_str(&format!("    let _clip_scale = if _gnorm > {clip_val}f32 {{ {clip_val}f32 / _gnorm }} else {{ 1.0f32 }};\n"));
@@ -621,20 +756,32 @@ fn generate_rust_source(
             // W update
             s.push_str(&format!("    for k in 0..{r}*{c} {{\n"));
             s.push_str(&format!("        let g = *(*h).dw{i}.add(k);\n"));
-            s.push_str(&format!("        let m = b1 * *(*h).mw{i}.add(k) + (1.0-b1)*g; *(*h).mw{i}.add(k) = m;\n"));
-            s.push_str(&format!("        let v = b2 * *(*h).vw{i}.add(k) + (1.0-b2)*g*g; *(*h).vw{i}.add(k) = v;\n"));
+            s.push_str(&format!(
+                "        let m = b1 * *(*h).mw{i}.add(k) + (1.0-b1)*g; *(*h).mw{i}.add(k) = m;\n"
+            ));
+            s.push_str(&format!(
+                "        let v = b2 * *(*h).vw{i}.add(k) + (1.0-b2)*g*g; *(*h).vw{i}.add(k) = v;\n"
+            ));
             if use_adamw {
                 s.push_str(&format!("        *(*h).w{i}.add(k) -= lr * ((m/bc1) / ((v/bc2).sqrt() + eps) + wd * *(*h).w{i}.add(k));\n"));
             } else {
-                s.push_str(&format!("        *(*h).w{i}.add(k) -= lr * (m/bc1) / ((v/bc2).sqrt() + eps);\n"));
+                s.push_str(&format!(
+                    "        *(*h).w{i}.add(k) -= lr * (m/bc1) / ((v/bc2).sqrt() + eps);\n"
+                ));
             }
             s.push_str("    }\n");
             // Bias update (no weight decay on biases)
             s.push_str(&format!("    for k in 0..{c} {{\n"));
             s.push_str(&format!("        let g = *(*h).db{i}.add(k);\n"));
-            s.push_str(&format!("        let m = b1 * *(*h).mb{i}.add(k) + (1.0-b1)*g; *(*h).mb{i}.add(k) = m;\n"));
-            s.push_str(&format!("        let v = b2 * *(*h).vb{i}.add(k) + (1.0-b2)*g*g; *(*h).vb{i}.add(k) = v;\n"));
-            s.push_str(&format!("        *(*h).b{i}.add(k) -= lr * (m/bc1) / ((v/bc2).sqrt() + eps);\n"));
+            s.push_str(&format!(
+                "        let m = b1 * *(*h).mb{i}.add(k) + (1.0-b1)*g; *(*h).mb{i}.add(k) = m;\n"
+            ));
+            s.push_str(&format!(
+                "        let v = b2 * *(*h).vb{i}.add(k) + (1.0-b2)*g*g; *(*h).vb{i}.add(k) = v;\n"
+            ));
+            s.push_str(&format!(
+                "        *(*h).b{i}.add(k) -= lr * (m/bc1) / ((v/bc2).sqrt() + eps);\n"
+            ));
             s.push_str("    }\n");
         } else if use_adagrad {
             // Adagrad: G += g², p -= lr * g / sqrt(G + eps)
@@ -644,17 +791,23 @@ fn generate_rust_source(
             s.push_str(&format!("    for k in 0..{r}*{c} {{\n"));
             s.push_str(&format!("        let g = *(*h).dw{i}.add(k);\n"));
             s.push_str(&format!("        *(*h).gw{i}.add(k) += g * g;\n"));
-            s.push_str(&format!("        *(*h).w{i}.add(k) -= lr * g / ((*(*h).gw{i}.add(k) + eps).sqrt());\n"));
+            s.push_str(&format!(
+                "        *(*h).w{i}.add(k) -= lr * g / ((*(*h).gw{i}.add(k) + eps).sqrt());\n"
+            ));
             s.push_str("    }\n");
             s.push_str(&format!("    for k in 0..{c} {{\n"));
             s.push_str(&format!("        let g = *(*h).db{i}.add(k);\n"));
             s.push_str(&format!("        *(*h).gb{i}.add(k) += g * g;\n"));
-            s.push_str(&format!("        *(*h).b{i}.add(k) -= lr * g / ((*(*h).gb{i}.add(k) + eps).sqrt());\n"));
+            s.push_str(&format!(
+                "        *(*h).b{i}.add(k) -= lr * g / ((*(*h).gb{i}.add(k) + eps).sqrt());\n"
+            ));
             s.push_str("    }\n");
         } else {
             // Fused dW + SGD
             s.push_str(&format!("    sgd_fused_tn((*h).w{i}, (*h).act{i} as *const f32, (*h).delta{i} as *const f32, {r}, B, {c}, lr);\n"));
-            s.push_str(&format!("    for k in 0..{c} {{ *(*h).b{i}.add(k) -= lr * *(*h).db{i}.add(k); }}\n"));
+            s.push_str(&format!(
+                "    for k in 0..{c} {{ *(*h).b{i}.add(k) -= lr * *(*h).db{i}.add(k); }}\n"
+            ));
         }
     }
     s.push_str("}\n");
