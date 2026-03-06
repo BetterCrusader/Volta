@@ -151,3 +151,5 @@ Short version:
 ## License
 
 Apache-2.0
+
+See also: [`DISCLAIMER.md`](DISCLAIMER.md)
