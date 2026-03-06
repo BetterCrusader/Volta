@@ -84,6 +84,15 @@ pub fn compile_mlp_train_rust_dll(
         }
     })?;
 
+    // Write build.rs to link MKL
+    let mkl_lib_path = "C:/Users/User/miniforge3/envs/mkl/Library/lib";
+    let build_rs = format!(
+        "fn main() {{\n    println!(\"cargo:rustc-link-search=native={mkl_lib_path}\");\n    println!(\"cargo:rustc-link-lib=dylib=mkl_rt\");\n}}\n"
+    );
+    std::fs::write(crate_dir.join("build.rs"), &build_rs).map_err(|e| RustTrainCodegenError {
+        message: format!("write build.rs: {e}"),
+    })?;
+
     // Resolve crate_dir to absolute path for --target-dir
     let abs_crate_dir = std::fs::canonicalize(&crate_dir).unwrap_or_else(|_| crate_dir.clone());
     let target_dir = abs_crate_dir.join("target");
@@ -163,32 +172,32 @@ fn generate_rust_source(
     s.push_str("#![allow(non_snake_case, unused, private_interfaces)]\n");
     s.push_str("use std::alloc::{alloc_zeroed, dealloc, Layout};\n\n");
 
-    // gemm wrapper: C[m×n] = A[m×k] @ B[k×n]  (C zeroed before call, read_dst=false)
-    // gemm 0.19 API: gemm(m,n,k, dst,dst_cs,dst_rs, read_dst, lhs,lhs_cs,lhs_rs, rhs,rhs_cs,rhs_rs, beta,alpha, conj_dst,conj_lhs,conj_rhs, par)
-    // Row-major strides: col_stride=1, row_stride=cols
-    // Note: always use Parallelism::None — DLL context on Windows cannot safely
-    // spawn Rayon worker threads (crashes on first Rayon call in a dynamically-loaded DLL).
-    // Single-threaded gemm with AVX2 is still faster than our C tiled GEMM.
-    s.push_str("fn par(_m: usize, _k: usize, _n: usize) -> gemm::Parallelism {\n");
-    s.push_str("    gemm::Parallelism::None\n");
-    s.push_str("}\n\n");
-    // C = A[m×k] @ B[k×n]  (standard row-major)
+    // MKL cblas_sgemm for all GEMM — better tile strategy than gemm crate for these shapes
+    s.push_str("#[link(name = \"mkl_rt\", kind = \"dylib\")]\n");
+    s.push_str("extern \"C\" {\n");
+    s.push_str("    fn cblas_sgemm(order: i32, transa: i32, transb: i32, m: i32, n: i32, k: i32, alpha: f32, a: *const f32, lda: i32, b: *const f32, ldb: i32, beta: f32, c: *mut f32, ldc: i32);\n");
+    s.push_str("}\n");
+    s.push_str("const CblasRowMajor: i32 = 101; const CblasNoTrans: i32 = 111; const CblasTrans: i32 = 112;\n\n");
+    // C = A[m×k] @ B[k×n]  (standard row-major) — beta=0 zeros C first
     s.push_str(
         "fn sgemm(C: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize) {\n",
     );
-    s.push_str("    unsafe { gemm::gemm(m,n,k, C,1isize,n as isize, false, A,1isize,k as isize, B,1isize,n as isize, 0f32,1f32, false,false,false, par(m,k,n)); }\n");
+    s.push_str("    unsafe { cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m as i32, n as i32, k as i32, 1.0f32, A, k as i32, B, n as i32, 0.0f32, C, n as i32); }\n");
     s.push_str("}\n\n");
-    // C[m×n] = A^T[m×k] @ B[k×n]  where A stored as [k×m] row-major
-    // A^T[i,p] = A[p,i] = A_ptr[p*m + i]  → lhs_rs=1, lhs_cs=m
+    // C[m×n] = A^T[m×k] @ B[k×n]  where A stored as [k×m] row-major → CblasTrans on A, lda=m
     s.push_str(
         "fn sgemm_tn(C: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize) {\n",
     );
-    s.push_str("    unsafe { gemm::gemm(m,n,k, C,1isize,n as isize, false, A,m as isize,1isize, B,1isize,n as isize, 0f32,1f32, false,false,false, par(m,k,n)); }\n");
+    s.push_str("    unsafe { cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans, m as i32, n as i32, k as i32, 1.0f32, A, m as i32, B, n as i32, 0.0f32, C, n as i32); }\n");
     s.push_str("}\n\n");
-    // W[m×n] -= lr * A^T[m×k] @ B[k×n]  — fused dW compute + SGD update
-    // Uses beta=1 (accumulate into W) and alpha=-lr, skipping intermediate dw buffer
+    // W[m×n] -= lr * A^T[m×k] @ B[k×n]  — fused dW compute + SGD update via MKL beta=1
     s.push_str("fn sgd_fused_tn(W: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize, lr: f32) {\n");
-    s.push_str("    unsafe { gemm::gemm(m,n,k, W,1isize,n as isize, true, A,m as isize,1isize, B,1isize,n as isize, 1f32,-lr, false,false,false, par(m,k,n)); }\n");
+    s.push_str("    unsafe { cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans, m as i32, n as i32, k as i32, -lr, A, m as i32, B, n as i32, 1.0f32, W, n as i32); }\n");
+    s.push_str("}\n\n");
+    // C[m×n] = A[m×k] @ B^T where B stored as [n×k] row-major → CblasTrans on B, ldb=k, ldc=n
+    // Usage: dX[B×r] = delta[B×c] @ W^T where W[r×c]: m=B,k=c,n=r,ldb=c
+    s.push_str("fn sgemm_nt(C: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize, b_cols: usize) {\n");
+    s.push_str("    unsafe { cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, m as i32, n as i32, k as i32, 1.0f32, A, k as i32, B, b_cols as i32, 0.0f32, C, n as i32); }\n");
     s.push_str("}\n\n");
     // Adam weight update: dw already computed, update m/v/w in-place with AVX2+Rayon
     // Threshold: parallelize when n >= 1<<17 (128K elements)
@@ -252,12 +261,6 @@ fn generate_rust_source(
     s.push_str("        let w0 = *w.add(i);\n");
     s.push_str("        *w.add(i) = w0 - lr * ((m1/bc1) / ((v1/bc2).sqrt() + eps) + wd * w0);\n");
     s.push_str("    }\n");
-    s.push_str("}\n\n");
-    // C[m×n] = A[m×k] @ B^T  where B stored as [n×k] row-major
-    // B^T rhs strides: rhs_rs=b_cols (p-step), rhs_cs=1 (j-step)
-    // Usage: dX[B×r] = delta[B×c] @ W^T  where W stored [r×c]: m=B,k=c,n=r,b_cols=c
-    s.push_str("fn sgemm_nt(C: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize, b_cols: usize) {\n");
-    s.push_str("    unsafe { gemm::gemm(m,n,k, C,1isize,n as isize, false, A,1isize,k as isize, B,b_cols as isize,1isize, 0f32,1f32, false,false,false, par(m,k,n)); }\n");
     s.push_str("}\n\n");
     // Transpose: dst[cols×rows] = src[rows×cols]^T
     // AVX2 8×8 kernel (7.76× faster than scalar for large matrices)
@@ -589,14 +592,16 @@ fn generate_rust_source(
         s.push_str(&format!(
             "    sgemm({dst}, (*h).act{i} as *const f32, (*h).w{i} as *const f32, B, {r}, {c});\n"
         ));
-        // bias add
-        s.push_str(&format!("    for bi in 0..B {{ for j in 0..{c} {{ *{dst}.add(bi*{c}+j) += *(*h).b{i}.add(j); }} }}\n"));
-        if !is_last {
-            // pre[i] always stores pre-activation; act[i+1] stores post-activation
+        if is_last {
+            // last layer: bias add
+            s.push_str(&format!("    for bi in 0..B {{ for j in 0..{c} {{ *(*h).act{n}.add(bi*{c}+j) += *(*h).b{i}.add(j); }} }}\n"));
+        } else {
+            // bias add
+            s.push_str(&format!("    for bi in 0..B {{ for j in 0..{c} {{ *(*h).pre{i}.add(bi*{c}+j) += *(*h).b{i}.add(j); }} }}\n"));
             if use_relu {
                 s.push_str(&format!("    for k in 0..B*{c} {{ let v = *(*h).pre{i}.add(k); *(*h).act{}.add(k) = if v > 0.0 {{ v }} else {{ 0.0 }}; }}\n", i+1));
             } else if use_softmax {
-                // Numerically stable softmax: per-row (each sample independently)
+                // softmax
                 s.push_str(&format!("    for bi in 0..B {{\n"));
                 s.push_str(&format!("        let base = bi*{c};\n"));
                 s.push_str(&format!("        let mut mx = *(*h).pre{i}.add(base);\n"));
@@ -787,7 +792,7 @@ fn generate_rust_source(
             }
         }
 
-        // dX[B×r] = delta{i}[B×c] @ W{i}^T — compute BEFORE W is updated
+        // dX[B×r] = delta{i}[B×c] @ W{i}^T
         if i > 0 {
             s.push_str(&format!(
                 "    fast_transpose((*h).dt{i}, (*h).delta{i} as *const f32, B, {c});\n"
@@ -799,7 +804,7 @@ fn generate_rust_source(
             ));
         }
 
-        // db[c] = sum over batch of delta{i}
+        // db[c] = sum over batch of delta{i}  (fused with relu_mask when applicable)
         s.push_str(&format!("    std::ptr::write_bytes((*h).db{i}, 0, {c});\n"));
         s.push_str(&format!("    for bi in 0..B {{ for j in 0..{c} {{ *(*h).db{i}.add(j) += *(*h).delta{i}.add(bi*{c}+j); }} }}\n"));
     }
