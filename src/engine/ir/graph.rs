@@ -91,9 +91,11 @@ impl Graph {
         subgraph: Graph,
         input_mapping: BTreeMap<usize, ValueId>,
     ) -> Result<ValueId, GraphError> {
-        let block_id = self.find_block_for_node(node_id).ok_or_else(|| GraphError {
-            message: format!("Node {} not found in any block", node_id.0),
-        })?;
+        let block_id = self
+            .find_block_for_node(node_id)
+            .ok_or_else(|| GraphError {
+                message: format!("Node {} not found in any block", node_id.0),
+            })?;
 
         let mut value_remap = BTreeMap::new();
         for (sub_input_idx, outer_value) in input_mapping {
@@ -194,13 +196,17 @@ mod tests {
         let mut subgraph = Graph::new();
         let sub_block = subgraph.create_block();
         // Вхід підграфа буде ValueId(0)
-        let (_, v_sub_add) = subgraph.add_op(sub_block, Op::Add(ValueId(0), ValueId(0))).unwrap();
+        let (_, v_sub_add) = subgraph
+            .add_op(sub_block, Op::Add(ValueId(0), ValueId(0)))
+            .unwrap();
         subgraph.add_op(sub_block, Op::Output(v_sub_add)).unwrap();
 
         let mut mapping = BTreeMap::new();
         mapping.insert(0, v_in);
 
-        let final_v = graph.inline_subgraph(n_to_inline, subgraph, mapping).unwrap();
+        let final_v = graph
+            .inline_subgraph(n_to_inline, subgraph, mapping)
+            .unwrap();
 
         // Перевіряємо результат
         assert_eq!(graph.nodes.len(), 3); // ConstInt, Add, Identity(замість оригінальної ноди)

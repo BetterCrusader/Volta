@@ -17,7 +17,10 @@ impl LrSchedule {
     pub fn compute_lr(&self, base_lr: f32, epoch: usize) -> f32 {
         match self {
             LrSchedule::Constant => base_lr,
-            LrSchedule::Cosine { total_epochs, lr_min } => {
+            LrSchedule::Cosine {
+                total_epochs,
+                lr_min,
+            } => {
                 let t = epoch as f32 / (*total_epochs).max(1) as f32;
                 let cos_val = (std::f32::consts::PI * t).cos();
                 lr_min + 0.5 * (base_lr - lr_min) * (1.0 + cos_val)
@@ -123,18 +126,53 @@ pub fn apply_gradients(
             beta2,
             epsilon,
             weight_decay,
-        } => apply_adamw(parameters, gradients, *lr, *beta1, *beta2, *epsilon, *weight_decay, state),
+        } => apply_adamw(
+            parameters,
+            gradients,
+            *lr,
+            *beta1,
+            *beta2,
+            *epsilon,
+            *weight_decay,
+            state,
+        ),
         OptimizerConfig::RmsProp {
             lr,
             alpha,
             epsilon,
             weight_decay,
             momentum,
-        } => apply_rmsprop(parameters, gradients, *lr, *alpha, *epsilon, *weight_decay, *momentum, state),
-        OptimizerConfig::Adagrad { lr, epsilon, weight_decay } =>
-            apply_adagrad(parameters, gradients, *lr, *epsilon, *weight_decay, state),
-        OptimizerConfig::Lars { lr, momentum, weight_decay, trust_coeff, epsilon } =>
-            apply_lars(parameters, gradients, *lr, *momentum, *weight_decay, *trust_coeff, *epsilon, state),
+        } => apply_rmsprop(
+            parameters,
+            gradients,
+            *lr,
+            *alpha,
+            *epsilon,
+            *weight_decay,
+            *momentum,
+            state,
+        ),
+        OptimizerConfig::Adagrad {
+            lr,
+            epsilon,
+            weight_decay,
+        } => apply_adagrad(parameters, gradients, *lr, *epsilon, *weight_decay, state),
+        OptimizerConfig::Lars {
+            lr,
+            momentum,
+            weight_decay,
+            trust_coeff,
+            epsilon,
+        } => apply_lars(
+            parameters,
+            gradients,
+            *lr,
+            *momentum,
+            *weight_decay,
+            *trust_coeff,
+            *epsilon,
+            state,
+        ),
     }
 }
 
@@ -376,7 +414,8 @@ fn apply_rmsprop(
             );
             let buf_data = Arc::make_mut(&mut buf.data);
 
-            for ((p, g), (v_i, b_i)) in p_data.iter_mut()
+            for ((p, g), (v_i, b_i)) in p_data
+                .iter_mut()
                 .zip(g_contig.data.iter())
                 .zip(v_data.iter_mut().zip(buf_data.iter_mut()))
             {
@@ -386,7 +425,8 @@ fn apply_rmsprop(
                 *p -= *b_i;
             }
         } else {
-            for ((p, g), v_i) in p_data.iter_mut()
+            for ((p, g), v_i) in p_data
+                .iter_mut()
                 .zip(g_contig.data.iter())
                 .zip(v_data.iter_mut())
             {
@@ -428,7 +468,8 @@ fn apply_adagrad(
         let g_contig = gradient.make_contiguous()?;
         let acc_data = Arc::make_mut(&mut acc.data);
 
-        for ((p, g), acc_i) in p_data.iter_mut()
+        for ((p, g), acc_i) in p_data
+            .iter_mut()
             .zip(g_contig.data.iter())
             .zip(acc_data.iter_mut())
         {
@@ -483,7 +524,8 @@ fn apply_lars(
         let g_contig = gradient.make_contiguous()?;
         let vel_data = Arc::make_mut(&mut vel.data);
 
-        for ((p, g), v) in p_data.iter_mut()
+        for ((p, g), v) in p_data
+            .iter_mut()
             .zip(g_contig.data.iter())
             .zip(vel_data.iter_mut())
         {
@@ -602,11 +644,21 @@ mod tests {
     #[test]
     fn adagrad_reduces_loss_over_steps() {
         let mut params = HashMap::new();
-        params.insert(vid(0), Tensor::new(vec![2], vec![1.0, -1.0]).expect("valid"));
+        params.insert(
+            vid(0),
+            Tensor::new(vec![2], vec![1.0, -1.0]).expect("valid"),
+        );
         let mut grads = HashMap::new();
-        grads.insert(vid(0), Tensor::new(vec![2], vec![0.5, -0.5]).expect("valid"));
+        grads.insert(
+            vid(0),
+            Tensor::new(vec![2], vec![0.5, -0.5]).expect("valid"),
+        );
         let mut state = OptimizerState::default();
-        let config = OptimizerConfig::Adagrad { lr: 0.1, epsilon: 1e-8, weight_decay: 0.0 };
+        let config = OptimizerConfig::Adagrad {
+            lr: 0.1,
+            epsilon: 1e-8,
+            weight_decay: 0.0,
+        };
 
         // Run 3 steps with same gradient — parameter should monotonically approach 0
         let mut prev_p0 = 1.0f32;

@@ -50,22 +50,26 @@ impl Module for BatchNormLayer {
 
         let weight = builder.add_parameter(Parameter::new(
             format!("{}.weight", self.name),
-            Tensor::ones(vec![self.num_features]).map_err(|e| ModelBuildError { message: e.message })?,
+            Tensor::ones(vec![self.num_features])
+                .map_err(|e| ModelBuildError { message: e.message })?,
             true,
         ))?;
         let bias = builder.add_parameter(Parameter::new(
             format!("{}.bias", self.name),
-            Tensor::zeros(vec![self.num_features]).map_err(|e| ModelBuildError { message: e.message })?,
+            Tensor::zeros(vec![self.num_features])
+                .map_err(|e| ModelBuildError { message: e.message })?,
             true,
         ))?;
         let mean = builder.add_parameter(Parameter::new(
             format!("{}.mean", self.name),
-            Tensor::zeros(vec![self.num_features]).map_err(|e| ModelBuildError { message: e.message })?,
+            Tensor::zeros(vec![self.num_features])
+                .map_err(|e| ModelBuildError { message: e.message })?,
             false,
         ))?;
         let var = builder.add_parameter(Parameter::new(
             format!("{}.var", self.name),
-            Tensor::ones(vec![self.num_features]).map_err(|e| ModelBuildError { message: e.message })?,
+            Tensor::ones(vec![self.num_features])
+                .map_err(|e| ModelBuildError { message: e.message })?,
             false,
         ))?;
 

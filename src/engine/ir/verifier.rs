@@ -124,7 +124,10 @@ pub fn verify_memory_alignment(graph: &Graph) -> Result<(), VerifyError> {
                 if expected != data.len() {
                     return Err(err(format!(
                         "Node {}: ConstTensor shape {:?} implies {} elements but data has {}",
-                        node.id.0, shape, expected, data.len()
+                        node.id.0,
+                        shape,
+                        expected,
+                        data.len()
                     )));
                 }
                 // Alignment: total bytes must be 4-byte aligned (always true for f32)
@@ -245,7 +248,9 @@ fn infer_type_for_op(
             let ty = type_of(*value, value_types);
             require_tensor_or_unknown(ty, node_id, "tensor unary op")
         }
-        Op::SigmoidBackward(input, grad) | Op::GeluBackward(input, grad) | Op::GeluExactBackward(input, grad) => {
+        Op::SigmoidBackward(input, grad)
+        | Op::GeluBackward(input, grad)
+        | Op::GeluExactBackward(input, grad) => {
             let left = type_of(*input, value_types);
             let right = type_of(*grad, value_types);
             let same = require_same_strict(left, right, node_id, "backward op")?;
@@ -283,8 +288,7 @@ fn infer_type_for_op(
             let ty = type_of(*input, value_types);
             require_tensor_or_unknown(ty, node_id, "tensor unary op")
         }
-        Op::GroupNormBackwardBias { upstream }
-        | Op::InstanceNormBackwardBias { upstream } => {
+        Op::GroupNormBackwardBias { upstream } | Op::InstanceNormBackwardBias { upstream } => {
             let ty = type_of(*upstream, value_types);
             require_tensor_or_unknown(ty, node_id, "norm backward bias")
         }
@@ -292,8 +296,10 @@ fn infer_type_for_op(
             let ty = type_of(*weight, value_types);
             require_tensor_or_unknown(ty, node_id, "embedding weight")
         }
-        Op::LstmCell { x, .. } | Op::LstmCellBackward { x, .. }
-        | Op::GruCell { x, .. } | Op::GruCellBackward { x, .. } => {
+        Op::LstmCell { x, .. }
+        | Op::LstmCellBackward { x, .. }
+        | Op::GruCell { x, .. }
+        | Op::GruCellBackward { x, .. } => {
             let ty = type_of(*x, value_types);
             require_tensor_or_unknown(ty, node_id, "rnn cell input")
         }
@@ -329,7 +335,11 @@ fn infer_type_for_op(
             let ty = type_of(*upstream, value_types);
             require_tensor_or_unknown(ty, node_id, "batchnorm_backward_bias")
         }
-        Op::ReluBackward(input, grad) | Op::MatMul(input, grad) | Op::Conv2D(input, grad) | Op::Conv2DBackwardInput(input, grad, _) | Op::Conv2DBackwardWeight(input, grad, _) => {
+        Op::ReluBackward(input, grad)
+        | Op::MatMul(input, grad)
+        | Op::Conv2D(input, grad)
+        | Op::Conv2DBackwardInput(input, grad, _)
+        | Op::Conv2DBackwardWeight(input, grad, _) => {
             let left = type_of(*input, value_types);
             let right = type_of(*grad, value_types);
             let same = require_same_strict(left, right, node_id, "tensor binary op")?;
@@ -366,22 +376,44 @@ fn infer_type_for_op(
             weight,
             ..
         } => {
-            let _ = require_tensor_or_unknown(type_of(*input, value_types), node_id, "layernorm bg_input")?;
-            let _ = require_tensor_or_unknown(type_of(*upstream, value_types), node_id, "layernorm bg_input")?;
-            let _ = require_tensor_or_unknown(type_of(*weight, value_types), node_id, "layernorm bg_input")?;
+            let _ = require_tensor_or_unknown(
+                type_of(*input, value_types),
+                node_id,
+                "layernorm bg_input",
+            )?;
+            let _ = require_tensor_or_unknown(
+                type_of(*upstream, value_types),
+                node_id,
+                "layernorm bg_input",
+            )?;
+            let _ = require_tensor_or_unknown(
+                type_of(*weight, value_types),
+                node_id,
+                "layernorm bg_input",
+            )?;
             Ok(ValueType::Tensor) // dX is a tensor
         }
         Op::LayerNormBackwardWeight {
-            input,
-            upstream,
-            ..
+            input, upstream, ..
         } => {
-            let _ = require_tensor_or_unknown(type_of(*input, value_types), node_id, "layernorm bg_weight")?;
-            let _ = require_tensor_or_unknown(type_of(*upstream, value_types), node_id, "layernorm bg_weight")?;
+            let _ = require_tensor_or_unknown(
+                type_of(*input, value_types),
+                node_id,
+                "layernorm bg_weight",
+            )?;
+            let _ = require_tensor_or_unknown(
+                type_of(*upstream, value_types),
+                node_id,
+                "layernorm bg_weight",
+            )?;
             Ok(ValueType::Tensor) // dGamma is a tensor
         }
         Op::LayerNormBackwardBias { upstream } => {
-            let _ = require_tensor_or_unknown(type_of(*upstream, value_types), node_id, "layernorm bg_bias")?;
+            let _ = require_tensor_or_unknown(
+                type_of(*upstream, value_types),
+                node_id,
+                "layernorm bg_bias",
+            )?;
             Ok(ValueType::Tensor) // dBeta is a tensor
         }
         Op::Phi(values) => {

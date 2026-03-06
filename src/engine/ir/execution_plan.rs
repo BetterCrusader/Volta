@@ -1,14 +1,14 @@
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 
+use crate::ir::pass::PassManager;
+use crate::ir::{
+    AlgebraicSimplificationPass, ConstantFoldingPass, CsePass, DcePass, ElementwiseFusionPass,
+};
 use crate::ir::{
     AllocationPlan, Graph, KernelGroup, Schedule, StorageClass, ValueId, build_schedule,
     graph_fingerprint, group_kernels, plan_allocation, verify_allocation, verify_graph,
     verify_schedule,
-};
-use crate::ir::pass::PassManager;
-use crate::ir::{
-    AlgebraicSimplificationPass, ConstantFoldingPass, CsePass, DcePass, ElementwiseFusionPass,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

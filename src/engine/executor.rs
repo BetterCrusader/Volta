@@ -829,7 +829,10 @@ impl Executor {
         let input_node = lower_ctx
             .push_op(crate::ir::Op::Input("input".to_string()))
             .ok_or_else(|| {
-                Self::error("Failed to build inference graph: unable to create input node".to_string(), span)
+                Self::error(
+                    "Failed to build inference graph: unable to create input node".to_string(),
+                    span,
+                )
             })?;
 
         lower_ctx.lower_model_to_graph(
@@ -856,14 +859,16 @@ impl Executor {
         )
         .map_err(|e| Self::error(format!("Execution plan error: {}", e.message), span))?;
 
-        let loaded_weights = model_state.weights.clone().ok_or_else(|| {
-            Self::error(format!("Model '{model_name}' has no weights."), span)
-        })?;
+        let loaded_weights = model_state
+            .weights
+            .clone()
+            .ok_or_else(|| Self::error(format!("Model '{model_name}' has no weights."), span))?;
 
         // Build flat input tensor [n, in_size]
         let flat: Vec<f32> = inline_inputs.iter().flatten().map(|&v| v as f32).collect();
-        let input_tensor = crate::ir::tensor::Tensor::new(vec![n, in_size], flat)
-            .map_err(|e| Self::error(format!("Failed to build input tensor: {}", e.message), span))?;
+        let input_tensor = crate::ir::tensor::Tensor::new(vec![n, in_size], flat).map_err(|e| {
+            Self::error(format!("Failed to build input tensor: {}", e.message), span)
+        })?;
 
         let mut context = crate::ir::interpreter::ExecutionContext {
             inputs: std::collections::HashMap::new(),
@@ -892,7 +897,10 @@ impl Executor {
         .map_err(|e| Self::error(format!("Inference execution failed: {}", e.message), span))?;
 
         let Some(crate::ir::RuntimeValue::Tensor(out_tensor)) = result else {
-            return Err(Self::error("Inference did not return a tensor".to_string(), span));
+            return Err(Self::error(
+                "Inference did not return a tensor".to_string(),
+                span,
+            ));
         };
 
         // Print results
@@ -903,7 +911,11 @@ impl Executor {
             let preds = &out_tensor.data[start..end];
             let input_str: Vec<String> = row_inputs.iter().map(|v| format!("{v}")).collect();
             let pred_str: Vec<String> = preds.iter().map(|v| format!("{v:.4}")).collect();
-            println!("  input [{}] → [{}]", input_str.join(", "), pred_str.join(", "));
+            println!(
+                "  input [{}] → [{}]",
+                input_str.join(", "),
+                pred_str.join(", ")
+            );
         }
 
         Ok(())
@@ -989,12 +1001,12 @@ impl Executor {
 
         // --- AST to IR Lowering & Training ---
 
+        #[cfg(feature = "cuda")]
+        use crate::ir::CudaBackend;
         use crate::ir::lowering::LoweringContext;
         use crate::ir::tensor::Tensor;
         use crate::ir::train::{TrainConfig, TrainSample, train_graph_with_backend};
         use crate::ir::{Backend, CpuBackend, Op};
-        #[cfg(feature = "cuda")]
-        use crate::ir::CudaBackend;
 
         let mut lower_ctx = LoweringContext::new();
 
@@ -1670,14 +1682,20 @@ impl Executor {
     /// Requires the `llvm-codegen` feature. Returns the path to the compiled exe.
     #[cfg(feature = "llvm-codegen")]
     pub fn compile_first_model_to_object(&self, source_path: &str) -> Result<String, String> {
+        use crate::ir::Op;
         use crate::ir::codegen::{compile_graph_to_object, link_object_to_exe};
         use crate::ir::lowering::LoweringContext;
-        use crate::ir::Op;
 
-        let (model_name, model_state) = self.runtime.models.iter().next()
+        let (model_name, model_state) = self
+            .runtime
+            .models
+            .iter()
+            .next()
             .ok_or_else(|| "No models found — declare and train a model first".to_string())?;
 
-        let weights = model_state.weights.as_ref()
+        let weights = model_state
+            .weights
+            .as_ref()
             .ok_or_else(|| format!("Model '{model_name}' has no weights — train it first"))?;
 
         // Build forward inference graph (same as exec_infer_stmt)
@@ -1710,13 +1728,15 @@ impl Executor {
 
         let obj = std::path::Path::new(source_path).with_extension("o");
         // Shared library: .dll on Windows, .so on Linux/Mac
-        let lib_ext = if cfg!(target_os = "windows") { "dll" } else { "so" };
+        let lib_ext = if cfg!(target_os = "windows") {
+            "dll"
+        } else {
+            "so"
+        };
         let exe = std::path::Path::new(source_path).with_extension(lib_ext);
 
-        compile_graph_to_object(&graph, &params, &obj)
-            .map_err(|e| e.to_string())?;
-        link_object_to_exe(&obj, &exe)
-            .map_err(|e| e.to_string())?;
+        compile_graph_to_object(&graph, &params, &obj).map_err(|e| e.to_string())?;
+        link_object_to_exe(&obj, &exe).map_err(|e| e.to_string())?;
 
         Ok(exe.display().to_string())
     }
@@ -1727,7 +1747,11 @@ impl Executor {
     pub fn compile_first_model_to_train_dll(&self, source_path: &str) -> Result<String, String> {
         use crate::ir::codegen::{MlpTopology, compile_mlp_train_dll};
 
-        let (model_name, model_state) = self.runtime.models.iter().next()
+        let (model_name, model_state) = self
+            .runtime
+            .models
+            .iter()
+            .next()
             .ok_or_else(|| "No models found — declare a model first".to_string())?;
 
         let weights = model_state.weights.as_ref();
@@ -1743,10 +1767,16 @@ impl Executor {
         };
 
         let init_weights = weights.map(|w| {
-            w.iter().map(|(k, t)| (k.clone(), t.data.as_ref().clone())).collect::<std::collections::HashMap<_, _>>()
+            w.iter()
+                .map(|(k, t)| (k.clone(), t.data.as_ref().clone()))
+                .collect::<std::collections::HashMap<_, _>>()
         });
 
-        let lib_ext = if cfg!(target_os = "windows") { "train.dll" } else { "train.so" };
+        let lib_ext = if cfg!(target_os = "windows") {
+            "train.dll"
+        } else {
+            "train.so"
+        };
         let dll_path = std::path::Path::new(source_path).with_extension(lib_ext);
 
         compile_mlp_train_dll(&topology, init_weights.as_ref(), &dll_path)
@@ -1755,11 +1785,18 @@ impl Executor {
         Ok(dll_path.display().to_string())
     }
 
-    pub fn compile_first_model_to_train_rust_dll(&self, source_path: &str) -> Result<String, String> {
-        use crate::ir::codegen::{compile_mlp_train_rust_dll};
+    pub fn compile_first_model_to_train_rust_dll(
+        &self,
+        source_path: &str,
+    ) -> Result<String, String> {
+        use crate::ir::codegen::compile_mlp_train_rust_dll;
         use crate::ir::codegen::mlp_train_rust_codegen::MlpTopology as RustMlpTopology;
 
-        let (model_name, model_state) = self.runtime.models.iter().next()
+        let (model_name, model_state) = self
+            .runtime
+            .models
+            .iter()
+            .next()
             .ok_or_else(|| "No models found — declare a model first".to_string())?;
 
         let weights = model_state.weights.as_ref();
@@ -1772,17 +1809,26 @@ impl Executor {
         let topology = RustMlpTopology {
             layers: layer_sizes,
             activation: model_state.activation.clone(),
-            optimizer: model_state.optimizer.clone().unwrap_or_else(|| "sgd".to_string()),
+            optimizer: model_state
+                .optimizer
+                .clone()
+                .unwrap_or_else(|| "sgd".to_string()),
             clip_grad: model_state.clip_grad.unwrap_or(0.0) as f32,
             dropout_p: model_state.dropout_p.unwrap_or(0.0) as f32,
             use_layernorm: model_state.use_layernorm,
         };
 
         let init_weights = weights.map(|w| {
-            w.iter().map(|(k, t)| (k.clone(), t.data.as_ref().clone())).collect::<std::collections::HashMap<_, _>>()
+            w.iter()
+                .map(|(k, t)| (k.clone(), t.data.as_ref().clone()))
+                .collect::<std::collections::HashMap<_, _>>()
         });
 
-        let lib_ext = if cfg!(target_os = "windows") { "train_rust.dll" } else { "train_rust.so" };
+        let lib_ext = if cfg!(target_os = "windows") {
+            "train_rust.dll"
+        } else {
+            "train_rust.so"
+        };
         let dll_path = std::path::Path::new(source_path).with_extension(lib_ext);
 
         compile_mlp_train_rust_dll(&topology, init_weights.as_ref(), &dll_path)
@@ -1859,11 +1905,17 @@ impl Executor {
         let dropout_p = match Self::find_prop(props, "dropout") {
             Some(values) => {
                 if values.len() != 1 {
-                    return Err(Self::error("model.dropout expects exactly one value".to_string(), span));
+                    return Err(Self::error(
+                        "model.dropout expects exactly one value".to_string(),
+                        span,
+                    ));
                 }
                 let v = self.expect_float_value(&values[0], "model.dropout")?;
                 if !(0.0..1.0).contains(&v) {
-                    return Err(Self::error("model.dropout must be in [0, 1)".to_string(), span));
+                    return Err(Self::error(
+                        "model.dropout must be in [0, 1)".to_string(),
+                        span,
+                    ));
                 }
                 Some(v)
             }
@@ -1873,13 +1925,22 @@ impl Executor {
         let use_layernorm = match Self::find_prop(props, "layernorm") {
             Some(values) => {
                 if values.len() != 1 {
-                    return Err(Self::error("model.layernorm expects exactly one value (yes/no/true/false)".to_string(), span));
+                    return Err(Self::error(
+                        "model.layernorm expects exactly one value (yes/no/true/false)".to_string(),
+                        span,
+                    ));
                 }
                 match &values[0] {
-                    Expr::Symbol { name, .. } | Expr::Ident { name, .. } =>
-                        matches!(name.as_str(), "yes" | "true" | "on"),
+                    Expr::Symbol { name, .. } | Expr::Ident { name, .. } => {
+                        matches!(name.as_str(), "yes" | "true" | "on")
+                    }
                     Expr::Bool { value, .. } => *value,
-                    other => return Err(Self::error(format!("model.layernorm: unexpected value {other:?}"), span)),
+                    other => {
+                        return Err(Self::error(
+                            format!("model.layernorm: unexpected value {other:?}"),
+                            span,
+                        ));
+                    }
                 }
             }
             None => false,
@@ -2185,7 +2246,12 @@ impl Executor {
         // Extract symbol name from the expression
         let name = match &values[0] {
             Expr::Symbol { name, .. } => name.clone(),
-            _ => return Err(Self::error("train.lr_schedule must be a symbol (cosine or step)".to_string(), span)),
+            _ => {
+                return Err(Self::error(
+                    "train.lr_schedule must be a symbol (cosine or step)".to_string(),
+                    span,
+                ));
+            }
         };
         match name.as_str() {
             "cosine" => Ok(Some(crate::ir::optimizer::LrSchedule::Cosine {
@@ -2221,13 +2287,23 @@ impl Executor {
         let patience = match &values[0] {
             Expr::Int { value, .. } => *value as usize,
             Expr::Float { value, .. } => *value as usize,
-            _ => return Err(Self::error("train.early_stopping patience must be an integer".to_string(), span)),
+            _ => {
+                return Err(Self::error(
+                    "train.early_stopping patience must be an integer".to_string(),
+                    span,
+                ));
+            }
         };
         let min_delta = if values.len() == 2 {
             match &values[1] {
                 Expr::Float { value, .. } => *value as f32,
                 Expr::Int { value, .. } => *value as f32,
-                _ => return Err(Self::error("train.early_stopping min_delta must be a float".to_string(), span)),
+                _ => {
+                    return Err(Self::error(
+                        "train.early_stopping min_delta must be a float".to_string(),
+                        span,
+                    ));
+                }
             }
         } else {
             1e-4
@@ -2250,10 +2326,18 @@ impl Executor {
         let steps = match &values[0] {
             Expr::Int { value, .. } => *value as usize,
             Expr::Float { value, .. } => *value as usize,
-            _ => return Err(Self::error("train.gradient_accumulation must be an integer".to_string(), span)),
+            _ => {
+                return Err(Self::error(
+                    "train.gradient_accumulation must be an integer".to_string(),
+                    span,
+                ));
+            }
         };
         if steps == 0 {
-            return Err(Self::error("train.gradient_accumulation must be >= 1".to_string(), span));
+            return Err(Self::error(
+                "train.gradient_accumulation must be >= 1".to_string(),
+                span,
+            ));
         }
         Ok(steps)
     }
@@ -2269,7 +2353,10 @@ impl Executor {
         Self::expect_single_property_value(values, "train.clip_grad", span)?;
         let v = self.expect_float_value(&values[0], "train.clip_grad")?;
         if v <= 0.0 {
-            return Err(Self::error("train.clip_grad must be positive".to_string(), span));
+            return Err(Self::error(
+                "train.clip_grad must be positive".to_string(),
+                span,
+            ));
         }
         Ok(Some(v))
     }
@@ -2966,10 +3053,10 @@ impl Value {
     }
 }
 
-    fn is_runtime_assignable(target: &Value, source: &Value) -> bool {
-        target.type_name() == source.type_name()
-            || (matches!(target, Value::Float(_)) && matches!(source, Value::Int(_)))
-    }
+fn is_runtime_assignable(target: &Value, source: &Value) -> bool {
+    target.type_name() == source.type_name()
+        || (matches!(target, Value::Float(_)) && matches!(source, Value::Int(_)))
+}
 
 fn detect_gpu_available() -> bool {
     std::env::var("VOLTA_GPU_AVAILABLE")
@@ -3342,7 +3429,9 @@ mod tests {
     fn adamw_maps_to_adamw_optimizer_config() {
         let cfg = optimizer_config_from_name("adamw", 0.001);
         match cfg {
-            crate::ir::optimizer::OptimizerConfig::AdamW { lr, weight_decay, .. } => {
+            crate::ir::optimizer::OptimizerConfig::AdamW {
+                lr, weight_decay, ..
+            } => {
                 assert!((lr - 0.001f32).abs() < 1e-6);
                 assert!(weight_decay > 0.0);
             }

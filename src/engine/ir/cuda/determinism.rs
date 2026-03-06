@@ -1,5 +1,5 @@
-use crate::ir::{DeterminismLevel, ExecutionPhase};
 use crate::ir::cuda::{CudaKernel, LoweredCudaPlan};
+use crate::ir::{DeterminismLevel, ExecutionPhase};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CudaDeterminismPolicy {

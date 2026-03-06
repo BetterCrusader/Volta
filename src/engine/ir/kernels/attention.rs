@@ -17,12 +17,16 @@ pub fn scaled_dot_product_attention(
     let k_c = k.make_contiguous()?;
     let v_c = v.make_contiguous()?;
     if q_c.shape.len() != 3 || k_c.shape.len() != 3 || v_c.shape.len() != 3 {
-        return Err(TensorError { message: "SDPA expects rank-3 tensors".to_string() });
+        return Err(TensorError {
+            message: "SDPA expects rank-3 tensors".to_string(),
+        });
     }
     let (batch, seq_q, head_dim) = (q_c.shape[0], q_c.shape[1], q_c.shape[2]);
     let seq_k = k_c.shape[1];
     if k_c.shape != vec![batch, seq_k, head_dim] || v_c.shape[..2] != [batch, seq_k] {
-        return Err(TensorError { message: "SDPA shape mismatch between Q, K, V".to_string() });
+        return Err(TensorError {
+            message: "SDPA shape mismatch between Q, K, V".to_string(),
+        });
     }
     let v_dim = v_c.shape[2];
 
@@ -140,14 +144,20 @@ pub fn scaled_dot_product_attention_backward(
         for i in 0..seq_q {
             let aw_row = &aw.data[(b * seq_q + i) * seq_k..(b * seq_q + i) * seq_k + seq_k];
             let da_row = &d_aw[i * seq_k..(i + 1) * seq_k];
-            let s: f32 = aw_row.iter().zip(da_row.iter()).map(|(&a, &da)| a * da).sum();
+            let s: f32 = aw_row
+                .iter()
+                .zip(da_row.iter())
+                .map(|(&a, &da)| a * da)
+                .sum();
             for j in 0..seq_k {
                 d_logits[i * seq_k + j] = aw_row[j] * (da_row[j] - s);
             }
         }
 
         // Scale backward
-        for v in d_logits.iter_mut() { *v *= scale; }
+        for v in d_logits.iter_mut() {
+            *v *= scale;
+        }
 
         // dQ = d_logits @ K  [seq_q, head_dim]
         for i in 0..seq_q {
@@ -219,14 +229,18 @@ pub fn multi_head_attention(
 ) -> Result<MhaOutput, TensorError> {
     let q_c = q_input.make_contiguous()?;
     if q_c.shape.len() != 3 {
-        return Err(TensorError { message: "MHA expects rank-3 inputs [batch, seq, d_model]".to_string() });
+        return Err(TensorError {
+            message: "MHA expects rank-3 inputs [batch, seq, d_model]".to_string(),
+        });
     }
     let (batch, seq_q, d_model) = (q_c.shape[0], q_c.shape[1], q_c.shape[2]);
     let k_c = k_input.make_contiguous()?;
     let seq_k = k_c.shape[1];
 
     if d_model % num_heads != 0 {
-        return Err(TensorError { message: format!("d_model {d_model} not divisible by num_heads {num_heads}") });
+        return Err(TensorError {
+            message: format!("d_model {d_model} not divisible by num_heads {num_heads}"),
+        });
     }
     let head_dim = d_model / num_heads;
     let scale = 1.0 / (head_dim as f32).sqrt();
@@ -295,9 +309,8 @@ pub fn multi_head_attention(
         None
     };
 
-    let (attn_out, attn_weights) = scaled_dot_product_attention(
-        &q_heads, &k_heads, &v_heads, mask_ref, scale
-    )?;
+    let (attn_out, attn_weights) =
+        scaled_dot_product_attention(&q_heads, &k_heads, &v_heads, mask_ref, scale)?;
 
     // Reshape back: [batch*num_heads, seq_q, head_dim] → [batch, seq_q, d_model]
     let attn_out_c = attn_out.make_contiguous()?;

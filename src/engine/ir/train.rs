@@ -7,9 +7,8 @@ use crate::ir::optimizer::{OptimizerConfig, OptimizerState};
 use crate::ir::tensor::Tensor;
 use crate::ir::{
     Backend, CompilerFlags, CpuBackend, Graph, Op, ValueId, build_execution_plan,
-    execute_terminal_with_backend_buffered, execute_value_with_backend,
-    execute_forward_and_save, execute_backward_with_saved_activations,
-    verify_graph,
+    execute_backward_with_saved_activations, execute_forward_and_save,
+    execute_terminal_with_backend_buffered, execute_value_with_backend, verify_graph,
 };
 
 #[derive(Debug, Clone)]
@@ -29,7 +28,11 @@ pub struct EarlyStoppingConfig {
 
 impl Default for EarlyStoppingConfig {
     fn default() -> Self {
-        Self { patience: 10, min_delta: 1e-4, restore_best_weights: true }
+        Self {
+            patience: 10,
+            min_delta: 1e-4,
+            restore_best_weights: true,
+        }
     }
 }
 
@@ -48,7 +51,14 @@ pub struct TrainConfig {
 
 impl TrainConfig {
     pub fn new(epochs: usize, optimizer: OptimizerConfig) -> Self {
-        Self { epochs, optimizer, lr_schedule: None, clip_grad: None, early_stopping: None, gradient_accumulation_steps: 1 }
+        Self {
+            epochs,
+            optimizer,
+            lr_schedule: None,
+            clip_grad: None,
+            early_stopping: None,
+            gradient_accumulation_steps: 1,
+        }
     }
 }
 
@@ -168,7 +178,10 @@ pub fn train_graph_with_backend(
     let grad_targets: Vec<(String, ValueId, ValueId)> = tracked_params
         .iter()
         .filter_map(|(name, value_id)| {
-            gradient_graph.gradients.get(value_id).copied()
+            gradient_graph
+                .gradients
+                .get(value_id)
+                .copied()
                 .map(|grad_value_id| (name.clone(), *value_id, grad_value_id))
         })
         .collect();
@@ -252,9 +265,12 @@ pub fn train_graph_with_backend(
 
             // Accumulate gradients
             for (name, value_id, grad_value_id) in &grad_targets {
-                let grad_runtime = all_grads.get(grad_value_id).ok_or_else(|| TrainError {
-                    message: format!("Missing gradient for '{name}'"),
-                })?.clone();
+                let grad_runtime = all_grads
+                    .get(grad_value_id)
+                    .ok_or_else(|| TrainError {
+                        message: format!("Missing gradient for '{name}'"),
+                    })?
+                    .clone();
                 let grad_tensor = runtime_to_tensor(grad_runtime).map_err(|e| TrainError {
                     message: format!("Gradient for '{name}' is invalid: {e}"),
                 })?;
@@ -282,7 +298,9 @@ pub fn train_graph_with_backend(
                 let scale = 1.0 / accum_steps as f32;
                 for grad in accum_grads.values_mut() {
                     let data = Arc::make_mut(&mut grad.data);
-                    for v in data.iter_mut() { *v *= scale; }
+                    for v in data.iter_mut() {
+                        *v *= scale;
+                    }
                 }
             }
 
@@ -293,7 +311,8 @@ pub fn train_graph_with_backend(
             let mut gradients_by_id = gradients_by_id;
             if let Some(max_norm) = config.clip_grad {
                 if max_norm > 0.0 {
-                    let global_sq_norm: f32 = gradients_by_id.values()
+                    let global_sq_norm: f32 = gradients_by_id
+                        .values()
                         .flat_map(|t| t.data.iter())
                         .map(|v| v * v)
                         .sum();
@@ -302,7 +321,9 @@ pub fn train_graph_with_backend(
                         let scale = max_norm / global_norm;
                         for grad in gradients_by_id.values_mut() {
                             let data = Arc::make_mut(&mut grad.data);
-                            for v in data.iter_mut() { *v *= scale; }
+                            for v in data.iter_mut() {
+                                *v *= scale;
+                            }
                         }
                     }
                 }
@@ -336,7 +357,9 @@ pub fn train_graph_with_backend(
                 let scale = 1.0 / accum_count as f32;
                 for grad in accum_grads.values_mut() {
                     let data = Arc::make_mut(&mut grad.data);
-                    for v in data.iter_mut() { *v *= scale; }
+                    for v in data.iter_mut() {
+                        *v *= scale;
+                    }
                 }
             }
 
@@ -345,7 +368,8 @@ pub fn train_graph_with_backend(
             // Gradient clipping
             if let Some(max_norm) = config.clip_grad {
                 if max_norm > 0.0 {
-                    let global_sq_norm: f32 = gradients_by_id.values()
+                    let global_sq_norm: f32 = gradients_by_id
+                        .values()
                         .flat_map(|t| t.data.iter())
                         .map(|v| v * v)
                         .sum();
@@ -354,7 +378,9 @@ pub fn train_graph_with_backend(
                         let scale = max_norm / global_norm;
                         for grad in gradients_by_id.values_mut() {
                             let data = Arc::make_mut(&mut grad.data);
-                            for v in data.iter_mut() { *v *= scale; }
+                            for v in data.iter_mut() {
+                                *v *= scale;
+                            }
                         }
                     }
                 }
@@ -493,7 +519,8 @@ pub fn train_graph_with_backend(
                 if es_patience_counter >= es.patience {
                     println!(
                         "Early stopping at epoch {} (best loss: {:.4})",
-                        epoch + 1, es_best_loss
+                        epoch + 1,
+                        es_best_loss
                     );
                     es_stopped_epoch = Some(epoch + 1);
                     break;
@@ -570,17 +597,15 @@ fn build_context_with_ids(
 ) -> ExecutionContext {
     let mut context = ExecutionContext::default();
     for (name, tensor) in &sample.inputs {
-        context.inputs.insert(
-            name.clone(),
-            RuntimeValue::Tensor(Arc::new(tensor.clone())),
-        );
+        context
+            .inputs
+            .insert(name.clone(), RuntimeValue::Tensor(Arc::new(tensor.clone())));
     }
     for (name, value_id) in tracked_params {
         if let Some(arc_tensor) = parameter_tensors.get(value_id) {
-            context.parameters.insert(
-                name.clone(),
-                RuntimeValue::Tensor(Arc::clone(arc_tensor)),
-            );
+            context
+                .parameters
+                .insert(name.clone(), RuntimeValue::Tensor(Arc::clone(arc_tensor)));
         }
     }
     context
@@ -633,16 +658,65 @@ fn get_optimizer_lr(config: &OptimizerConfig) -> f32 {
 fn set_optimizer_lr(config: OptimizerConfig, new_lr: f32) -> OptimizerConfig {
     match config {
         OptimizerConfig::Sgd { .. } => OptimizerConfig::Sgd { lr: new_lr },
-        OptimizerConfig::Adam { beta1, beta2, epsilon, .. } =>
-            OptimizerConfig::Adam { lr: new_lr, beta1, beta2, epsilon },
-        OptimizerConfig::AdamW { beta1, beta2, epsilon, weight_decay, .. } =>
-            OptimizerConfig::AdamW { lr: new_lr, beta1, beta2, epsilon, weight_decay },
-        OptimizerConfig::RmsProp { alpha, epsilon, weight_decay, momentum, .. } =>
-            OptimizerConfig::RmsProp { lr: new_lr, alpha, epsilon, weight_decay, momentum },
-        OptimizerConfig::Adagrad { epsilon, weight_decay, .. } =>
-            OptimizerConfig::Adagrad { lr: new_lr, epsilon, weight_decay },
-        OptimizerConfig::Lars { momentum, weight_decay, trust_coeff, epsilon, .. } =>
-            OptimizerConfig::Lars { lr: new_lr, momentum, weight_decay, trust_coeff, epsilon },
+        OptimizerConfig::Adam {
+            beta1,
+            beta2,
+            epsilon,
+            ..
+        } => OptimizerConfig::Adam {
+            lr: new_lr,
+            beta1,
+            beta2,
+            epsilon,
+        },
+        OptimizerConfig::AdamW {
+            beta1,
+            beta2,
+            epsilon,
+            weight_decay,
+            ..
+        } => OptimizerConfig::AdamW {
+            lr: new_lr,
+            beta1,
+            beta2,
+            epsilon,
+            weight_decay,
+        },
+        OptimizerConfig::RmsProp {
+            alpha,
+            epsilon,
+            weight_decay,
+            momentum,
+            ..
+        } => OptimizerConfig::RmsProp {
+            lr: new_lr,
+            alpha,
+            epsilon,
+            weight_decay,
+            momentum,
+        },
+        OptimizerConfig::Adagrad {
+            epsilon,
+            weight_decay,
+            ..
+        } => OptimizerConfig::Adagrad {
+            lr: new_lr,
+            epsilon,
+            weight_decay,
+        },
+        OptimizerConfig::Lars {
+            momentum,
+            weight_decay,
+            trust_coeff,
+            epsilon,
+            ..
+        } => OptimizerConfig::Lars {
+            lr: new_lr,
+            momentum,
+            weight_decay,
+            trust_coeff,
+            epsilon,
+        },
     }
 }
 
@@ -703,12 +777,15 @@ mod tests {
             params,
             &dataset,
             &[],
-            &TrainConfig::new(100, OptimizerConfig::Adam {
-                lr: 0.05,
-                beta1: 0.9,
-                beta2: 0.999,
-                epsilon: 1e-8,
-            }),
+            &TrainConfig::new(
+                100,
+                OptimizerConfig::Adam {
+                    lr: 0.05,
+                    beta1: 0.9,
+                    beta2: 0.999,
+                    epsilon: 1e-8,
+                },
+            ),
         )
         .expect("training should succeed");
 

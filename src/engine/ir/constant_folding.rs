@@ -1,4 +1,4 @@
-use crate::ir::{Graph, Op, Pass, ValueId, run_with_verifier_guard, Tensor};
+use crate::ir::{Graph, Op, Pass, Tensor, ValueId, run_with_verifier_guard};
 
 #[derive(Debug, Clone)]
 enum ConstValue {
@@ -81,7 +81,10 @@ fn fold_op(op: &Op, constants: &[Option<ConstValue>]) -> Option<Op> {
             match val_const {
                 ConstValue::Int(v) => Some(Op::ConstInt(-v)),
                 ConstValue::Float(v) => Some(Op::ConstFloat(-v)),
-                ConstValue::Tensor(t) => t.neg_elementwise().ok().map(|res| op_from_const(ConstValue::Tensor(res))),
+                ConstValue::Tensor(t) => t
+                    .neg_elementwise()
+                    .ok()
+                    .map(|res| op_from_const(ConstValue::Tensor(res))),
             }
         }
         Op::Relu(value) => {
@@ -89,13 +92,18 @@ fn fold_op(op: &Op, constants: &[Option<ConstValue>]) -> Option<Op> {
             match val_const {
                 ConstValue::Int(v) => Some(Op::ConstInt(if *v > 0 { *v } else { 0 })),
                 ConstValue::Float(v) => Some(Op::ConstFloat(if *v > 0.0 { *v } else { 0.0 })),
-                ConstValue::Tensor(t) => t.relu().ok().map(|res| op_from_const(ConstValue::Tensor(res))),
+                ConstValue::Tensor(t) => t
+                    .relu()
+                    .ok()
+                    .map(|res| op_from_const(ConstValue::Tensor(res))),
             }
         }
         Op::Transpose(value) => {
             let val_const = constants.get(value.0).and_then(|v| v.as_ref())?;
             if let ConstValue::Tensor(t) = val_const {
-                t.transpose_2d().ok().map(|res| op_from_const(ConstValue::Tensor(res)))
+                t.transpose_2d()
+                    .ok()
+                    .map(|res| op_from_const(ConstValue::Tensor(res)))
             } else {
                 None
             }
@@ -103,7 +111,9 @@ fn fold_op(op: &Op, constants: &[Option<ConstValue>]) -> Option<Op> {
         Op::Reshape { input, shape } => {
             let val_const = constants.get(input.0).and_then(|v| v.as_ref())?;
             if let ConstValue::Tensor(t) = val_const {
-                t.reshape(shape.clone()).ok().map(|res| op_from_const(ConstValue::Tensor(res)))
+                t.reshape(shape.clone())
+                    .ok()
+                    .map(|res| op_from_const(ConstValue::Tensor(res)))
             } else {
                 None
             }
@@ -112,7 +122,9 @@ fn fold_op(op: &Op, constants: &[Option<ConstValue>]) -> Option<Op> {
             let left_const = constants.get(left.0).and_then(|v| v.as_ref())?;
             let right_const = constants.get(right.0).and_then(|v| v.as_ref())?;
             if let (ConstValue::Tensor(a), ConstValue::Tensor(b)) = (left_const, right_const) {
-                a.matmul(b).ok().map(|res| op_from_const(ConstValue::Tensor(res)))
+                a.matmul(b)
+                    .ok()
+                    .map(|res| op_from_const(ConstValue::Tensor(res)))
             } else {
                 None
             }
@@ -203,7 +215,10 @@ fn zero_for(left: Option<&ConstValue>, right: Option<&ConstValue>) -> ConstValue
     match (left, right) {
         (Some(ConstValue::Float(_)), _) | (_, Some(ConstValue::Float(_))) => ConstValue::Float(0.0),
         (Some(ConstValue::Tensor(t)), _) | (_, Some(ConstValue::Tensor(t))) => {
-            Tensor::zeros(t.shape.clone()).ok().map(ConstValue::Tensor).unwrap_or(ConstValue::Int(0))
+            Tensor::zeros(t.shape.clone())
+                .ok()
+                .map(ConstValue::Tensor)
+                .unwrap_or(ConstValue::Int(0))
         }
         _ => ConstValue::Int(0),
     }
@@ -272,7 +287,9 @@ fn fold_mul(left: ConstValue, right: ConstValue) -> Option<ConstValue> {
             }
             finite_float(a * b)
         }
-        (ConstValue::Tensor(a), ConstValue::Tensor(b)) => a.mul_elementwise(&b).ok().map(ConstValue::Tensor),
+        (ConstValue::Tensor(a), ConstValue::Tensor(b)) => {
+            a.mul_elementwise(&b).ok().map(ConstValue::Tensor)
+        }
         _ => None,
     }
 }
@@ -295,7 +312,9 @@ fn fold_div(left: ConstValue, right: ConstValue) -> Option<ConstValue> {
             }
             finite_float(a / b)
         }
-        (ConstValue::Tensor(a), ConstValue::Tensor(b)) => a.div_broadcast(&b).ok().map(ConstValue::Tensor),
+        (ConstValue::Tensor(a), ConstValue::Tensor(b)) => {
+            a.div_broadcast(&b).ok().map(ConstValue::Tensor)
+        }
         _ => None,
     }
 }
@@ -313,9 +332,9 @@ fn const_from_op(op: &Op) -> Option<ConstValue> {
     match op {
         Op::ConstInt(value) => Some(ConstValue::Int(*value)),
         Op::ConstFloat(value) => Some(ConstValue::Float(*value)),
-        Op::ConstTensor { shape, data } => {
-            Tensor::new(shape.clone(), data.clone()).ok().map(ConstValue::Tensor)
-        }
+        Op::ConstTensor { shape, data } => Tensor::new(shape.clone(), data.clone())
+            .ok()
+            .map(ConstValue::Tensor),
         _ => None,
     }
 }
@@ -544,16 +563,22 @@ mod tests {
         let mut graph = Graph::new();
         let block = graph.create_block();
         let (_, v0) = graph
-            .add_op(block, Op::ConstTensor {
-                shape: vec![2, 2],
-                data: vec![1.0, 2.0, 3.0, 4.0],
-            })
+            .add_op(
+                block,
+                Op::ConstTensor {
+                    shape: vec![2, 2],
+                    data: vec![1.0, 2.0, 3.0, 4.0],
+                },
+            )
             .expect("add op should succeed");
         let (_, v1) = graph
-            .add_op(block, Op::ConstTensor {
-                shape: vec![2, 2],
-                data: vec![5.0, 6.0, 7.0, 8.0],
-            })
+            .add_op(
+                block,
+                Op::ConstTensor {
+                    shape: vec![2, 2],
+                    data: vec![5.0, 6.0, 7.0, 8.0],
+                },
+            )
             .expect("add op should succeed");
         graph
             .add_op(block, Op::Add(v0, v1))
@@ -563,14 +588,20 @@ mod tests {
         pass.run(&mut graph);
 
         // Check if Add was folded into a single ConstTensor
-        let folded_const = graph.nodes.iter().find(|n| matches!(n.op, Op::ConstTensor { .. }));
+        let folded_const = graph
+            .nodes
+            .iter()
+            .find(|n| matches!(n.op, Op::ConstTensor { .. }));
         assert!(folded_const.is_some());
         if let Some(node) = graph.nodes.last() {
-             if let Op::ConstTensor { data, .. } = &node.op {
-                 assert_eq!(data, &vec![6.0, 8.0, 10.0, 12.0]);
-             } else {
-                 panic!("Last node should be ConstTensor after folding, got {:?}", node.op);
-             }
+            if let Op::ConstTensor { data, .. } = &node.op {
+                assert_eq!(data, &vec![6.0, 8.0, 10.0, 12.0]);
+            } else {
+                panic!(
+                    "Last node should be ConstTensor after folding, got {:?}",
+                    node.op
+                );
+            }
         }
     }
 }

@@ -91,12 +91,22 @@ pub fn build_reverse_graph(
                 );
                 for (input_value, grad_op) in backward_ops {
                     let mapped_input = mapped(&forward_to_backward, input_value)?;
-                    let (_, grad_contribution) = backward
-                        .add_op(block, grad_op)
-                        .map_err(|err| AutogradError {
-                            message: format!("Failed to add backward op for plugin: {}", err.message),
-                        })?;
-                    accumulate_grad(&mut backward, block, &mut grad_map, mapped_input, grad_contribution)?;
+                    let (_, grad_contribution) =
+                        backward
+                            .add_op(block, grad_op)
+                            .map_err(|err| AutogradError {
+                                message: format!(
+                                    "Failed to add backward op for plugin: {}",
+                                    err.message
+                                ),
+                            })?;
+                    accumulate_grad(
+                        &mut backward,
+                        block,
+                        &mut grad_map,
+                        mapped_input,
+                        grad_contribution,
+                    )?;
                 }
             }
             Op::Add(a, b) => {
@@ -561,48 +571,119 @@ pub fn build_reverse_graph(
                         },
                     )
                     .map_err(|err| AutogradError {
-                        message: format!("Failed to build GlobalAveragePool backward: {}", err.message),
+                        message: format!(
+                            "Failed to build GlobalAveragePool backward: {}",
+                            err.message
+                        ),
                     })?;
                 accumulate_grad(&mut backward, block, &mut grad_map, input_m, grad)?;
             }
             Op::GlobalAveragePoolBackward { .. } => {
                 // backward of backward not implemented
             }
-            Op::GroupNorm { input, weight, bias, num_groups, epsilon } => {
+            Op::GroupNorm {
+                input,
+                weight,
+                bias,
+                num_groups,
+                epsilon,
+            } => {
                 let input_m = mapped(&forward_to_backward, *input)?;
                 let weight_m = mapped(&forward_to_backward, *weight)?;
-                let (_, grad_input) = backward.add_op(block, Op::GroupNormBackwardInput {
-                    input: input_m, upstream, weight: weight_m,
-                    num_groups: *num_groups, epsilon: *epsilon,
-                }).map_err(|e| AutogradError { message: format!("GroupNorm bwd input: {}", e.message) })?;
+                let (_, grad_input) = backward
+                    .add_op(
+                        block,
+                        Op::GroupNormBackwardInput {
+                            input: input_m,
+                            upstream,
+                            weight: weight_m,
+                            num_groups: *num_groups,
+                            epsilon: *epsilon,
+                        },
+                    )
+                    .map_err(|e| AutogradError {
+                        message: format!("GroupNorm bwd input: {}", e.message),
+                    })?;
                 accumulate_grad(&mut backward, block, &mut grad_map, input_m, grad_input)?;
-                let (_, grad_weight) = backward.add_op(block, Op::GroupNormBackwardWeight {
-                    input: input_m, upstream, num_groups: *num_groups, epsilon: *epsilon,
-                }).map_err(|e| AutogradError { message: format!("GroupNorm bwd weight: {}", e.message) })?;
+                let (_, grad_weight) = backward
+                    .add_op(
+                        block,
+                        Op::GroupNormBackwardWeight {
+                            input: input_m,
+                            upstream,
+                            num_groups: *num_groups,
+                            epsilon: *epsilon,
+                        },
+                    )
+                    .map_err(|e| AutogradError {
+                        message: format!("GroupNorm bwd weight: {}", e.message),
+                    })?;
                 let weight_m_param = mapped(&forward_to_backward, *weight)?;
-                accumulate_grad(&mut backward, block, &mut grad_map, weight_m_param, grad_weight)?;
-                let (_, grad_bias) = backward.add_op(block, Op::GroupNormBackwardBias { upstream })
-                    .map_err(|e| AutogradError { message: format!("GroupNorm bwd bias: {}", e.message) })?;
+                accumulate_grad(
+                    &mut backward,
+                    block,
+                    &mut grad_map,
+                    weight_m_param,
+                    grad_weight,
+                )?;
+                let (_, grad_bias) = backward
+                    .add_op(block, Op::GroupNormBackwardBias { upstream })
+                    .map_err(|e| AutogradError {
+                        message: format!("GroupNorm bwd bias: {}", e.message),
+                    })?;
                 let bias_m = mapped(&forward_to_backward, *bias)?;
                 accumulate_grad(&mut backward, block, &mut grad_map, bias_m, grad_bias)?;
             }
             Op::GroupNormBackwardInput { .. }
             | Op::GroupNormBackwardWeight { .. }
             | Op::GroupNormBackwardBias { .. } => {}
-            Op::InstanceNorm { input, weight, bias, epsilon } => {
+            Op::InstanceNorm {
+                input,
+                weight,
+                bias,
+                epsilon,
+            } => {
                 let input_m = mapped(&forward_to_backward, *input)?;
                 let weight_m = mapped(&forward_to_backward, *weight)?;
-                let (_, grad_input) = backward.add_op(block, Op::InstanceNormBackwardInput {
-                    input: input_m, upstream, weight: weight_m, epsilon: *epsilon,
-                }).map_err(|e| AutogradError { message: format!("InstanceNorm bwd input: {}", e.message) })?;
+                let (_, grad_input) = backward
+                    .add_op(
+                        block,
+                        Op::InstanceNormBackwardInput {
+                            input: input_m,
+                            upstream,
+                            weight: weight_m,
+                            epsilon: *epsilon,
+                        },
+                    )
+                    .map_err(|e| AutogradError {
+                        message: format!("InstanceNorm bwd input: {}", e.message),
+                    })?;
                 accumulate_grad(&mut backward, block, &mut grad_map, input_m, grad_input)?;
-                let (_, grad_weight) = backward.add_op(block, Op::InstanceNormBackwardWeight {
-                    input: input_m, upstream, epsilon: *epsilon,
-                }).map_err(|e| AutogradError { message: format!("InstanceNorm bwd weight: {}", e.message) })?;
+                let (_, grad_weight) = backward
+                    .add_op(
+                        block,
+                        Op::InstanceNormBackwardWeight {
+                            input: input_m,
+                            upstream,
+                            epsilon: *epsilon,
+                        },
+                    )
+                    .map_err(|e| AutogradError {
+                        message: format!("InstanceNorm bwd weight: {}", e.message),
+                    })?;
                 let weight_m_param = mapped(&forward_to_backward, *weight)?;
-                accumulate_grad(&mut backward, block, &mut grad_map, weight_m_param, grad_weight)?;
-                let (_, grad_bias) = backward.add_op(block, Op::InstanceNormBackwardBias { upstream })
-                    .map_err(|e| AutogradError { message: format!("InstanceNorm bwd bias: {}", e.message) })?;
+                accumulate_grad(
+                    &mut backward,
+                    block,
+                    &mut grad_map,
+                    weight_m_param,
+                    grad_weight,
+                )?;
+                let (_, grad_bias) = backward
+                    .add_op(block, Op::InstanceNormBackwardBias { upstream })
+                    .map_err(|e| AutogradError {
+                        message: format!("InstanceNorm bwd bias: {}", e.message),
+                    })?;
                 let bias_m = mapped(&forward_to_backward, *bias)?;
                 accumulate_grad(&mut backward, block, &mut grad_map, bias_m, grad_bias)?;
             }
@@ -615,7 +696,12 @@ pub fn build_reverse_graph(
                 let input_m = mapped(&forward_to_backward, *input)?;
                 accumulate_grad(&mut backward, block, &mut grad_map, input_m, upstream)?;
             }
-            Op::Upsample2D { input, scale_h, scale_w, mode } => {
+            Op::Upsample2D {
+                input,
+                scale_h,
+                scale_w,
+                mode,
+            } => {
                 let input_m = mapped(&forward_to_backward, *input)?;
                 if *mode == 0 {
                     let sh = scale_h.round() as usize;
@@ -623,13 +709,20 @@ pub fn build_reverse_graph(
                     // We need orig_h and orig_w — they come from the input shape
                     // For now we emit UpsampleBackward with placeholder zeros (shape from verifier)
                     // In practice, caller must set correct orig_h/orig_w from shape facts
-                    let (_, grad) = backward.add_op(block, Op::Upsample2DBackward {
-                        upstream,
-                        orig_h: 0, // will be resolved at runtime from input shape
-                        orig_w: 0,
-                        scale_h: sh,
-                        scale_w: sw,
-                    }).map_err(|e| AutogradError { message: format!("Upsample2D bwd: {}", e.message) })?;
+                    let (_, grad) = backward
+                        .add_op(
+                            block,
+                            Op::Upsample2DBackward {
+                                upstream,
+                                orig_h: 0, // will be resolved at runtime from input shape
+                                orig_w: 0,
+                                scale_h: sh,
+                                scale_w: sw,
+                            },
+                        )
+                        .map_err(|e| AutogradError {
+                            message: format!("Upsample2D bwd: {}", e.message),
+                        })?;
                     accumulate_grad(&mut backward, block, &mut grad_map, input_m, grad)?;
                 } else {
                     // Bilinear backward: approximate as pass-through (TODO: proper backward)
@@ -652,10 +745,17 @@ pub fn build_reverse_graph(
             }
             Op::RoPE { input, offset } => {
                 let input_m = mapped(&forward_to_backward, *input)?;
-                let (_, grad) = backward.add_op(block, Op::RoPEBackward {
-                    upstream,
-                    offset: *offset,
-                }).map_err(|e| AutogradError { message: format!("RoPE backward: {}", e.message) })?;
+                let (_, grad) = backward
+                    .add_op(
+                        block,
+                        Op::RoPEBackward {
+                            upstream,
+                            offset: *offset,
+                        },
+                    )
+                    .map_err(|e| AutogradError {
+                        message: format!("RoPE backward: {}", e.message),
+                    })?;
                 accumulate_grad(&mut backward, block, &mut grad_map, input_m, grad)?;
             }
             Op::RoPEBackward { .. } => {}
@@ -663,16 +763,31 @@ pub fn build_reverse_graph(
                 // Gradient flows to weight (sparse), not to indices (discrete)
                 let weight_m = mapped(&forward_to_backward, *weight)?;
                 let indices_m = mapped(&forward_to_backward, *indices)?;
-                let (_, grad_weight) = backward.add_op(block, Op::EmbeddingBackward {
-                    weight: weight_m,
-                    indices: indices_m,
-                    upstream,
-                }).map_err(|e| AutogradError { message: format!("Embedding backward: {}", e.message) })?;
+                let (_, grad_weight) = backward
+                    .add_op(
+                        block,
+                        Op::EmbeddingBackward {
+                            weight: weight_m,
+                            indices: indices_m,
+                            upstream,
+                        },
+                    )
+                    .map_err(|e| AutogradError {
+                        message: format!("Embedding backward: {}", e.message),
+                    })?;
                 accumulate_grad(&mut backward, block, &mut grad_map, weight_m, grad_weight)?;
                 // No gradient for indices (they're discrete tokens)
             }
             Op::EmbeddingBackward { .. } => {}
-            Op::LstmCell { x, h_prev, c_prev, weight_ih, weight_hh, bias, output_idx: _ } => {
+            Op::LstmCell {
+                x,
+                h_prev,
+                c_prev,
+                weight_ih,
+                weight_hh,
+                bias,
+                output_idx: _,
+            } => {
                 // For autograd we only support output_idx=0 (h_next) as the primary output.
                 // The saved tensors (gates_raw, tanh_c_next, c_next) need to be computed first.
                 // We emit LstmCellBackward ops for each trainable param.
@@ -685,40 +800,105 @@ pub fn build_reverse_graph(
                 let bias_m = mapped(&forward_to_backward, *bias)?;
                 // Re-run forward to get gates_raw (output_idx=2) and tanh_c_next (output_idx=3) for backward.
                 // Note: We must emit these as separate nodes in the backward graph.
-                let (_, gates_node) = backward.add_op(block, Op::LstmCell {
-                    x: x_m, h_prev: h_m, c_prev: c_m, weight_ih: wih_m, weight_hh: whh_m, bias: bias_m,
-                    output_idx: 2,
-                }).map_err(|e| AutogradError { message: format!("LSTM bwd gates: {}", e.message) })?;
-                let (_, tanh_c_node) = backward.add_op(block, Op::LstmCell {
-                    x: x_m, h_prev: h_m, c_prev: c_m, weight_ih: wih_m, weight_hh: whh_m, bias: bias_m,
-                    output_idx: 3,
-                }).map_err(|e| AutogradError { message: format!("LSTM bwd tanh_c: {}", e.message) })?;
+                let (_, gates_node) = backward
+                    .add_op(
+                        block,
+                        Op::LstmCell {
+                            x: x_m,
+                            h_prev: h_m,
+                            c_prev: c_m,
+                            weight_ih: wih_m,
+                            weight_hh: whh_m,
+                            bias: bias_m,
+                            output_idx: 2,
+                        },
+                    )
+                    .map_err(|e| AutogradError {
+                        message: format!("LSTM bwd gates: {}", e.message),
+                    })?;
+                let (_, tanh_c_node) = backward
+                    .add_op(
+                        block,
+                        Op::LstmCell {
+                            x: x_m,
+                            h_prev: h_m,
+                            c_prev: c_m,
+                            weight_ih: wih_m,
+                            weight_hh: whh_m,
+                            bias: bias_m,
+                            output_idx: 3,
+                        },
+                    )
+                    .map_err(|e| AutogradError {
+                        message: format!("LSTM bwd tanh_c: {}", e.message),
+                    })?;
                 // Zero dc_next (we assume single-step LSTM, no cell grad from future)
-                let (_, zero_dc) = backward.add_op(block, Op::LstmCell {
-                    x: x_m, h_prev: h_m, c_prev: c_m, weight_ih: wih_m, weight_hh: whh_m, bias: bias_m,
-                    output_idx: 1, // c_next shape for zeros reference
-                }).map_err(|e| AutogradError { message: format!("LSTM bwd c_next shape: {}", e.message) })?;
+                let (_, zero_dc) = backward
+                    .add_op(
+                        block,
+                        Op::LstmCell {
+                            x: x_m,
+                            h_prev: h_m,
+                            c_prev: c_m,
+                            weight_ih: wih_m,
+                            weight_hh: whh_m,
+                            bias: bias_m,
+                            output_idx: 1, // c_next shape for zeros reference
+                        },
+                    )
+                    .map_err(|e| AutogradError {
+                        message: format!("LSTM bwd c_next shape: {}", e.message),
+                    })?;
                 // We'll use the c_next value as dc_next (approximation: zeros via Mul by zero const)
                 // Actually just use upstream as dh_next and c_prev zeros as dc_next.
                 // Proper approach: use the actual c_next grad. For single-step, dc_next = 0.
-                let (_, dc_zero) = backward.add_op(block, Op::Mul(zero_dc, zero_dc))
-                    .map_err(|e| AutogradError { message: format!("LSTM dc zero: {}", e.message) })?;
+                let (_, dc_zero) =
+                    backward
+                        .add_op(block, Op::Mul(zero_dc, zero_dc))
+                        .map_err(|e| AutogradError {
+                            message: format!("LSTM dc zero: {}", e.message),
+                        })?;
                 // Emit backward ops for each target
                 for (target, param_m) in [
-                    (0usize, x_m), (1, h_m), (2, c_m), (3, wih_m), (4, whh_m), (5, bias_m)
+                    (0usize, x_m),
+                    (1, h_m),
+                    (2, c_m),
+                    (3, wih_m),
+                    (4, whh_m),
+                    (5, bias_m),
                 ] {
-                    let (_, grad) = backward.add_op(block, Op::LstmCellBackward {
-                        x: x_m, h_prev: h_m, c_prev: c_m,
-                        weight_ih: wih_m, weight_hh: whh_m,
-                        gates_raw: gates_node, tanh_c_next: tanh_c_node,
-                        dh_next: upstream, dc_next: dc_zero,
-                        grad_target: target,
-                    }).map_err(|e| AutogradError { message: format!("LstmCellBackward: {}", e.message) })?;
+                    let (_, grad) = backward
+                        .add_op(
+                            block,
+                            Op::LstmCellBackward {
+                                x: x_m,
+                                h_prev: h_m,
+                                c_prev: c_m,
+                                weight_ih: wih_m,
+                                weight_hh: whh_m,
+                                gates_raw: gates_node,
+                                tanh_c_next: tanh_c_node,
+                                dh_next: upstream,
+                                dc_next: dc_zero,
+                                grad_target: target,
+                            },
+                        )
+                        .map_err(|e| AutogradError {
+                            message: format!("LstmCellBackward: {}", e.message),
+                        })?;
                     accumulate_grad(&mut backward, block, &mut grad_map, param_m, grad)?;
                 }
             }
             Op::LstmCellBackward { .. } => {}
-            Op::GruCell { x, h_prev, weight_ih, weight_hh, bias_ih, bias_hh, .. } => {
+            Op::GruCell {
+                x,
+                h_prev,
+                weight_ih,
+                weight_hh,
+                bias_ih,
+                bias_hh,
+                ..
+            } => {
                 let x_m = mapped(&forward_to_backward, *x)?;
                 let h_m = mapped(&forward_to_backward, *h_prev)?;
                 let wih_m = mapped(&forward_to_backward, *weight_ih)?;
@@ -726,26 +906,81 @@ pub fn build_reverse_graph(
                 let bih_m = mapped(&forward_to_backward, *bias_ih)?;
                 let bhh_m = mapped(&forward_to_backward, *bias_hh)?;
                 // Re-compute saved gate tensors for backward
-                let (_, z_node) = backward.add_op(block, Op::GruCell {
-                    x: x_m, h_prev: h_m, weight_ih: wih_m, weight_hh: whh_m, bias_ih: bih_m, bias_hh: bhh_m, output_idx: 1,
-                }).map_err(|e| AutogradError { message: format!("GRU bwd z: {}", e.message) })?;
-                let (_, r_node) = backward.add_op(block, Op::GruCell {
-                    x: x_m, h_prev: h_m, weight_ih: wih_m, weight_hh: whh_m, bias_ih: bih_m, bias_hh: bhh_m, output_idx: 2,
-                }).map_err(|e| AutogradError { message: format!("GRU bwd r: {}", e.message) })?;
-                let (_, n_node) = backward.add_op(block, Op::GruCell {
-                    x: x_m, h_prev: h_m, weight_ih: wih_m, weight_hh: whh_m, bias_ih: bih_m, bias_hh: bhh_m, output_idx: 3,
-                }).map_err(|e| AutogradError { message: format!("GRU bwd n: {}", e.message) })?;
+                let (_, z_node) = backward
+                    .add_op(
+                        block,
+                        Op::GruCell {
+                            x: x_m,
+                            h_prev: h_m,
+                            weight_ih: wih_m,
+                            weight_hh: whh_m,
+                            bias_ih: bih_m,
+                            bias_hh: bhh_m,
+                            output_idx: 1,
+                        },
+                    )
+                    .map_err(|e| AutogradError {
+                        message: format!("GRU bwd z: {}", e.message),
+                    })?;
+                let (_, r_node) = backward
+                    .add_op(
+                        block,
+                        Op::GruCell {
+                            x: x_m,
+                            h_prev: h_m,
+                            weight_ih: wih_m,
+                            weight_hh: whh_m,
+                            bias_ih: bih_m,
+                            bias_hh: bhh_m,
+                            output_idx: 2,
+                        },
+                    )
+                    .map_err(|e| AutogradError {
+                        message: format!("GRU bwd r: {}", e.message),
+                    })?;
+                let (_, n_node) = backward
+                    .add_op(
+                        block,
+                        Op::GruCell {
+                            x: x_m,
+                            h_prev: h_m,
+                            weight_ih: wih_m,
+                            weight_hh: whh_m,
+                            bias_ih: bih_m,
+                            bias_hh: bhh_m,
+                            output_idx: 3,
+                        },
+                    )
+                    .map_err(|e| AutogradError {
+                        message: format!("GRU bwd n: {}", e.message),
+                    })?;
                 let params = [
-                    (0usize, x_m), (1, h_m), (2, wih_m), (3, whh_m), (4, bih_m), (5, bhh_m)
+                    (0usize, x_m),
+                    (1, h_m),
+                    (2, wih_m),
+                    (3, whh_m),
+                    (4, bih_m),
+                    (5, bhh_m),
                 ];
                 for (target, param_m) in params {
-                    let (_, grad) = backward.add_op(block, Op::GruCellBackward {
-                        x: x_m, h_prev: h_m,
-                        weight_ih: wih_m, weight_hh: whh_m,
-                        z_gate: z_node, r_gate: r_node, n_gate: n_node,
-                        dh_next: upstream,
-                        grad_target: target,
-                    }).map_err(|e| AutogradError { message: format!("GruCellBackward: {}", e.message) })?;
+                    let (_, grad) = backward
+                        .add_op(
+                            block,
+                            Op::GruCellBackward {
+                                x: x_m,
+                                h_prev: h_m,
+                                weight_ih: wih_m,
+                                weight_hh: whh_m,
+                                z_gate: z_node,
+                                r_gate: r_node,
+                                n_gate: n_node,
+                                dh_next: upstream,
+                                grad_target: target,
+                            },
+                        )
+                        .map_err(|e| AutogradError {
+                            message: format!("GruCellBackward: {}", e.message),
+                        })?;
                     accumulate_grad(&mut backward, block, &mut grad_map, param_m, grad)?;
                 }
             }
@@ -1413,7 +1648,7 @@ pub fn build_reverse_graph(
             | Op::SigmoidBackward(_, _)
             | Op::GeluBackward(_, _)
             | Op::GeluExactBackward(_, _)
-        | Op::ReduceMaxBackward { .. }
+            | Op::ReduceMaxBackward { .. }
             | Op::GemmBackward { .. }
             | Op::Conv2DBackwardInput(_, _, _)
             | Op::Conv2DBackwardWeight(_, _, _)
@@ -1436,7 +1671,10 @@ pub fn build_reverse_graph(
                 let (_, grad_input) = backward
                     .add_op(block, Op::Conv2DBackwardInput(input_m, weight_m, upstream))
                     .map_err(|err| AutogradError {
-                        message: format!("Failed to build Conv2D backward input op: {}", err.message),
+                        message: format!(
+                            "Failed to build Conv2D backward input op: {}",
+                            err.message
+                        ),
                     })?;
                 accumulate_grad(&mut backward, block, &mut grad_map, input_m, grad_input)?;
 
@@ -2196,7 +2434,8 @@ mod tests {
             .add_op(block, Op::Output(y))
             .expect("add op should succeed");
 
-        let backward = build_reverse_graph(&forward, out, &[x, w, b]).expect("autograd should pass");
+        let backward =
+            build_reverse_graph(&forward, out, &[x, w, b]).expect("autograd should pass");
         assert!(backward.gradients.contains_key(&x));
         assert!(backward.gradients.contains_key(&w));
         assert!(backward.gradients.contains_key(&b));
@@ -2287,7 +2526,11 @@ mod tests {
         context.inputs.insert(
             "x".to_string(),
             RuntimeValue::Tensor(std::sync::Arc::new(
-                crate::ir::tensor::Tensor::new(vec![3, 3], vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]).unwrap(),
+                crate::ir::tensor::Tensor::new(
+                    vec![3, 3],
+                    vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
+                )
+                .unwrap(),
             )),
         );
         context.parameters.insert(
@@ -2303,11 +2546,17 @@ mod tests {
             )),
         );
 
-        let grad_x = execute_value_with_context(&backward.backward, gx, &context).expect("gx execute");
-        let grad_w = execute_value_with_context(&backward.backward, gw, &context).expect("gw execute");
+        let grad_x =
+            execute_value_with_context(&backward.backward, gx, &context).expect("gx execute");
+        let grad_w =
+            execute_value_with_context(&backward.backward, gw, &context).expect("gw execute");
 
-        let RuntimeValue::Tensor(tx) = grad_x else { panic!("expected tensor") };
-        let RuntimeValue::Tensor(tw) = grad_w else { panic!("expected tensor") };
+        let RuntimeValue::Tensor(tx) = grad_x else {
+            panic!("expected tensor")
+        };
+        let RuntimeValue::Tensor(tw) = grad_w else {
+            panic!("expected tensor")
+        };
 
         assert_eq!(tx.shape, vec![3, 3]);
         assert_eq!(tw.shape, vec![2, 2]);

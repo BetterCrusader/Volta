@@ -94,7 +94,9 @@ fn infer_shape_for_op(
         | Op::Sigmoid(value)
         | Op::GeluExact(value)
         | Op::Gelu(value) => infer_tensor_unary(*value, shapes),
-        Op::SigmoidBackward(input, grad) | Op::GeluBackward(input, grad) | Op::GeluExactBackward(input, grad) => {
+        Op::SigmoidBackward(input, grad)
+        | Op::GeluBackward(input, grad)
+        | Op::GeluExactBackward(input, grad) => {
             infer_same_tensor(*input, *grad, shapes, "backward")
         }
         Op::Gemm { lhs, rhs, .. } => infer_matmul(*lhs, *rhs, shapes),
@@ -186,14 +188,20 @@ fn infer_shape_for_op(
             ShapeFact::Unknown => Ok(ShapeFact::Unknown),
             ShapeFact::NonTensor => Err("flatten expects tensor input".to_string()),
         },
-        Op::LstmCell { h_prev, weight_ih, output_idx, .. } => {
+        Op::LstmCell {
+            h_prev,
+            weight_ih,
+            output_idx,
+            ..
+        } => {
             match (shape_of(*h_prev, shapes), shape_of(*weight_ih, shapes)) {
                 (ShapeFact::Tensor(h), ShapeFact::Tensor(w)) if h.len() == 2 && w.len() == 2 => {
-                    let batch = h[0]; let hidden = h[1];
+                    let batch = h[0];
+                    let hidden = h[1];
                     let out_shape = match output_idx {
-                        0 | 1 => vec![batch, hidden],         // h_next / c_next
-                        2 => vec![batch, 4 * hidden],         // gates_raw
-                        3 => vec![batch, hidden],             // tanh_c_next
+                        0 | 1 => vec![batch, hidden], // h_next / c_next
+                        2 => vec![batch, 4 * hidden], // gates_raw
+                        3 => vec![batch, hidden],     // tanh_c_next
                         _ => return Err("LstmCell invalid output_idx".to_string()),
                     };
                     Ok(ShapeFact::Tensor(out_shape))
@@ -202,12 +210,31 @@ fn infer_shape_for_op(
                 _ => Err("LstmCell expects rank-2 h_prev and weight_ih".to_string()),
             }
         }
-        Op::LstmCellBackward { x, h_prev, weight_ih, weight_hh, grad_target, .. } => {
+        Op::LstmCellBackward {
+            x,
+            h_prev,
+            weight_ih,
+            weight_hh,
+            grad_target,
+            ..
+        } => {
             match grad_target {
-                0 => match shape_of(*x, shapes) { ShapeFact::Tensor(s) => Ok(ShapeFact::Tensor(s)), o => Ok(o) },
-                1 | 2 => match shape_of(*h_prev, shapes) { ShapeFact::Tensor(s) => Ok(ShapeFact::Tensor(s)), o => Ok(o) },
-                3 => match shape_of(*weight_ih, shapes) { ShapeFact::Tensor(s) => Ok(ShapeFact::Tensor(s)), o => Ok(o) },
-                4 => match shape_of(*weight_hh, shapes) { ShapeFact::Tensor(s) => Ok(ShapeFact::Tensor(s)), o => Ok(o) },
+                0 => match shape_of(*x, shapes) {
+                    ShapeFact::Tensor(s) => Ok(ShapeFact::Tensor(s)),
+                    o => Ok(o),
+                },
+                1 | 2 => match shape_of(*h_prev, shapes) {
+                    ShapeFact::Tensor(s) => Ok(ShapeFact::Tensor(s)),
+                    o => Ok(o),
+                },
+                3 => match shape_of(*weight_ih, shapes) {
+                    ShapeFact::Tensor(s) => Ok(ShapeFact::Tensor(s)),
+                    o => Ok(o),
+                },
+                4 => match shape_of(*weight_hh, shapes) {
+                    ShapeFact::Tensor(s) => Ok(ShapeFact::Tensor(s)),
+                    o => Ok(o),
+                },
                 // bias grad shape: [4*hidden], derive from weight_hh [4*hidden, hidden]
                 5 => match shape_of(*weight_hh, shapes) {
                     ShapeFact::Tensor(s) if !s.is_empty() => Ok(ShapeFact::Tensor(vec![s[0]])),
@@ -216,22 +243,41 @@ fn infer_shape_for_op(
                 _ => Err("LstmCellBackward invalid grad_target".to_string()),
             }
         }
-        Op::GruCell { h_prev, weight_ih, .. } => {
-            match (shape_of(*h_prev, shapes), shape_of(*weight_ih, shapes)) {
-                (ShapeFact::Tensor(h), ShapeFact::Tensor(_)) if h.len() == 2 => {
-                    let (batch, hidden) = (h[0], h[1]);
-                    Ok(ShapeFact::Tensor(vec![batch, hidden]))
-                }
-                (ShapeFact::Unknown, _) | (_, ShapeFact::Unknown) => Ok(ShapeFact::Unknown),
-                _ => Err("GruCell expects rank-2 h_prev".to_string()),
+        Op::GruCell {
+            h_prev, weight_ih, ..
+        } => match (shape_of(*h_prev, shapes), shape_of(*weight_ih, shapes)) {
+            (ShapeFact::Tensor(h), ShapeFact::Tensor(_)) if h.len() == 2 => {
+                let (batch, hidden) = (h[0], h[1]);
+                Ok(ShapeFact::Tensor(vec![batch, hidden]))
             }
-        }
-        Op::GruCellBackward { x, h_prev, weight_ih, weight_hh, grad_target, .. } => {
+            (ShapeFact::Unknown, _) | (_, ShapeFact::Unknown) => Ok(ShapeFact::Unknown),
+            _ => Err("GruCell expects rank-2 h_prev".to_string()),
+        },
+        Op::GruCellBackward {
+            x,
+            h_prev,
+            weight_ih,
+            weight_hh,
+            grad_target,
+            ..
+        } => {
             match grad_target {
-                0 => match shape_of(*x, shapes) { ShapeFact::Tensor(s) => Ok(ShapeFact::Tensor(s)), o => Ok(o) },
-                1 => match shape_of(*h_prev, shapes) { ShapeFact::Tensor(s) => Ok(ShapeFact::Tensor(s)), o => Ok(o) },
-                2 => match shape_of(*weight_ih, shapes) { ShapeFact::Tensor(s) => Ok(ShapeFact::Tensor(s)), o => Ok(o) },
-                3 => match shape_of(*weight_hh, shapes) { ShapeFact::Tensor(s) => Ok(ShapeFact::Tensor(s)), o => Ok(o) },
+                0 => match shape_of(*x, shapes) {
+                    ShapeFact::Tensor(s) => Ok(ShapeFact::Tensor(s)),
+                    o => Ok(o),
+                },
+                1 => match shape_of(*h_prev, shapes) {
+                    ShapeFact::Tensor(s) => Ok(ShapeFact::Tensor(s)),
+                    o => Ok(o),
+                },
+                2 => match shape_of(*weight_ih, shapes) {
+                    ShapeFact::Tensor(s) => Ok(ShapeFact::Tensor(s)),
+                    o => Ok(o),
+                },
+                3 => match shape_of(*weight_hh, shapes) {
+                    ShapeFact::Tensor(s) => Ok(ShapeFact::Tensor(s)),
+                    o => Ok(o),
+                },
                 // Bias shapes: [3*hidden] derived from weight_ih [3*hidden, input_size]
                 4 | 5 => match shape_of(*weight_ih, shapes) {
                     ShapeFact::Tensor(s) if !s.is_empty() => Ok(ShapeFact::Tensor(vec![s[0]])),
@@ -240,19 +286,27 @@ fn infer_shape_for_op(
                 _ => Err("GruCellBackward invalid grad_target".to_string()),
             }
         }
-        Op::ConvTranspose2D { input, weight, stride, padding } => {
-            match (shape_of(*input, shapes), shape_of(*weight, shapes)) {
-                (ShapeFact::Tensor(inp), ShapeFact::Tensor(w)) if inp.len() == 4 && w.len() == 4 => {
-                    let (n, c_out, kh, kw) = (inp[0], w[1], w[2], w[3]);
-                    let out_h = (inp[2] - 1) * stride[0] + kh - 2 * padding[0];
-                    let out_w = (inp[3] - 1) * stride[1] + kw - 2 * padding[1];
-                    Ok(ShapeFact::Tensor(vec![n, c_out, out_h, out_w]))
-                }
-                (ShapeFact::Unknown, _) | (_, ShapeFact::Unknown) => Ok(ShapeFact::Unknown),
-                _ => Err("ConvTranspose2D expects rank-4 input and weight".to_string()),
+        Op::ConvTranspose2D {
+            input,
+            weight,
+            stride,
+            padding,
+        } => match (shape_of(*input, shapes), shape_of(*weight, shapes)) {
+            (ShapeFact::Tensor(inp), ShapeFact::Tensor(w)) if inp.len() == 4 && w.len() == 4 => {
+                let (n, c_out, kh, kw) = (inp[0], w[1], w[2], w[3]);
+                let out_h = (inp[2] - 1) * stride[0] + kh - 2 * padding[0];
+                let out_w = (inp[3] - 1) * stride[1] + kw - 2 * padding[1];
+                Ok(ShapeFact::Tensor(vec![n, c_out, out_h, out_w]))
             }
-        }
-        Op::Upsample2D { input, scale_h, scale_w, .. } => match shape_of(*input, shapes) {
+            (ShapeFact::Unknown, _) | (_, ShapeFact::Unknown) => Ok(ShapeFact::Unknown),
+            _ => Err("ConvTranspose2D expects rank-4 input and weight".to_string()),
+        },
+        Op::Upsample2D {
+            input,
+            scale_h,
+            scale_w,
+            ..
+        } => match shape_of(*input, shapes) {
             ShapeFact::Tensor(s) if s.len() == 4 => {
                 let out_h = (s[2] as f32 * scale_h).round() as usize;
                 let out_w = (s[3] as f32 * scale_w).round() as usize;
@@ -261,29 +315,38 @@ fn infer_shape_for_op(
             ShapeFact::Unknown => Ok(ShapeFact::Unknown),
             _ => Err("Upsample2D expects rank-4 NCHW input".to_string()),
         },
-        Op::Upsample2DBackward { upstream, orig_h, orig_w, .. } => match shape_of(*upstream, shapes) {
+        Op::Upsample2DBackward {
+            upstream,
+            orig_h,
+            orig_w,
+            ..
+        } => match shape_of(*upstream, shapes) {
             ShapeFact::Tensor(s) if s.len() == 4 => {
                 Ok(ShapeFact::Tensor(vec![s[0], s[1], *orig_h, *orig_w]))
             }
             other => Ok(other),
         },
-        Op::MultiHeadAttention { q_input, k_input, num_heads, output_idx, .. } => {
-            match (shape_of(*q_input, shapes), shape_of(*k_input, shapes)) {
-                (ShapeFact::Tensor(q), ShapeFact::Tensor(k)) if q.len() == 3 && k.len() == 3 => {
-                    let (batch, seq_q, d_model) = (q[0], q[1], q[2]);
-                    let seq_k = k[1];
-                    let s = match output_idx {
-                        0 | 5 => vec![batch, seq_q, d_model],
-                        1 => vec![batch * num_heads, seq_q, seq_k],
-                        2 | 3 | 4 => vec![batch, seq_q.max(seq_k), d_model],
-                        _ => return Err("MultiHeadAttention invalid output_idx".to_string()),
-                    };
-                    Ok(ShapeFact::Tensor(s))
-                }
-                (ShapeFact::Unknown, _) | (_, ShapeFact::Unknown) => Ok(ShapeFact::Unknown),
-                _ => Err("MultiHeadAttention expects rank-3 q_input and k_input".to_string()),
+        Op::MultiHeadAttention {
+            q_input,
+            k_input,
+            num_heads,
+            output_idx,
+            ..
+        } => match (shape_of(*q_input, shapes), shape_of(*k_input, shapes)) {
+            (ShapeFact::Tensor(q), ShapeFact::Tensor(k)) if q.len() == 3 && k.len() == 3 => {
+                let (batch, seq_q, d_model) = (q[0], q[1], q[2]);
+                let seq_k = k[1];
+                let s = match output_idx {
+                    0 | 5 => vec![batch, seq_q, d_model],
+                    1 => vec![batch * num_heads, seq_q, seq_k],
+                    2 | 3 | 4 => vec![batch, seq_q.max(seq_k), d_model],
+                    _ => return Err("MultiHeadAttention invalid output_idx".to_string()),
+                };
+                Ok(ShapeFact::Tensor(s))
             }
-        }
+            (ShapeFact::Unknown, _) | (_, ShapeFact::Unknown) => Ok(ShapeFact::Unknown),
+            _ => Err("MultiHeadAttention expects rank-3 q_input and k_input".to_string()),
+        },
         Op::SinusoidalPE { input } | Op::RoPE { input, .. } => match shape_of(*input, shapes) {
             ShapeFact::Tensor(s) => Ok(ShapeFact::Tensor(s)),
             other => Ok(other),
@@ -312,11 +375,14 @@ fn infer_shape_for_op(
             // Input: [N, C, H, W] or [N, C, ...] → output: [N, C, 1, 1] or [N, C]
             ShapeFact::Tensor(shape) if shape.len() >= 2 => {
                 let mut out = shape[..2].to_vec();
-                for _ in 2..shape.len() { out.push(1); }
+                for _ in 2..shape.len() {
+                    out.push(1);
+                }
                 Ok(ShapeFact::Tensor(out))
             }
             ShapeFact::Tensor(shape) => Err(format!(
-                "GlobalAveragePool expects at least rank-2 tensor, got {:?}", shape
+                "GlobalAveragePool expects at least rank-2 tensor, got {:?}",
+                shape
             )),
             ShapeFact::Unknown => Ok(ShapeFact::Unknown),
             ShapeFact::NonTensor => Err("GlobalAveragePool expects tensor input".to_string()),
@@ -325,26 +391,37 @@ fn infer_shape_for_op(
             ShapeFact::Tensor(shape) => Ok(ShapeFact::Tensor(shape)),
             other => Ok(other),
         },
-        Op::GroupNorm { input, .. } | Op::InstanceNorm { input, .. } => match shape_of(*input, shapes) {
-            ShapeFact::Tensor(shape) => Ok(ShapeFact::Tensor(shape)),
-            other => Ok(other),
-        },
-        Op::GroupNormBackwardInput { input, .. } | Op::InstanceNormBackwardInput { input, .. } => match shape_of(*input, shapes) {
-            ShapeFact::Tensor(shape) => Ok(ShapeFact::Tensor(shape)),
-            other => Ok(other),
-        },
-        Op::GroupNormBackwardWeight { input, .. } | Op::InstanceNormBackwardWeight { input, .. } => match shape_of(*input, shapes) {
+        Op::GroupNorm { input, .. } | Op::InstanceNorm { input, .. } => {
+            match shape_of(*input, shapes) {
+                ShapeFact::Tensor(shape) => Ok(ShapeFact::Tensor(shape)),
+                other => Ok(other),
+            }
+        }
+        Op::GroupNormBackwardInput { input, .. } | Op::InstanceNormBackwardInput { input, .. } => {
+            match shape_of(*input, shapes) {
+                ShapeFact::Tensor(shape) => Ok(ShapeFact::Tensor(shape)),
+                other => Ok(other),
+            }
+        }
+        Op::GroupNormBackwardWeight { input, .. }
+        | Op::InstanceNormBackwardWeight { input, .. } => match shape_of(*input, shapes) {
             // dW has shape [C]
             ShapeFact::Tensor(shape) if shape.len() >= 2 => Ok(ShapeFact::Tensor(vec![shape[1]])),
             ShapeFact::Unknown => Ok(ShapeFact::Unknown),
             _ => Err("GroupNorm/InstanceNorm backward weight expects rank >= 2 input".to_string()),
         },
-        Op::GroupNormBackwardBias { upstream } | Op::InstanceNormBackwardBias { upstream } => match shape_of(*upstream, shapes) {
-            // dB has shape [C]
-            ShapeFact::Tensor(shape) if shape.len() >= 2 => Ok(ShapeFact::Tensor(vec![shape[1]])),
-            ShapeFact::Unknown => Ok(ShapeFact::Unknown),
-            _ => Err("GroupNorm/InstanceNorm backward bias expects rank >= 2 upstream".to_string()),
-        },
+        Op::GroupNormBackwardBias { upstream } | Op::InstanceNormBackwardBias { upstream } => {
+            match shape_of(*upstream, shapes) {
+                // dB has shape [C]
+                ShapeFact::Tensor(shape) if shape.len() >= 2 => {
+                    Ok(ShapeFact::Tensor(vec![shape[1]]))
+                }
+                ShapeFact::Unknown => Ok(ShapeFact::Unknown),
+                _ => Err(
+                    "GroupNorm/InstanceNorm backward bias expects rank >= 2 upstream".to_string(),
+                ),
+            }
+        }
         Op::Phi(values) => infer_phi(values, shapes),
         Op::CustomCall { inputs, .. } => {
             // Unknown output shape; propagate first input's shape if available
@@ -358,12 +435,20 @@ fn infer_shape_for_op(
             // Same shape as input (simulated quantization stores values as f32)
             Ok(shape_of(*input, shapes))
         }
-        Op::DepthwiseSeparableConv { input, pw_weight, stride, padding, .. } => {
+        Op::DepthwiseSeparableConv {
+            input,
+            pw_weight,
+            stride,
+            padding,
+            ..
+        } => {
             // Output shape: [N, C_out, H_out, W_out]
             let input_shape = shape_of(*input, shapes);
             let pw_shape = shape_of(*pw_weight, shapes);
             match (input_shape, pw_shape) {
-                (ShapeFact::Tensor(inp), ShapeFact::Tensor(pw)) if inp.len() == 4 && !pw.is_empty() => {
+                (ShapeFact::Tensor(inp), ShapeFact::Tensor(pw))
+                    if inp.len() == 4 && !pw.is_empty() =>
+                {
                     let n = inp[0];
                     let h = inp[2];
                     let w = inp[3];

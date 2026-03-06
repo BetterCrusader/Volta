@@ -3,7 +3,9 @@ use crate::engine::ir::tensor::{Tensor, TensorError};
 // ─── Helper: sigmoid ──────────────────────────────────────────────────────────
 
 #[inline]
-fn sigmoid_f32(x: f32) -> f32 { 1.0 / (1.0 + (-x).exp()) }
+fn sigmoid_f32(x: f32) -> f32 {
+    1.0 / (1.0 + (-x).exp())
+}
 
 // ─── LSTM cell ────────────────────────────────────────────────────────────────
 // Inputs:
@@ -41,23 +43,37 @@ pub fn lstm_cell(
     let b = bias.make_contiguous()?;
 
     if x_c.shape.len() != 2 || h_c.shape.len() != 2 {
-        return Err(TensorError { message: "LSTM cell expects rank-2 x and h_prev".to_string() });
+        return Err(TensorError {
+            message: "LSTM cell expects rank-2 x and h_prev".to_string(),
+        });
     }
     let batch = x_c.shape[0];
     let input_size = x_c.shape[1];
     let hidden = h_c.shape[1];
     if cp.shape != h_c.shape {
-        return Err(TensorError { message: "LSTM: c_prev shape must match h_prev".to_string() });
+        return Err(TensorError {
+            message: "LSTM: c_prev shape must match h_prev".to_string(),
+        });
     }
     if wih.shape != vec![4 * hidden, input_size] {
-        return Err(TensorError { message: format!(
-            "LSTM weight_ih must be [{}, {}], got {:?}", 4*hidden, input_size, wih.shape
-        )});
+        return Err(TensorError {
+            message: format!(
+                "LSTM weight_ih must be [{}, {}], got {:?}",
+                4 * hidden,
+                input_size,
+                wih.shape
+            ),
+        });
     }
     if whh.shape != vec![4 * hidden, hidden] {
-        return Err(TensorError { message: format!(
-            "LSTM weight_hh must be [{}, {}], got {:?}", 4*hidden, hidden, whh.shape
-        )});
+        return Err(TensorError {
+            message: format!(
+                "LSTM weight_hh must be [{}, {}], got {:?}",
+                4 * hidden,
+                hidden,
+                whh.shape
+            ),
+        });
     }
 
     let mut gates_raw = vec![0.0_f32; batch * 4 * hidden];
@@ -168,8 +184,9 @@ pub fn lstm_cell_backward(
             dc_prev[n * hidden + j] = dc * f_gate;
 
             // gate gradients (pre-activation)
-            dgates[n * 4 * hidden + j]            = dc * g_gate * i_gate * (1.0 - i_gate); // di
-            dgates[n * 4 * hidden + hidden + j]   = dc * cp.data[n * hidden + j] * f_gate * (1.0 - f_gate); // df
+            dgates[n * 4 * hidden + j] = dc * g_gate * i_gate * (1.0 - i_gate); // di
+            dgates[n * 4 * hidden + hidden + j] =
+                dc * cp.data[n * hidden + j] * f_gate * (1.0 - f_gate); // df
             dgates[n * 4 * hidden + 2 * hidden + j] = dc * i_gate * (1.0 - g_gate * g_gate); // dg
             dgates[n * 4 * hidden + 3 * hidden + j] = dh * tc_j * o_gate * (1.0 - o_gate); // do
         }
@@ -232,13 +249,17 @@ pub fn gru_cell(
     let bhh = bias_hh.make_contiguous()?;
 
     if x_c.shape.len() != 2 || h_c.shape.len() != 2 {
-        return Err(TensorError { message: "GRU cell expects rank-2 x and h_prev".to_string() });
+        return Err(TensorError {
+            message: "GRU cell expects rank-2 x and h_prev".to_string(),
+        });
     }
     let batch = x_c.shape[0];
     let input_size = x_c.shape[1];
     let hidden = h_c.shape[1];
     if wih.shape != vec![3 * hidden, input_size] || whh.shape != vec![3 * hidden, hidden] {
-        return Err(TensorError { message: "GRU weight shape mismatch".to_string() });
+        return Err(TensorError {
+            message: "GRU weight shape mismatch".to_string(),
+        });
     }
 
     let mut z_gate = vec![0.0_f32; batch * hidden];
@@ -392,13 +413,15 @@ pub fn gru_cell_backward(
 
                 dweight_ih[j * input_size + k] += x_c.data[b * input_size + k] * dz_raw;
                 dweight_ih[(hidden + j) * input_size + k] += x_c.data[b * input_size + k] * dr_raw;
-                dweight_ih[(2 * hidden + j) * input_size + k] += x_c.data[b * input_size + k] * dn_raw;
+                dweight_ih[(2 * hidden + j) * input_size + k] +=
+                    x_c.data[b * input_size + k] * dn_raw;
             }
 
             for k in 0..hidden {
                 dweight_hh[j * hidden + k] += h_c.data[b * hidden + k] * dz_raw;
                 dweight_hh[(hidden + j) * hidden + k] += h_c.data[b * hidden + k] * dr_raw;
-                dweight_hh[(2 * hidden + j) * hidden + k] += h_c.data[b * hidden + k] * dn_raw * r_j;
+                dweight_hh[(2 * hidden + j) * hidden + k] +=
+                    h_c.data[b * hidden + k] * dn_raw * r_j;
             }
         }
     }

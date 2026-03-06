@@ -141,21 +141,36 @@ fn format_op(op: &Op) -> String {
         Op::Log(value) => format!("log {}", fmt_value(value)),
         Op::Exp(value) => format!("exp {}", fmt_value(value)),
         Op::Sigmoid(value) => format!("sigmoid {}", fmt_value(value)),
-        Op::SigmoidBackward(input, grad) => format!(
-            "sigmoid_backward {} {}",
-            fmt_value(input),
-            fmt_value(grad)
-        ),
+        Op::SigmoidBackward(input, grad) => {
+            format!("sigmoid_backward {} {}", fmt_value(input), fmt_value(grad))
+        }
         Op::Gelu(value) => format!("gelu {}", fmt_value(value)),
         Op::GeluExact(value) => format!("gelu_exact {}", fmt_value(value)),
         Op::GeluBackward(input, grad) => {
             format!("gelu_backward {} {}", fmt_value(input), fmt_value(grad))
         }
         Op::GeluExactBackward(input, grad) => {
-            format!("gelu_exact_backward {} {}", fmt_value(input), fmt_value(grad))
+            format!(
+                "gelu_exact_backward {} {}",
+                fmt_value(input),
+                fmt_value(grad)
+            )
         }
-        Op::ReduceMaxBackward { input, output_max, upstream, axis, keepdims } => {
-            format!("reduce_max_backward {} {} {} axis={:?} keepdims={}", fmt_value(input), fmt_value(output_max), fmt_value(upstream), axis, keepdims)
+        Op::ReduceMaxBackward {
+            input,
+            output_max,
+            upstream,
+            axis,
+            keepdims,
+        } => {
+            format!(
+                "reduce_max_backward {} {} {} axis={:?} keepdims={}",
+                fmt_value(input),
+                fmt_value(output_max),
+                fmt_value(upstream),
+                axis,
+                keepdims
+            )
         }
         Op::Gemm {
             lhs,
@@ -204,19 +219,51 @@ fn format_op(op: &Op) -> String {
             format!("plugin {} {}", operator.name(), inputs_str)
         }
         Op::CustomCall { target, inputs, .. } => {
-            let inputs_str = inputs.iter().map(|id| fmt_value(id)).collect::<Vec<_>>().join(" ");
+            let inputs_str = inputs
+                .iter()
+                .map(|id| fmt_value(id))
+                .collect::<Vec<_>>()
+                .join(" ");
             format!("custom_call target={target} {inputs_str}")
         }
-        Op::DepthwiseSeparableConv { input, dw_weight, pw_weight, stride, padding } => {
-            format!("depthwise_sep_conv stride={},{} pad={},{} {} {} {}",
-                stride[0], stride[1], padding[0], padding[1],
-                fmt_value(input), fmt_value(dw_weight), fmt_value(pw_weight))
+        Op::DepthwiseSeparableConv {
+            input,
+            dw_weight,
+            pw_weight,
+            stride,
+            padding,
+        } => {
+            format!(
+                "depthwise_sep_conv stride={},{} pad={},{} {} {} {}",
+                stride[0],
+                stride[1],
+                padding[0],
+                padding[1],
+                fmt_value(input),
+                fmt_value(dw_weight),
+                fmt_value(pw_weight)
+            )
         }
-        Op::QuantizeLinear { input, scale, zero_point, bits } => {
-            format!("quantize_linear scale={scale} zp={zero_point} bits={bits} {}", fmt_value(input))
+        Op::QuantizeLinear {
+            input,
+            scale,
+            zero_point,
+            bits,
+        } => {
+            format!(
+                "quantize_linear scale={scale} zp={zero_point} bits={bits} {}",
+                fmt_value(input)
+            )
         }
-        Op::DequantizeLinear { input, scale, zero_point } => {
-            format!("dequantize_linear scale={scale} zp={zero_point} {}", fmt_value(input))
+        Op::DequantizeLinear {
+            input,
+            scale,
+            zero_point,
+        } => {
+            format!(
+                "dequantize_linear scale={scale} zp={zero_point} {}",
+                fmt_value(input)
+            )
         }
         Op::ReduceSum {
             input,
@@ -254,10 +301,20 @@ fn format_op(op: &Op) -> String {
             format!("conv2d {} {}", fmt_value(input), fmt_value(weight))
         }
         Op::Conv2DBackwardInput(input, weight, upstream) => {
-            format!("conv2d_backward_input {} {} {}", fmt_value(input), fmt_value(weight), fmt_value(upstream))
+            format!(
+                "conv2d_backward_input {} {} {}",
+                fmt_value(input),
+                fmt_value(weight),
+                fmt_value(upstream)
+            )
         }
         Op::Conv2DBackwardWeight(input, weight, upstream) => {
-            format!("conv2d_backward_weight {} {} {}", fmt_value(input), fmt_value(weight), fmt_value(upstream))
+            format!(
+                "conv2d_backward_weight {} {} {}",
+                fmt_value(input),
+                fmt_value(weight),
+                fmt_value(upstream)
+            )
         }
         Op::MaxPool {
             input,
@@ -300,65 +357,202 @@ fn format_op(op: &Op) -> String {
         Op::Flatten { input, axis } => format!("flatten {} axis={}", fmt_value(input), axis),
         Op::GlobalAveragePool { input } => format!("global_avg_pool {}", fmt_value(input)),
         Op::GlobalAveragePoolBackward { input, upstream } => {
-            format!("global_avg_pool_bwd {} upstream={}", fmt_value(input), fmt_value(upstream))
+            format!(
+                "global_avg_pool_bwd {} upstream={}",
+                fmt_value(input),
+                fmt_value(upstream)
+            )
         }
-        Op::GroupNorm { input, weight, bias, num_groups, .. } => {
-            format!("group_norm {} weight={} bias={} groups={}", fmt_value(input), fmt_value(weight), fmt_value(bias), num_groups)
+        Op::GroupNorm {
+            input,
+            weight,
+            bias,
+            num_groups,
+            ..
+        } => {
+            format!(
+                "group_norm {} weight={} bias={} groups={}",
+                fmt_value(input),
+                fmt_value(weight),
+                fmt_value(bias),
+                num_groups
+            )
         }
-        Op::GroupNormBackwardInput { input, upstream, num_groups, .. } => {
-            format!("group_norm_bwd_input {} upstream={} groups={}", fmt_value(input), fmt_value(upstream), num_groups)
+        Op::GroupNormBackwardInput {
+            input,
+            upstream,
+            num_groups,
+            ..
+        } => {
+            format!(
+                "group_norm_bwd_input {} upstream={} groups={}",
+                fmt_value(input),
+                fmt_value(upstream),
+                num_groups
+            )
         }
-        Op::GroupNormBackwardWeight { input, upstream, num_groups, .. } => {
-            format!("group_norm_bwd_weight {} upstream={} groups={}", fmt_value(input), fmt_value(upstream), num_groups)
+        Op::GroupNormBackwardWeight {
+            input,
+            upstream,
+            num_groups,
+            ..
+        } => {
+            format!(
+                "group_norm_bwd_weight {} upstream={} groups={}",
+                fmt_value(input),
+                fmt_value(upstream),
+                num_groups
+            )
         }
         Op::GroupNormBackwardBias { upstream } => {
             format!("group_norm_bwd_bias {}", fmt_value(upstream))
         }
-        Op::InstanceNorm { input, weight, bias, .. } => {
-            format!("instance_norm {} weight={} bias={}", fmt_value(input), fmt_value(weight), fmt_value(bias))
+        Op::InstanceNorm {
+            input,
+            weight,
+            bias,
+            ..
+        } => {
+            format!(
+                "instance_norm {} weight={} bias={}",
+                fmt_value(input),
+                fmt_value(weight),
+                fmt_value(bias)
+            )
         }
-        Op::InstanceNormBackwardInput { input, upstream, .. } => {
-            format!("instance_norm_bwd_input {} upstream={}", fmt_value(input), fmt_value(upstream))
+        Op::InstanceNormBackwardInput {
+            input, upstream, ..
+        } => {
+            format!(
+                "instance_norm_bwd_input {} upstream={}",
+                fmt_value(input),
+                fmt_value(upstream)
+            )
         }
-        Op::InstanceNormBackwardWeight { input, upstream, .. } => {
-            format!("instance_norm_bwd_weight {} upstream={}", fmt_value(input), fmt_value(upstream))
+        Op::InstanceNormBackwardWeight {
+            input, upstream, ..
+        } => {
+            format!(
+                "instance_norm_bwd_weight {} upstream={}",
+                fmt_value(input),
+                fmt_value(upstream)
+            )
         }
         Op::InstanceNormBackwardBias { upstream } => {
             format!("instance_norm_bwd_bias {}", fmt_value(upstream))
         }
         Op::Embedding { weight, indices } => {
-            format!("embedding weight={} indices={}", fmt_value(weight), fmt_value(indices))
+            format!(
+                "embedding weight={} indices={}",
+                fmt_value(weight),
+                fmt_value(indices)
+            )
         }
-        Op::EmbeddingBackward { weight, indices, upstream } => {
-            format!("embedding_bwd weight={} indices={} upstream={}", fmt_value(weight), fmt_value(indices), fmt_value(upstream))
+        Op::EmbeddingBackward {
+            weight,
+            indices,
+            upstream,
+        } => {
+            format!(
+                "embedding_bwd weight={} indices={} upstream={}",
+                fmt_value(weight),
+                fmt_value(indices),
+                fmt_value(upstream)
+            )
         }
-        Op::LstmCell { x, h_prev, output_idx, .. } => {
-            format!("lstm_cell x={} h={} out={}", fmt_value(x), fmt_value(h_prev), output_idx)
+        Op::LstmCell {
+            x,
+            h_prev,
+            output_idx,
+            ..
+        } => {
+            format!(
+                "lstm_cell x={} h={} out={}",
+                fmt_value(x),
+                fmt_value(h_prev),
+                output_idx
+            )
         }
         Op::LstmCellBackward { x, grad_target, .. } => {
             format!("lstm_cell_bwd x={} grad={}", fmt_value(x), grad_target)
         }
-        Op::GruCell { x, h_prev, output_idx, .. } => {
-            format!("gru_cell x={} h={} out={}", fmt_value(x), fmt_value(h_prev), output_idx)
+        Op::GruCell {
+            x,
+            h_prev,
+            output_idx,
+            ..
+        } => {
+            format!(
+                "gru_cell x={} h={} out={}",
+                fmt_value(x),
+                fmt_value(h_prev),
+                output_idx
+            )
         }
         Op::GruCellBackward { x, grad_target, .. } => {
             format!("gru_cell_bwd x={} grad={}", fmt_value(x), grad_target)
         }
-        Op::ConvTranspose2D { input, weight, stride, padding } => {
-            format!("conv_transpose2d input={} weight={} stride={:?} pad={:?}", fmt_value(input), fmt_value(weight), stride, padding)
+        Op::ConvTranspose2D {
+            input,
+            weight,
+            stride,
+            padding,
+        } => {
+            format!(
+                "conv_transpose2d input={} weight={} stride={:?} pad={:?}",
+                fmt_value(input),
+                fmt_value(weight),
+                stride,
+                padding
+            )
         }
-        Op::Upsample2D { input, scale_h, scale_w, mode } => {
-            format!("upsample2d {} scale=({}, {}) mode={}", fmt_value(input), scale_h, scale_w, if *mode == 0 { "nearest" } else { "bilinear" })
+        Op::Upsample2D {
+            input,
+            scale_h,
+            scale_w,
+            mode,
+        } => {
+            format!(
+                "upsample2d {} scale=({}, {}) mode={}",
+                fmt_value(input),
+                scale_h,
+                scale_w,
+                if *mode == 0 { "nearest" } else { "bilinear" }
+            )
         }
-        Op::Upsample2DBackward { upstream, orig_h, orig_w, .. } => {
-            format!("upsample2d_bwd {} orig=({}, {})", fmt_value(upstream), orig_h, orig_w)
+        Op::Upsample2DBackward {
+            upstream,
+            orig_h,
+            orig_w,
+            ..
+        } => {
+            format!(
+                "upsample2d_bwd {} orig=({}, {})",
+                fmt_value(upstream),
+                orig_h,
+                orig_w
+            )
         }
-        Op::MultiHeadAttention { q_input, num_heads, output_idx, causal, .. } => {
-            format!("mha q={} heads={} out={} causal={}", fmt_value(q_input), num_heads, output_idx, causal)
+        Op::MultiHeadAttention {
+            q_input,
+            num_heads,
+            output_idx,
+            causal,
+            ..
+        } => {
+            format!(
+                "mha q={} heads={} out={} causal={}",
+                fmt_value(q_input),
+                num_heads,
+                output_idx,
+                causal
+            )
         }
         Op::SinusoidalPE { input } => format!("sinusoidal_pe {}", fmt_value(input)),
         Op::RoPE { input, offset } => format!("rope {} offset={}", fmt_value(input), offset),
-        Op::RoPEBackward { upstream, offset } => format!("rope_bwd {} offset={}", fmt_value(upstream), offset),
+        Op::RoPEBackward { upstream, offset } => {
+            format!("rope_bwd {} offset={}", fmt_value(upstream), offset)
+        }
         Op::Dropout { input, ratio } => {
             format!("dropout {} ratio={}", fmt_value(input), ratio)
         }

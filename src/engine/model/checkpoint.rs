@@ -321,7 +321,9 @@ fn zlib_compress(data: &[u8]) -> Result<Vec<u8>, TrainApiError> {
 
 fn zlib_decompress(data: &[u8]) -> Result<Vec<u8>, TrainApiError> {
     if data.len() < 6 {
-        return Err(TrainApiError { message: "Compressed data too short".to_string() });
+        return Err(TrainApiError {
+            message: "Compressed data too short".to_string(),
+        });
     }
     // Skip 2-byte zlib header
     let mut pos = 2usize;
@@ -329,7 +331,9 @@ fn zlib_decompress(data: &[u8]) -> Result<Vec<u8>, TrainApiError> {
 
     loop {
         if pos >= data.len() {
-            return Err(TrainApiError { message: "Unexpected end in deflate stream".to_string() });
+            return Err(TrainApiError {
+                message: "Unexpected end in deflate stream".to_string(),
+            });
         }
         let bfinal_btype = data[pos];
         pos += 1;
@@ -340,24 +344,32 @@ fn zlib_decompress(data: &[u8]) -> Result<Vec<u8>, TrainApiError> {
             0 => {
                 // Uncompressed block
                 if pos + 4 > data.len() {
-                    return Err(TrainApiError { message: "Truncated deflate block header".to_string() });
+                    return Err(TrainApiError {
+                        message: "Truncated deflate block header".to_string(),
+                    });
                 }
                 let len = u16::from_le_bytes([data[pos], data[pos + 1]]) as usize;
                 pos += 4; // skip len + nlen
                 if pos + len > data.len() {
-                    return Err(TrainApiError { message: "Truncated deflate block data".to_string() });
+                    return Err(TrainApiError {
+                        message: "Truncated deflate block data".to_string(),
+                    });
                 }
                 out.extend_from_slice(&data[pos..pos + len]);
                 pos += len;
             }
             _ => {
                 return Err(TrainApiError {
-                    message: format!("Compressed deflate BTYPE={btype} not supported in this decompressor"),
+                    message: format!(
+                        "Compressed deflate BTYPE={btype} not supported in this decompressor"
+                    ),
                 });
             }
         }
 
-        if bfinal == 1 { break; }
+        if bfinal == 1 {
+            break;
+        }
     }
 
     Ok(out)
@@ -379,7 +391,10 @@ fn load_checkpoint_from_str(content: &str) -> Result<HashMap<String, Tensor>, Tr
     let mut lines = content.lines().enumerate().peekable();
 
     while let Some((_, line)) = lines.peek() {
-        if line.trim().is_empty() { lines.next(); continue; }
+        if line.trim().is_empty() {
+            lines.next();
+            continue;
+        }
         break;
     }
 
@@ -391,9 +406,15 @@ fn load_checkpoint_from_str(content: &str) -> Result<HashMap<String, Tensor>, Tr
 
     for (line_no, line) in lines {
         let trimmed = line.trim();
-        if trimmed.is_empty() { continue; }
-        if parse_header_line(line_no, line)? { continue; }
-        if trimmed.starts_with('#') { continue; }
+        if trimmed.is_empty() {
+            continue;
+        }
+        if parse_header_line(line_no, line)? {
+            continue;
+        }
+        if trimmed.starts_with('#') {
+            continue;
+        }
         let (name, tensor) = parse_parameter_line(line_no, trimmed)?;
         parameters.insert(name, tensor);
     }

@@ -21,10 +21,31 @@ pub const DATASET_KNOWN_PROPERTIES: &[&str] = &[
     "num_classes",
     "type",
 ];
-pub const TRAIN_KNOWN_PROPERTIES: &[&str] =
-    &["epochs", "device", "optimizer", "lr", "batch", "precision", "clip_grad", "weight_decay", "warmup_steps", "lr_schedule", "early_stopping", "gradient_accumulation"];
+pub const TRAIN_KNOWN_PROPERTIES: &[&str] = &[
+    "epochs",
+    "device",
+    "optimizer",
+    "lr",
+    "batch",
+    "precision",
+    "clip_grad",
+    "weight_decay",
+    "warmup_steps",
+    "lr_schedule",
+    "early_stopping",
+    "gradient_accumulation",
+];
 
-pub const ACTIVATIONS: &[&str] = &["relu", "sigmoid", "tanh", "softmax", "leaky_relu", "leakyrelu", "silu", "gelu"];
+pub const ACTIVATIONS: &[&str] = &[
+    "relu",
+    "sigmoid",
+    "tanh",
+    "softmax",
+    "leaky_relu",
+    "leakyrelu",
+    "silu",
+    "gelu",
+];
 pub const OPTIMIZERS: &[&str] = &["adam", "adamw", "sgd", "rmsprop", "rms_prop", "adagrad"];
 pub const DEVICES: &[&str] = &["cpu", "gpu", "cuda", "auto"];
 

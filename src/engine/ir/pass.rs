@@ -15,7 +15,11 @@ pub struct PassGroup {
 
 impl PassGroup {
     pub fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into(), passes: Vec::new(), repeat: 1 }
+        Self {
+            name: name.into(),
+            passes: Vec::new(),
+            repeat: 1,
+        }
     }
 
     pub fn with_repeat(mut self, n: usize) -> Self {
@@ -50,7 +54,10 @@ pub struct PassManager {
 
 impl PassManager {
     pub fn new() -> Self {
-        Self { passes: Vec::new(), groups: Vec::new() }
+        Self {
+            passes: Vec::new(),
+            groups: Vec::new(),
+        }
     }
 
     /// Add a single pass.
@@ -66,7 +73,10 @@ impl PassManager {
     /// Build a standard optimization pipeline.
     /// Applies: CSE → ConstantFolding → AlgebraicSimplification → DCE → DeadTensorElimination.
     pub fn build_default() -> Self {
-        use crate::ir::{CsePass, ConstantFoldingPass, AlgebraicSimplificationPass, DcePass, DeadTensorEliminationPass};
+        use crate::ir::{
+            AlgebraicSimplificationPass, ConstantFoldingPass, CsePass, DcePass,
+            DeadTensorEliminationPass,
+        };
         let mut pm = Self::new();
         pm.add_pass(Box::new(CsePass));
         pm.add_pass(Box::new(ConstantFoldingPass));
@@ -78,7 +88,7 @@ impl PassManager {
 
     /// Build a fusion-focused pipeline.
     pub fn build_fusion() -> Self {
-        use crate::ir::{CsePass, ElementwiseFusionPass, GradientFusionPass, DcePass};
+        use crate::ir::{CsePass, DcePass, ElementwiseFusionPass, GradientFusionPass};
         let mut pm = Self::new();
         pm.add_pass(Box::new(CsePass));
         pm.add_pass(Box::new(ElementwiseFusionPass));
@@ -92,16 +102,18 @@ impl PassManager {
         for pass in &mut self.passes {
             #[cfg(feature = "debug-verify")]
             {
-                crate::ir::verifier::verify_graph(graph)
-                    .unwrap_or_else(|e| panic!("Graph verify failed before {}: {:?}", pass.name(), e));
+                crate::ir::verifier::verify_graph(graph).unwrap_or_else(|e| {
+                    panic!("Graph verify failed before {}: {:?}", pass.name(), e)
+                });
             }
 
             pass.run(graph);
 
             #[cfg(feature = "debug-verify")]
             {
-                crate::ir::verifier::verify_graph(graph)
-                    .unwrap_or_else(|e| panic!("Graph verify failed after {}: {:?}", pass.name(), e));
+                crate::ir::verifier::verify_graph(graph).unwrap_or_else(|e| {
+                    panic!("Graph verify failed after {}: {:?}", pass.name(), e)
+                });
             }
         }
 
@@ -112,7 +124,12 @@ impl PassManager {
 
     /// Run passes and return count of passes executed.
     pub fn run_counted(&mut self, graph: &mut Graph) -> usize {
-        let n = self.passes.len() + self.groups.iter().map(|g| g.passes.len() * g.repeat).sum::<usize>();
+        let n = self.passes.len()
+            + self
+                .groups
+                .iter()
+                .map(|g| g.passes.len() * g.repeat)
+                .sum::<usize>();
         self.run(graph);
         n
     }

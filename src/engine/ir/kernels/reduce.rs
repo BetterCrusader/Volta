@@ -1,33 +1,49 @@
-use crate::engine::ir::tensor::{Tensor, TensorError};
 use crate::engine::ir::kernels::utils::{product_prefix, product_suffix, should_par};
+use crate::engine::ir::tensor::{Tensor, TensorError};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
 pub fn reduce_sum(tensor: &Tensor, axis: Option<usize>) -> Result<Tensor, TensorError> {
     let contig = tensor.make_contiguous()?;
-    if contig.data.is_empty() { return Err(TensorError { message: "Empty tensor in reduce_sum".to_string() }); }
+    if contig.data.is_empty() {
+        return Err(TensorError {
+            message: "Empty tensor in reduce_sum".to_string(),
+        });
+    }
     match axis {
         None => {
             #[cfg(feature = "parallel")]
-            let sum: f32 = if should_par(contig.data.len()) { contig.data.par_iter().copied().sum() } else { contig.data.iter().copied().sum() };
+            let sum: f32 = if should_par(contig.data.len()) {
+                contig.data.par_iter().copied().sum()
+            } else {
+                contig.data.iter().copied().sum()
+            };
             #[cfg(not(feature = "parallel"))]
             let sum: f32 = contig.data.iter().copied().sum();
             Ok(Tensor::scalar(sum))
         }
         Some(a) => {
             let rank = contig.shape.len();
-            if a >= rank { return Err(TensorError { message: "Axis out of bounds in reduce_sum".to_string() }); }
+            if a >= rank {
+                return Err(TensorError {
+                    message: "Axis out of bounds in reduce_sum".to_string(),
+                });
+            }
             let outer = product_prefix(&contig.shape, a)?;
             let axis_dim = contig.shape[a];
             let inner = product_suffix(&contig.shape, a + 1)?;
             let mut out_shape = contig.shape.clone();
             out_shape.remove(a);
-            if out_shape.is_empty() { out_shape.push(1); }
+            if out_shape.is_empty() {
+                out_shape.push(1);
+            }
             let mut out = vec![0.0_f32; outer * inner];
             for o in 0..outer {
                 for i in 0..inner {
                     let mut acc = 0.0_f32;
-                    for k in 0..axis_dim { acc += contig.data[o * axis_dim * inner + k * inner + i]; }
+                    for k in 0..axis_dim {
+                        acc += contig.data[o * axis_dim * inner + k * inner + i];
+                    }
                     out[o * inner + i] = acc;
                 }
             }
@@ -38,12 +54,23 @@ pub fn reduce_sum(tensor: &Tensor, axis: Option<usize>) -> Result<Tensor, Tensor
 
 pub fn reduce_mean(tensor: &Tensor, axis: Option<usize>) -> Result<Tensor, TensorError> {
     let contig = tensor.make_contiguous()?;
-    if contig.data.is_empty() { return Err(TensorError { message: "Empty tensor in reduce_mean".to_string() }); }
+    if contig.data.is_empty() {
+        return Err(TensorError {
+            message: "Empty tensor in reduce_mean".to_string(),
+        });
+    }
     match axis {
-        None => { let sum = reduce_sum(&contig, None)?; sum.scale(1.0 / contig.logical_len() as f32) }
+        None => {
+            let sum = reduce_sum(&contig, None)?;
+            sum.scale(1.0 / contig.logical_len() as f32)
+        }
         Some(a) => {
             let axis_dim = contig.shape[a];
-            if axis_dim == 0 { return Err(TensorError { message: "Zero-sized axis in reduce_mean".to_string() }); }
+            if axis_dim == 0 {
+                return Err(TensorError {
+                    message: "Zero-sized axis in reduce_mean".to_string(),
+                });
+            }
             reduce_sum(&contig, Some(a))?.scale(1.0 / axis_dim as f32)
         }
     }
@@ -51,22 +78,36 @@ pub fn reduce_mean(tensor: &Tensor, axis: Option<usize>) -> Result<Tensor, Tenso
 
 pub fn reduce_max(tensor: &Tensor, axis: Option<usize>) -> Result<Tensor, TensorError> {
     let contig = tensor.make_contiguous()?;
-    if contig.data.is_empty() { return Err(TensorError { message: "Empty tensor in reduce_max".to_string() }); }
+    if contig.data.is_empty() {
+        return Err(TensorError {
+            message: "Empty tensor in reduce_max".to_string(),
+        });
+    }
     match axis {
-        None => Ok(Tensor::scalar(contig.data.iter().copied().fold(f32::NEG_INFINITY, f32::max))),
+        None => Ok(Tensor::scalar(
+            contig
+                .data
+                .iter()
+                .copied()
+                .fold(f32::NEG_INFINITY, f32::max),
+        )),
         Some(a) => {
             let outer = product_prefix(&contig.shape, a)?;
             let axis_dim = contig.shape[a];
             let inner = product_suffix(&contig.shape, a + 1)?;
             let mut out_shape = contig.shape.clone();
             out_shape.remove(a);
-            if out_shape.is_empty() { out_shape.push(1); }
+            if out_shape.is_empty() {
+                out_shape.push(1);
+            }
             let mut out = vec![f32::NEG_INFINITY; outer * inner];
             for o in 0..outer {
                 for i in 0..inner {
                     for k in 0..axis_dim {
                         let val = contig.data[o * axis_dim * inner + k * inner + i];
-                        if val > out[o * inner + i] { out[o * inner + i] = val; }
+                        if val > out[o * inner + i] {
+                            out[o * inner + i] = val;
+                        }
                     }
                 }
             }
@@ -148,10 +189,16 @@ pub fn reduce_max_backward(
 pub fn softmax(tensor: &Tensor) -> Result<Tensor, TensorError> {
     let contig = tensor.make_contiguous()?;
     if contig.shape.len() == 1 {
-        let max = contig.data.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let max = contig
+            .data
+            .iter()
+            .copied()
+            .fold(f32::NEG_INFINITY, f32::max);
         let mut exps: Vec<f32> = contig.data.iter().map(|x| (x - max).exp()).collect();
         let sum: f32 = exps.iter().sum();
-        for v in &mut exps { *v /= sum; }
+        for v in &mut exps {
+            *v /= sum;
+        }
         Tensor::new(contig.shape.clone(), exps)
     } else if contig.shape.len() == 2 {
         let row_len = contig.shape[1];
@@ -160,8 +207,14 @@ pub fn softmax(tensor: &Tensor) -> Result<Tensor, TensorError> {
             let max = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
             let row_exps: Vec<f32> = row.iter().map(|x| (x - max).exp()).collect();
             let sum: f32 = row_exps.iter().sum();
-            for e in row_exps { out.push(e / sum); }
+            for e in row_exps {
+                out.push(e / sum);
+            }
         }
         Tensor::new(contig.shape.clone(), out)
-    } else { Err(TensorError { message: "Softmax expects 1D or 2D".to_string() }) }
+    } else {
+        Err(TensorError {
+            message: "Softmax expects 1D or 2D".to_string(),
+        })
+    }
 }

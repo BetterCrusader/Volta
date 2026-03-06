@@ -1,3 +1,4 @@
+use crate::model::TrainApiError;
 /// GGUF metadata extraction for Volta.
 ///
 /// Reads architecture metadata and tensor descriptors from .gguf files,
@@ -5,7 +6,6 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
-use crate::model::TrainApiError;
 
 /// Top-level information extracted from a GGUF file.
 #[derive(Debug, Clone)]
@@ -44,14 +44,16 @@ impl GgufInfo {
     /// Number of transformer layers / blocks.
     pub fn num_layers(&self) -> Option<u64> {
         self.meta_u64(&format!("{}.block_count", self.architecture))
-            .or_else(|| self.metadata.iter()
-                .find(|(k, _)| k.contains("block_count"))
-                .and_then(|(_, v)| match v {
-                    GgufMetaValue::U32(n) => Some(*n as u64),
-                    GgufMetaValue::U64(n) => Some(*n),
-                    _ => None,
-                })
-            )
+            .or_else(|| {
+                self.metadata
+                    .iter()
+                    .find(|(k, _)| k.contains("block_count"))
+                    .and_then(|(_, v)| match v {
+                        GgufMetaValue::U32(n) => Some(*n as u64),
+                        GgufMetaValue::U64(n) => Some(*n),
+                        _ => None,
+                    })
+            })
     }
 
     /// Model hidden / embedding dimension.
@@ -62,14 +64,16 @@ impl GgufInfo {
     /// Vocabulary size.
     pub fn vocab_size(&self) -> Option<u64> {
         self.meta_u64(&format!("{}.vocab_size", self.architecture))
-            .or_else(|| self.metadata.iter()
-                .find(|(k, _)| k.contains("vocab_size"))
-                .and_then(|(_, v)| match v {
-                    GgufMetaValue::U32(n) => Some(*n as u64),
-                    GgufMetaValue::U64(n) => Some(*n),
-                    _ => None,
-                })
-            )
+            .or_else(|| {
+                self.metadata
+                    .iter()
+                    .find(|(k, _)| k.contains("vocab_size"))
+                    .and_then(|(_, v)| match v {
+                        GgufMetaValue::U32(n) => Some(*n as u64),
+                        GgufMetaValue::U64(n) => Some(*n),
+                        _ => None,
+                    })
+            })
     }
 }
 
@@ -161,14 +165,26 @@ impl GgufDtype {
 
     pub fn name(&self) -> &'static str {
         match self {
-            Self::F32 => "F32", Self::F16 => "F16", Self::BF16 => "BF16",
-            Self::Q4_0 => "Q4_0", Self::Q4_1 => "Q4_1",
-            Self::Q5_0 => "Q5_0", Self::Q5_1 => "Q5_1",
-            Self::Q8_0 => "Q8_0", Self::Q8_1 => "Q8_1",
-            Self::Q2K => "Q2_K", Self::Q3K => "Q3_K", Self::Q4K => "Q4_K",
-            Self::Q5K => "Q5_K", Self::Q6K => "Q6_K", Self::Q8K => "Q8_K",
-            Self::I8 => "I8", Self::I16 => "I16", Self::I32 => "I32",
-            Self::I64 => "I64", Self::F64 => "F64",
+            Self::F32 => "F32",
+            Self::F16 => "F16",
+            Self::BF16 => "BF16",
+            Self::Q4_0 => "Q4_0",
+            Self::Q4_1 => "Q4_1",
+            Self::Q5_0 => "Q5_0",
+            Self::Q5_1 => "Q5_1",
+            Self::Q8_0 => "Q8_0",
+            Self::Q8_1 => "Q8_1",
+            Self::Q2K => "Q2_K",
+            Self::Q3K => "Q3_K",
+            Self::Q4K => "Q4_K",
+            Self::Q5K => "Q5_K",
+            Self::Q6K => "Q6_K",
+            Self::Q8K => "Q8_K",
+            Self::I8 => "I8",
+            Self::I16 => "I16",
+            Self::I32 => "I32",
+            Self::I64 => "I64",
+            Self::F64 => "F64",
             Self::Unknown(_) => "Unknown",
         }
     }
@@ -213,7 +229,10 @@ fn parse_gguf(buf: &[u8], path: &str) -> Result<GgufInfo, TrainApiError> {
 
     // Tensor count and metadata count (v1: u32, v2+: u64)
     let (tensor_count, metadata_kv_count) = if version == 1 {
-        (read_u32(buf, &mut pos)? as u64, read_u32(buf, &mut pos)? as u64)
+        (
+            read_u32(buf, &mut pos)? as u64,
+            read_u32(buf, &mut pos)? as u64,
+        )
     } else {
         (read_u64(buf, &mut pos)?, read_u64(buf, &mut pos)?)
     };
@@ -255,10 +274,21 @@ fn parse_gguf(buf: &[u8], path: &str) -> Result<GgufInfo, TrainApiError> {
         let elements: u64 = shape.iter().product();
         total_params += elements;
 
-        tensors.push(GgufTensorInfo { name, shape, dtype, offset });
+        tensors.push(GgufTensorInfo {
+            name,
+            shape,
+            dtype,
+            offset,
+        });
     }
 
-    Ok(GgufInfo { version, architecture, metadata, tensors, total_params })
+    Ok(GgufInfo {
+        version,
+        architecture,
+        metadata,
+        tensors,
+        total_params,
+    })
 }
 
 // ── Binary reading helpers ────────────────────────────────────────────────────
@@ -296,7 +326,9 @@ fn read_i32(buf: &[u8], pos: &mut usize) -> Result<i32, TrainApiError> {
 }
 fn read_u64(buf: &[u8], pos: &mut usize) -> Result<u64, TrainApiError> {
     let b = read_bytes(buf, pos, 8)?;
-    Ok(u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
+    Ok(u64::from_le_bytes([
+        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+    ]))
 }
 fn read_i64(buf: &[u8], pos: &mut usize) -> Result<i64, TrainApiError> {
     Ok(read_u64(buf, pos)? as i64)
@@ -307,7 +339,9 @@ fn read_f32(buf: &[u8], pos: &mut usize) -> Result<f32, TrainApiError> {
 }
 fn read_f64(buf: &[u8], pos: &mut usize) -> Result<f64, TrainApiError> {
     let b = read_bytes(buf, pos, 8)?;
-    Ok(f64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
+    Ok(f64::from_le_bytes([
+        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+    ]))
 }
 
 fn read_gguf_string(buf: &[u8], pos: &mut usize, version: u32) -> Result<String, TrainApiError> {
@@ -336,16 +370,16 @@ fn read_gguf_value(
     version: u32,
 ) -> Result<GgufMetaValue, TrainApiError> {
     match value_type {
-        0  => Ok(GgufMetaValue::U8(read_u8(buf, pos)?)),
-        1  => Ok(GgufMetaValue::I8(read_i8(buf, pos)?)),
-        2  => Ok(GgufMetaValue::U16(read_u16(buf, pos)?)),
-        3  => Ok(GgufMetaValue::I16(read_i16(buf, pos)?)),
-        4  => Ok(GgufMetaValue::U32(read_u32(buf, pos)?)),
-        5  => Ok(GgufMetaValue::I32(read_i32(buf, pos)?)),
-        6  => Ok(GgufMetaValue::F32(read_f32(buf, pos)?)),
-        7  => Ok(GgufMetaValue::Bool(read_u8(buf, pos)? != 0)),
-        8  => Ok(GgufMetaValue::Str(read_gguf_string(buf, pos, version)?)),
-        9  => {
+        0 => Ok(GgufMetaValue::U8(read_u8(buf, pos)?)),
+        1 => Ok(GgufMetaValue::I8(read_i8(buf, pos)?)),
+        2 => Ok(GgufMetaValue::U16(read_u16(buf, pos)?)),
+        3 => Ok(GgufMetaValue::I16(read_i16(buf, pos)?)),
+        4 => Ok(GgufMetaValue::U32(read_u32(buf, pos)?)),
+        5 => Ok(GgufMetaValue::I32(read_i32(buf, pos)?)),
+        6 => Ok(GgufMetaValue::F32(read_f32(buf, pos)?)),
+        7 => Ok(GgufMetaValue::Bool(read_u8(buf, pos)? != 0)),
+        8 => Ok(GgufMetaValue::Str(read_gguf_string(buf, pos, version)?)),
+        9 => {
             // Array: element_type(u32) + count(u64) + elements
             let elem_type = read_u32(buf, pos)?;
             let count = read_u64(buf, pos)? as usize;
@@ -370,21 +404,34 @@ pub fn print_gguf_info(info: &GgufInfo) {
     println!("Version:      {}", info.version);
     println!("Architecture: {}", info.architecture);
     println!("Tensors:      {}", info.tensors.len());
-    println!("Total params: {:.2}B ({} elements)", info.total_params as f64 / 1e9, info.total_params);
+    println!(
+        "Total params: {:.2}B ({} elements)",
+        info.total_params as f64 / 1e9,
+        info.total_params
+    );
 
-    if let Some(n) = info.num_layers() { println!("Layers:       {n}"); }
-    if let Some(h) = info.hidden_size() { println!("Hidden size:  {h}"); }
-    if let Some(v) = info.vocab_size() { println!("Vocab size:   {v}"); }
+    if let Some(n) = info.num_layers() {
+        println!("Layers:       {n}");
+    }
+    if let Some(h) = info.hidden_size() {
+        println!("Hidden size:  {h}");
+    }
+    if let Some(v) = info.vocab_size() {
+        println!("Vocab size:   {v}");
+    }
 
     println!("\nTop 10 tensors:");
     println!("{:<50} {:>12} {:>8}", "Name", "Elements", "Dtype");
     println!("{}", "-".repeat(72));
     for t in info.tensors.iter().take(10) {
-        let shape_str = t.shape.iter()
+        let shape_str = t
+            .shape
+            .iter()
             .map(|d| d.to_string())
             .collect::<Vec<_>>()
             .join("×");
-        println!("{:<50} {:>12} {:>8}  [{}]",
+        println!(
+            "{:<50} {:>12} {:>8}  [{}]",
             &t.name[..t.name.len().min(49)],
             t.num_elements(),
             t.dtype.name(),
@@ -408,8 +455,11 @@ mod tests {
             .into_owned();
         std::fs::write(&path, b"NOT A GGUF FILE AT ALL").unwrap();
         let err = read_gguf_info(&path).expect_err("Should fail on non-GGUF file");
-        assert!(err.message.contains("GGUF") || err.message.contains("magic"),
-            "Error should mention GGUF magic, got: {}", err.message);
+        assert!(
+            err.message.contains("GGUF") || err.message.contains("magic"),
+            "Error should mention GGUF magic, got: {}",
+            err.message
+        );
     }
 
     #[test]

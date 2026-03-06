@@ -493,10 +493,13 @@ impl Op {
             Op::Phi(values) => values.clone(),
             Op::Plugin { inputs, .. } => inputs.clone(),
             Op::CustomCall { inputs, .. } => inputs.clone(),
-            Op::DepthwiseSeparableConv { input, dw_weight, pw_weight, .. } =>
-                vec![*input, *dw_weight, *pw_weight],
-            Op::QuantizeLinear { input, .. } | Op::DequantizeLinear { input, .. } =>
-                vec![*input],
+            Op::DepthwiseSeparableConv {
+                input,
+                dw_weight,
+                pw_weight,
+                ..
+            } => vec![*input, *dw_weight, *pw_weight],
+            Op::QuantizeLinear { input, .. } | Op::DequantizeLinear { input, .. } => vec![*input],
             Op::ConstInt(_)
             | Op::ConstFloat(_)
             | Op::ConstTensor { .. }
@@ -511,35 +514,128 @@ impl Op {
             | Op::Dropout { input, .. }
             | Op::Identity(input) => vec![*input],
             Op::GlobalAveragePoolBackward { input, upstream } => vec![*input, *upstream],
-            Op::GroupNorm { input, weight, bias, .. } => vec![*input, *weight, *bias],
-            Op::GroupNormBackwardInput { input, upstream, weight, .. } => vec![*input, *upstream, *weight],
-            Op::GroupNormBackwardWeight { input, upstream, .. } => vec![*input, *upstream],
+            Op::GroupNorm {
+                input,
+                weight,
+                bias,
+                ..
+            } => vec![*input, *weight, *bias],
+            Op::GroupNormBackwardInput {
+                input,
+                upstream,
+                weight,
+                ..
+            } => vec![*input, *upstream, *weight],
+            Op::GroupNormBackwardWeight {
+                input, upstream, ..
+            } => vec![*input, *upstream],
             Op::GroupNormBackwardBias { upstream } => vec![*upstream],
-            Op::InstanceNorm { input, weight, bias, .. } => vec![*input, *weight, *bias],
-            Op::InstanceNormBackwardInput { input, upstream, weight, .. } => vec![*input, *upstream, *weight],
-            Op::InstanceNormBackwardWeight { input, upstream, .. } => vec![*input, *upstream],
+            Op::InstanceNorm {
+                input,
+                weight,
+                bias,
+                ..
+            } => vec![*input, *weight, *bias],
+            Op::InstanceNormBackwardInput {
+                input,
+                upstream,
+                weight,
+                ..
+            } => vec![*input, *upstream, *weight],
+            Op::InstanceNormBackwardWeight {
+                input, upstream, ..
+            } => vec![*input, *upstream],
             Op::InstanceNormBackwardBias { upstream } => vec![*upstream],
             Op::Embedding { weight, indices } => vec![*weight, *indices],
-            Op::EmbeddingBackward { weight, indices, upstream } => vec![*weight, *indices, *upstream],
-            Op::LstmCell { x, h_prev, c_prev, weight_ih, weight_hh, bias, .. } => {
+            Op::EmbeddingBackward {
+                weight,
+                indices,
+                upstream,
+            } => vec![*weight, *indices, *upstream],
+            Op::LstmCell {
+                x,
+                h_prev,
+                c_prev,
+                weight_ih,
+                weight_hh,
+                bias,
+                ..
+            } => {
                 vec![*x, *h_prev, *c_prev, *weight_ih, *weight_hh, *bias]
             }
-            Op::LstmCellBackward { x, h_prev, c_prev, weight_ih, weight_hh, gates_raw, tanh_c_next, dh_next, dc_next, .. } => {
-                vec![*x, *h_prev, *c_prev, *weight_ih, *weight_hh, *gates_raw, *tanh_c_next, *dh_next, *dc_next]
+            Op::LstmCellBackward {
+                x,
+                h_prev,
+                c_prev,
+                weight_ih,
+                weight_hh,
+                gates_raw,
+                tanh_c_next,
+                dh_next,
+                dc_next,
+                ..
+            } => {
+                vec![
+                    *x,
+                    *h_prev,
+                    *c_prev,
+                    *weight_ih,
+                    *weight_hh,
+                    *gates_raw,
+                    *tanh_c_next,
+                    *dh_next,
+                    *dc_next,
+                ]
             }
-            Op::GruCell { x, h_prev, weight_ih, weight_hh, bias_ih, bias_hh, .. } => {
+            Op::GruCell {
+                x,
+                h_prev,
+                weight_ih,
+                weight_hh,
+                bias_ih,
+                bias_hh,
+                ..
+            } => {
                 vec![*x, *h_prev, *weight_ih, *weight_hh, *bias_ih, *bias_hh]
             }
-            Op::GruCellBackward { x, h_prev, weight_ih, weight_hh, z_gate, r_gate, n_gate, dh_next, .. } => {
-                vec![*x, *h_prev, *weight_ih, *weight_hh, *z_gate, *r_gate, *n_gate, *dh_next]
+            Op::GruCellBackward {
+                x,
+                h_prev,
+                weight_ih,
+                weight_hh,
+                z_gate,
+                r_gate,
+                n_gate,
+                dh_next,
+                ..
+            } => {
+                vec![
+                    *x, *h_prev, *weight_ih, *weight_hh, *z_gate, *r_gate, *n_gate, *dh_next,
+                ]
             }
             Op::ConvTranspose2D { input, weight, .. } => vec![*input, *weight],
             Op::Upsample2D { input, .. } => vec![*input],
             Op::Upsample2DBackward { upstream, .. } => vec![*upstream],
             Op::SinusoidalPE { input } | Op::RoPE { input, .. } => vec![*input],
             Op::RoPEBackward { upstream, .. } => vec![*upstream],
-            Op::MultiHeadAttention { q_input, k_input, v_input, w_q, w_k, w_v, w_o, bias_q, bias_k, bias_v, bias_o, .. } => {
-                vec![*q_input, *k_input, *v_input, *w_q, *w_k, *w_v, *w_o, *bias_q, *bias_k, *bias_v, *bias_o]
+            Op::MultiHeadAttention {
+                q_input,
+                k_input,
+                v_input,
+                w_q,
+                w_k,
+                w_v,
+                w_o,
+                bias_q,
+                bias_k,
+                bias_v,
+                bias_o,
+                ..
+            } => {
+                vec![
+                    *q_input, *k_input, *v_input, *w_q, *w_k, *w_v, *w_o, *bias_q, *bias_k,
+                    *bias_v, *bias_o,
+                ]
             }
             Op::BatchNorm {
                 input,
@@ -586,9 +682,7 @@ impl Op {
                 ..
             } => vec![*input, *upstream, *weight],
             Op::LayerNormBackwardWeight {
-                input,
-                upstream,
-                ..
+                input, upstream, ..
             } => vec![*input, *upstream],
             Op::LayerNormBackwardBias { upstream } => vec![*upstream],
         }
@@ -609,7 +703,8 @@ impl Op {
                 *left = remap(*left);
                 *right = remap(*right);
             }
-            Op::Conv2DBackwardInput(input, weight, upstream) | Op::Conv2DBackwardWeight(input, weight, upstream) => {
+            Op::Conv2DBackwardInput(input, weight, upstream)
+            | Op::Conv2DBackwardWeight(input, weight, upstream) => {
                 *input = remap(*input);
                 *weight = remap(*weight);
                 *upstream = remap(*upstream);
@@ -671,7 +766,12 @@ impl Op {
                     *input = remap(*input);
                 }
             }
-            Op::DepthwiseSeparableConv { input, dw_weight, pw_weight, .. } => {
+            Op::DepthwiseSeparableConv {
+                input,
+                dw_weight,
+                pw_weight,
+                ..
+            } => {
                 *input = remap(*input);
                 *dw_weight = remap(*dw_weight);
                 *pw_weight = remap(*pw_weight);
@@ -701,34 +801,58 @@ impl Op {
                 *input = remap(*input);
                 *upstream = remap(*upstream);
             }
-            Op::GroupNorm { input, weight, bias, .. } => {
+            Op::GroupNorm {
+                input,
+                weight,
+                bias,
+                ..
+            } => {
                 *input = remap(*input);
                 *weight = remap(*weight);
                 *bias = remap(*bias);
             }
-            Op::GroupNormBackwardInput { input, upstream, weight, .. } => {
+            Op::GroupNormBackwardInput {
+                input,
+                upstream,
+                weight,
+                ..
+            } => {
                 *input = remap(*input);
                 *upstream = remap(*upstream);
                 *weight = remap(*weight);
             }
-            Op::GroupNormBackwardWeight { input, upstream, .. } => {
+            Op::GroupNormBackwardWeight {
+                input, upstream, ..
+            } => {
                 *input = remap(*input);
                 *upstream = remap(*upstream);
             }
             Op::GroupNormBackwardBias { upstream } => {
                 *upstream = remap(*upstream);
             }
-            Op::InstanceNorm { input, weight, bias, .. } => {
+            Op::InstanceNorm {
+                input,
+                weight,
+                bias,
+                ..
+            } => {
                 *input = remap(*input);
                 *weight = remap(*weight);
                 *bias = remap(*bias);
             }
-            Op::InstanceNormBackwardInput { input, upstream, weight, .. } => {
+            Op::InstanceNormBackwardInput {
+                input,
+                upstream,
+                weight,
+                ..
+            } => {
                 *input = remap(*input);
                 *upstream = remap(*upstream);
                 *weight = remap(*weight);
             }
-            Op::InstanceNormBackwardWeight { input, upstream, .. } => {
+            Op::InstanceNormBackwardWeight {
+                input, upstream, ..
+            } => {
                 *input = remap(*input);
                 *upstream = remap(*upstream);
             }
@@ -739,48 +863,130 @@ impl Op {
                 *weight = remap(*weight);
                 *indices = remap(*indices);
             }
-            Op::EmbeddingBackward { weight, indices, upstream } => {
+            Op::EmbeddingBackward {
+                weight,
+                indices,
+                upstream,
+            } => {
                 *weight = remap(*weight);
                 *indices = remap(*indices);
                 *upstream = remap(*upstream);
             }
-            Op::LstmCell { x, h_prev, c_prev, weight_ih, weight_hh, bias, .. } => {
-                *x = remap(*x); *h_prev = remap(*h_prev); *c_prev = remap(*c_prev);
-                *weight_ih = remap(*weight_ih); *weight_hh = remap(*weight_hh); *bias = remap(*bias);
+            Op::LstmCell {
+                x,
+                h_prev,
+                c_prev,
+                weight_ih,
+                weight_hh,
+                bias,
+                ..
+            } => {
+                *x = remap(*x);
+                *h_prev = remap(*h_prev);
+                *c_prev = remap(*c_prev);
+                *weight_ih = remap(*weight_ih);
+                *weight_hh = remap(*weight_hh);
+                *bias = remap(*bias);
             }
-            Op::LstmCellBackward { x, h_prev, c_prev, weight_ih, weight_hh, gates_raw, tanh_c_next, dh_next, dc_next, .. } => {
-                *x = remap(*x); *h_prev = remap(*h_prev); *c_prev = remap(*c_prev);
-                *weight_ih = remap(*weight_ih); *weight_hh = remap(*weight_hh);
-                *gates_raw = remap(*gates_raw); *tanh_c_next = remap(*tanh_c_next);
-                *dh_next = remap(*dh_next); *dc_next = remap(*dc_next);
+            Op::LstmCellBackward {
+                x,
+                h_prev,
+                c_prev,
+                weight_ih,
+                weight_hh,
+                gates_raw,
+                tanh_c_next,
+                dh_next,
+                dc_next,
+                ..
+            } => {
+                *x = remap(*x);
+                *h_prev = remap(*h_prev);
+                *c_prev = remap(*c_prev);
+                *weight_ih = remap(*weight_ih);
+                *weight_hh = remap(*weight_hh);
+                *gates_raw = remap(*gates_raw);
+                *tanh_c_next = remap(*tanh_c_next);
+                *dh_next = remap(*dh_next);
+                *dc_next = remap(*dc_next);
             }
-            Op::GruCell { x, h_prev, weight_ih, weight_hh, bias_ih, bias_hh, .. } => {
-                *x = remap(*x); *h_prev = remap(*h_prev);
-                *weight_ih = remap(*weight_ih); *weight_hh = remap(*weight_hh);
-                *bias_ih = remap(*bias_ih); *bias_hh = remap(*bias_hh);
+            Op::GruCell {
+                x,
+                h_prev,
+                weight_ih,
+                weight_hh,
+                bias_ih,
+                bias_hh,
+                ..
+            } => {
+                *x = remap(*x);
+                *h_prev = remap(*h_prev);
+                *weight_ih = remap(*weight_ih);
+                *weight_hh = remap(*weight_hh);
+                *bias_ih = remap(*bias_ih);
+                *bias_hh = remap(*bias_hh);
             }
-            Op::GruCellBackward { x, h_prev, weight_ih, weight_hh, z_gate, r_gate, n_gate, dh_next, .. } => {
-                *x = remap(*x); *h_prev = remap(*h_prev);
-                *weight_ih = remap(*weight_ih); *weight_hh = remap(*weight_hh);
-                *z_gate = remap(*z_gate); *r_gate = remap(*r_gate); *n_gate = remap(*n_gate);
+            Op::GruCellBackward {
+                x,
+                h_prev,
+                weight_ih,
+                weight_hh,
+                z_gate,
+                r_gate,
+                n_gate,
+                dh_next,
+                ..
+            } => {
+                *x = remap(*x);
+                *h_prev = remap(*h_prev);
+                *weight_ih = remap(*weight_ih);
+                *weight_hh = remap(*weight_hh);
+                *z_gate = remap(*z_gate);
+                *r_gate = remap(*r_gate);
+                *n_gate = remap(*n_gate);
                 *dh_next = remap(*dh_next);
             }
             Op::ConvTranspose2D { input, weight, .. } => {
                 *input = remap(*input);
                 *weight = remap(*weight);
             }
-            Op::Upsample2D { input, .. } => { *input = remap(*input); }
-            Op::Upsample2DBackward { upstream, .. } => { *upstream = remap(*upstream); }
+            Op::Upsample2D { input, .. } => {
+                *input = remap(*input);
+            }
+            Op::Upsample2DBackward { upstream, .. } => {
+                *upstream = remap(*upstream);
+            }
             Op::SinusoidalPE { input } | Op::RoPE { input, .. } => {
                 *input = remap(*input);
             }
             Op::RoPEBackward { upstream, .. } => {
                 *upstream = remap(*upstream);
             }
-            Op::MultiHeadAttention { q_input, k_input, v_input, w_q, w_k, w_v, w_o, bias_q, bias_k, bias_v, bias_o, .. } => {
-                *q_input = remap(*q_input); *k_input = remap(*k_input); *v_input = remap(*v_input);
-                *w_q = remap(*w_q); *w_k = remap(*w_k); *w_v = remap(*w_v); *w_o = remap(*w_o);
-                *bias_q = remap(*bias_q); *bias_k = remap(*bias_k); *bias_v = remap(*bias_v); *bias_o = remap(*bias_o);
+            Op::MultiHeadAttention {
+                q_input,
+                k_input,
+                v_input,
+                w_q,
+                w_k,
+                w_v,
+                w_o,
+                bias_q,
+                bias_k,
+                bias_v,
+                bias_o,
+                ..
+            } => {
+                *q_input = remap(*q_input);
+                *k_input = remap(*k_input);
+                *v_input = remap(*v_input);
+                *w_q = remap(*w_q);
+                *w_k = remap(*w_k);
+                *w_v = remap(*w_v);
+                *w_o = remap(*w_o);
+                *bias_q = remap(*bias_q);
+                *bias_k = remap(*bias_k);
+                *bias_v = remap(*bias_v);
+                *bias_o = remap(*bias_o);
             }
             Op::BatchNorm {
                 input,
@@ -809,7 +1015,7 @@ impl Op {
                 upstream,
                 weight,
                 var,
-                            } => {
+            } => {
                 *input = remap(*input);
                 *upstream = remap(*upstream);
                 *weight = remap(*weight);
@@ -860,9 +1066,7 @@ impl Op {
                 *weight = remap(*weight);
             }
             Op::LayerNormBackwardWeight {
-                input,
-                upstream,
-                ..
+                input, upstream, ..
             } => {
                 *input = remap(*input);
                 *upstream = remap(*upstream);

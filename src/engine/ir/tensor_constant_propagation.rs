@@ -86,9 +86,7 @@ fn fold_tensor_op(op: &Op, known_tensors: &[Option<Tensor>]) -> Option<Op> {
             const_tensor_op(relu_backward(input, grad).ok()?)
         }
         Op::ElementwiseChain { input, ops } => {
-            let mut tensor = known_tensors
-                .get(input.0)
-                .and_then(|v| v.clone())?;
+            let mut tensor = known_tensors.get(input.0).and_then(|v| v.clone())?;
             for unary in ops {
                 tensor = match unary {
                     ElementwiseUnaryOp::Neg => tensor.scale(-1.0).ok()?,

@@ -55,7 +55,11 @@ pub fn emit_pytorch(program: &Program) -> String {
 
                 let mut layer_defs = String::new();
                 for i in 0..layers.len().saturating_sub(1) {
-                    layer_defs.push_str(&format!("            nn.Linear({}, {}),\n", layers[i], layers[i+1]));
+                    layer_defs.push_str(&format!(
+                        "            nn.Linear({}, {}),\n",
+                        layers[i],
+                        layers[i + 1]
+                    ));
                     if i < layers.len() - 2 {
                         layer_defs.push_str(&format!("            {},\n", activation));
                     }
@@ -71,32 +75,41 @@ pub fn emit_pytorch(program: &Program) -> String {
                 let mut shuffle = "False";
                 for prop in props {
                     if prop.key == "batch"
-                        && let Some(Expr::Int { value, .. }) = prop.values.first() {
-                            batch = Box::leak(value.to_string().into_boxed_str());
-                        }
+                        && let Some(Expr::Int { value, .. }) = prop.values.first()
+                    {
+                        batch = Box::leak(value.to_string().into_boxed_str());
+                    }
                     if prop.key == "shuffle"
-                        && let Some(Expr::Bool { value, .. }) = prop.values.first() {
-                            shuffle = if *value { "True" } else { "False" };
-                        }
+                        && let Some(Expr::Bool { value, .. }) = prop.values.first()
+                    {
+                        shuffle = if *value { "True" } else { "False" };
+                    }
                 }
                 out.push_str(&format!("# Placeholder for dataset loading: {}\n", name));
                 out.push_str(&format!("{}_loader = DataLoader(TensorDataset(torch.randn(100, 2), torch.randn(100, 1)), batch_size={}, shuffle={})\n\n", name, batch, shuffle));
             }
-            Stmt::Train { model, data, props, .. } => {
+            Stmt::Train {
+                model, data, props, ..
+            } => {
                 let mut epochs = "10";
                 let mut device = "cpu";
                 for prop in props {
                     if prop.key == "epochs"
-                        && let Some(Expr::Int { value, .. }) = prop.values.first() {
-                            epochs = Box::leak(value.to_string().into_boxed_str());
-                        }
+                        && let Some(Expr::Int { value, .. }) = prop.values.first()
+                    {
+                        epochs = Box::leak(value.to_string().into_boxed_str());
+                    }
                     if prop.key == "device"
-                        && let Some(Expr::Ident { name: dev_name, .. }) = prop.values.first() {
-                            device = Box::leak(dev_name.to_string().into_boxed_str());
-                        }
+                        && let Some(Expr::Ident { name: dev_name, .. }) = prop.values.first()
+                    {
+                        device = Box::leak(dev_name.to_string().into_boxed_str());
+                    }
                 }
                 out.push_str(&format!("device = torch.device('cuda' if '{}' == 'cuda' and torch.cuda.is_available() else 'cpu')\n", device));
-                out.push_str(&format!("model = {}().to(device)\n", uppercase_first(model)));
+                out.push_str(&format!(
+                    "model = {}().to(device)\n",
+                    uppercase_first(model)
+                ));
                 out.push_str("optimizer = optim.SGD(model.parameters(), lr=0.01) # Use actual lr/opt from model decl\n");
                 out.push_str("criterion = nn.MSELoss()\n\n");
                 out.push_str(&format!("for epoch in range({}):\n", epochs));

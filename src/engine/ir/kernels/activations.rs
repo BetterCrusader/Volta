@@ -1,6 +1,6 @@
-use crate::engine::ir::tensor::{Tensor, TensorError};
-use crate::engine::ir::op::ElementwiseUnaryOp;
 use crate::engine::ir::kernels::utils::erf_approx;
+use crate::engine::ir::op::ElementwiseUnaryOp;
+use crate::engine::ir::tensor::{Tensor, TensorError};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
@@ -9,31 +9,57 @@ pub fn relu(input: &Tensor) -> Result<Tensor, TensorError> {
     let out: Vec<f32> = {
         #[cfg(feature = "parallel")]
         if crate::engine::ir::kernels::utils::should_par(contig.data.len()) {
-            contig.data.par_iter().map(|&v| if v > 0.0 { v } else { 0.0 }).collect()
+            contig
+                .data
+                .par_iter()
+                .map(|&v| if v > 0.0 { v } else { 0.0 })
+                .collect()
         } else {
-            contig.data.iter().map(|&v| if v > 0.0 { v } else { 0.0 }).collect()
+            contig
+                .data
+                .iter()
+                .map(|&v| if v > 0.0 { v } else { 0.0 })
+                .collect()
         }
         #[cfg(not(feature = "parallel"))]
-        contig.data.iter().map(|&v| if v > 0.0 { v } else { 0.0 }).collect()
+        contig
+            .data
+            .iter()
+            .map(|&v| if v > 0.0 { v } else { 0.0 })
+            .collect()
     };
     Tensor::new(input.shape.clone(), out)
 }
 
 pub fn relu_backward(input: &Tensor, grad_output: &Tensor) -> Result<Tensor, TensorError> {
     if input.shape != grad_output.shape {
-        return Err(TensorError { message: "Shape mismatch in relu_backward".to_string() });
+        return Err(TensorError {
+            message: "Shape mismatch in relu_backward".to_string(),
+        });
     }
     let left = input.make_contiguous()?;
     let right = grad_output.make_contiguous()?;
     let out: Vec<f32> = {
         #[cfg(feature = "parallel")]
         if crate::engine::ir::kernels::utils::should_par(left.data.len()) {
-            left.data.par_iter().zip(right.data.par_iter()).map(|(&x, &g)| if x > 0.0 { g } else { 0.0 }).collect()
+            left.data
+                .par_iter()
+                .zip(right.data.par_iter())
+                .map(|(&x, &g)| if x > 0.0 { g } else { 0.0 })
+                .collect()
         } else {
-            left.data.iter().zip(right.data.iter()).map(|(&x, &g)| if x > 0.0 { g } else { 0.0 }).collect()
+            left.data
+                .iter()
+                .zip(right.data.iter())
+                .map(|(&x, &g)| if x > 0.0 { g } else { 0.0 })
+                .collect()
         }
         #[cfg(not(feature = "parallel"))]
-        left.data.iter().zip(right.data.iter()).map(|(&x, &g)| if x > 0.0 { g } else { 0.0 }).collect()
+        left.data
+            .iter()
+            .zip(right.data.iter())
+            .map(|(&x, &g)| if x > 0.0 { g } else { 0.0 })
+            .collect()
     };
     Tensor::new(input.shape.clone(), out)
 }
@@ -55,12 +81,19 @@ pub fn sigmoid(input: &Tensor) -> Result<Tensor, TensorError> {
 
 #[inline(always)]
 fn sigmoid_fn(x: f32) -> f32 {
-    if x >= 0.0 { 1.0 / (1.0 + (-x).exp()) } else { let ex = x.exp(); ex / (1.0 + ex) }
+    if x >= 0.0 {
+        1.0 / (1.0 + (-x).exp())
+    } else {
+        let ex = x.exp();
+        ex / (1.0 + ex)
+    }
 }
 
 pub fn sigmoid_backward(input: &Tensor, grad_output: &Tensor) -> Result<Tensor, TensorError> {
     if input.shape != grad_output.shape {
-        return Err(TensorError { message: "Shape mismatch in sigmoid_backward".to_string() });
+        return Err(TensorError {
+            message: "Shape mismatch in sigmoid_backward".to_string(),
+        });
     }
     let left = input.make_contiguous()?;
     let go = grad_output.make_contiguous()?;
@@ -71,7 +104,11 @@ pub fn sigmoid_backward(input: &Tensor, grad_output: &Tensor) -> Result<Tensor, 
     let out: Vec<f32> = {
         #[cfg(feature = "parallel")]
         if crate::engine::ir::kernels::utils::should_par(left.data.len()) {
-            left.data.par_iter().zip(go.data.par_iter()).map(f).collect()
+            left.data
+                .par_iter()
+                .zip(go.data.par_iter())
+                .map(f)
+                .collect()
         } else {
             left.data.iter().zip(go.data.iter()).map(f).collect()
         }
@@ -130,7 +167,9 @@ fn gelu_exact_fn(x: f32) -> f32 {
 
 pub fn gelu_backward(input: &Tensor, grad_output: &Tensor) -> Result<Tensor, TensorError> {
     if input.shape != grad_output.shape {
-        return Err(TensorError { message: "Shape mismatch in gelu_backward".to_string() });
+        return Err(TensorError {
+            message: "Shape mismatch in gelu_backward".to_string(),
+        });
     }
     let left = input.make_contiguous()?;
     let go = grad_output.make_contiguous()?;
@@ -147,7 +186,11 @@ pub fn gelu_backward(input: &Tensor, grad_output: &Tensor) -> Result<Tensor, Ten
     let out: Vec<f32> = {
         #[cfg(feature = "parallel")]
         if crate::engine::ir::kernels::utils::should_par(left.data.len()) {
-            left.data.par_iter().zip(go.data.par_iter()).map(f).collect()
+            left.data
+                .par_iter()
+                .zip(go.data.par_iter())
+                .map(f)
+                .collect()
         } else {
             left.data.iter().zip(go.data.iter()).map(f).collect()
         }
@@ -159,7 +202,9 @@ pub fn gelu_backward(input: &Tensor, grad_output: &Tensor) -> Result<Tensor, Ten
 
 pub fn gelu_exact_backward(input: &Tensor, grad_output: &Tensor) -> Result<Tensor, TensorError> {
     if input.shape != grad_output.shape {
-        return Err(TensorError { message: "Shape mismatch in gelu_exact_backward".to_string() });
+        return Err(TensorError {
+            message: "Shape mismatch in gelu_exact_backward".to_string(),
+        });
     }
     let left = input.make_contiguous()?;
     let go = grad_output.make_contiguous()?;
@@ -174,7 +219,11 @@ pub fn gelu_exact_backward(input: &Tensor, grad_output: &Tensor) -> Result<Tenso
     let out: Vec<f32> = {
         #[cfg(feature = "parallel")]
         if crate::engine::ir::kernels::utils::should_par(left.data.len()) {
-            left.data.par_iter().zip(go.data.par_iter()).map(f).collect()
+            left.data
+                .par_iter()
+                .zip(go.data.par_iter())
+                .map(f)
+                .collect()
         } else {
             left.data.iter().zip(go.data.iter()).map(f).collect()
         }
@@ -184,15 +233,30 @@ pub fn gelu_exact_backward(input: &Tensor, grad_output: &Tensor) -> Result<Tenso
     Tensor::new(input.shape.clone(), out)
 }
 
-pub fn apply_elementwise_chain(input: &Tensor, ops: &[ElementwiseUnaryOp]) -> Result<Tensor, TensorError> {
+pub fn apply_elementwise_chain(
+    input: &Tensor,
+    ops: &[ElementwiseUnaryOp],
+) -> Result<Tensor, TensorError> {
     let contig = input.make_contiguous()?;
     let f = |&x: &f32| -> f32 {
         let mut val = x;
         for op in ops {
             val = match op {
                 ElementwiseUnaryOp::Neg => -val,
-                ElementwiseUnaryOp::Relu => if val > 0.0 { val } else { 0.0 },
-                ElementwiseUnaryOp::LeakyRelu(alpha) => if val > 0.0 { val } else { val * alpha },
+                ElementwiseUnaryOp::Relu => {
+                    if val > 0.0 {
+                        val
+                    } else {
+                        0.0
+                    }
+                }
+                ElementwiseUnaryOp::LeakyRelu(alpha) => {
+                    if val > 0.0 {
+                        val
+                    } else {
+                        val * alpha
+                    }
+                }
                 ElementwiseUnaryOp::Sigmoid => sigmoid_fn(val),
                 ElementwiseUnaryOp::Gelu => gelu_fn(val),
                 ElementwiseUnaryOp::GeluExact => gelu_exact_fn(val),

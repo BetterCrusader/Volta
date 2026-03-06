@@ -1,6 +1,6 @@
-use std::sync::Arc;
-use crate::engine::ir::interpreter::{RuntimeValue, InterpreterError};
+use crate::engine::ir::interpreter::{InterpreterError, RuntimeValue};
 use crate::engine::ir::node::NodeId;
+use std::sync::Arc;
 
 pub fn add_values(
     left: RuntimeValue,
@@ -113,10 +113,7 @@ pub fn div_values(
     }
 }
 
-pub fn neg_value(
-    value: RuntimeValue,
-    node: NodeId,
-) -> Result<RuntimeValue, InterpreterError> {
+pub fn neg_value(value: RuntimeValue, node: NodeId) -> Result<RuntimeValue, InterpreterError> {
     match value {
         RuntimeValue::Int(a) => a
             .checked_neg()
@@ -124,7 +121,9 @@ pub fn neg_value(
             .ok_or_else(|| error("Integer overflow in neg".to_string(), node)),
         RuntimeValue::Float(a) => finite_float(-a, "Float overflow in neg", node),
         RuntimeValue::Tensor(t) => {
-            let out_tensor = t.neg_elementwise().map_err(|err| error(err.message, node))?;
+            let out_tensor = t
+                .neg_elementwise()
+                .map_err(|err| error(err.message, node))?;
             Ok(RuntimeValue::Tensor(Arc::new(out_tensor)))
         }
     }

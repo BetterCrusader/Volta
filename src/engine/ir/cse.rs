@@ -51,7 +51,13 @@ enum CseKey {
     GeluExact(ValueId),
     GeluBackward(ValueId, ValueId),
     GeluExactBackward(ValueId, ValueId),
-    ReduceMaxBackward { input: ValueId, output_max: ValueId, upstream: ValueId, axis: Option<usize>, keepdims: bool },
+    ReduceMaxBackward {
+        input: ValueId,
+        output_max: ValueId,
+        upstream: ValueId,
+        axis: Option<usize>,
+        keepdims: bool,
+    },
     Gemm {
         lhs: ValueId,
         rhs: ValueId,
@@ -204,7 +210,19 @@ fn key_of(op: &Op) -> Option<CseKey> {
         Op::GeluExact(value) => Some(CseKey::GeluExact(*value)),
         Op::GeluBackward(input, grad) => Some(CseKey::GeluBackward(*input, *grad)),
         Op::GeluExactBackward(input, grad) => Some(CseKey::GeluExactBackward(*input, *grad)),
-        Op::ReduceMaxBackward { input, output_max, upstream, axis, keepdims } => Some(CseKey::ReduceMaxBackward { input: *input, output_max: *output_max, upstream: *upstream, axis: *axis, keepdims: *keepdims }),
+        Op::ReduceMaxBackward {
+            input,
+            output_max,
+            upstream,
+            axis,
+            keepdims,
+        } => Some(CseKey::ReduceMaxBackward {
+            input: *input,
+            output_max: *output_max,
+            upstream: *upstream,
+            axis: *axis,
+            keepdims: *keepdims,
+        }),
         Op::Gemm {
             lhs,
             rhs,
@@ -259,8 +277,12 @@ fn key_of(op: &Op) -> Option<CseKey> {
             keepdims: *keepdims,
         }),
         Op::Conv2D(input, weight) => Some(CseKey::Conv2D(*input, *weight)),
-        Op::Conv2DBackwardInput(input, weight, upstream) => Some(CseKey::Conv2DBackwardInput(*input, *weight, *upstream)),
-        Op::Conv2DBackwardWeight(input, weight, upstream) => Some(CseKey::Conv2DBackwardWeight(*input, *weight, *upstream)),
+        Op::Conv2DBackwardInput(input, weight, upstream) => {
+            Some(CseKey::Conv2DBackwardInput(*input, *weight, *upstream))
+        }
+        Op::Conv2DBackwardWeight(input, weight, upstream) => {
+            Some(CseKey::Conv2DBackwardWeight(*input, *weight, *upstream))
+        }
         Op::MaxPool { .. }
         | Op::AvgPool { .. }
         | Op::BatchNorm { .. }

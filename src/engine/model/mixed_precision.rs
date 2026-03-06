@@ -1,3 +1,5 @@
+use crate::ir::Tensor;
+use crate::ir::node::ValueId;
 /// Mixed-precision training utilities for Volta.
 ///
 /// Implements automatic loss scaling to prevent FP16/BF16 gradient underflow,
@@ -9,8 +11,6 @@
 /// 2. Infinite/NaN gradient detection → skip update and reduce scale
 /// 3. Automatic scale increase after N consecutive clean steps
 use std::collections::HashMap;
-use crate::ir::node::ValueId;
-use crate::ir::Tensor;
 
 /// Configuration for automatic mixed-precision (AMP) loss scaling.
 #[derive(Debug, Clone)]
@@ -86,10 +86,7 @@ impl MixedPrecisionTrainer {
     /// Unscale gradients in-place: grad = grad / current_scale.
     /// Returns `true` if gradients are finite and the optimizer step should proceed.
     /// Returns `false` if any gradient is Inf or NaN (skip the step).
-    pub fn unscale_and_check(
-        &mut self,
-        gradients: &mut HashMap<ValueId, Tensor>,
-    ) -> bool {
+    pub fn unscale_and_check(&mut self, gradients: &mut HashMap<ValueId, Tensor>) -> bool {
         let inv_scale = 1.0 / self.state.current_scale;
         let mut overflow = false;
 
@@ -130,9 +127,7 @@ impl MixedPrecisionTrainer {
     pub fn print_report(&self) {
         println!(
             "[MixedPrecision] scale={:.1} overflows={} steps={}",
-            self.state.current_scale,
-            self.state.total_overflows,
-            self.state.total_steps,
+            self.state.current_scale, self.state.total_overflows, self.state.total_steps,
         );
     }
 }
@@ -140,7 +135,9 @@ impl MixedPrecisionTrainer {
 /// Quantize an f32 tensor to simulated FP16 precision (round to FP16, store as f32).
 /// Useful for testing mixed-precision pipelines without hardware FP16 support.
 pub fn simulate_fp16(tensor: &Tensor) -> Tensor {
-    let data: Vec<f32> = tensor.data.iter()
+    let data: Vec<f32> = tensor
+        .data
+        .iter()
         .map(|&v| f32_to_simulated_fp16(v))
         .collect();
     Tensor::new(tensor.shape.clone(), data).expect("simulate_fp16: valid tensor")
@@ -183,7 +180,9 @@ mod tests {
     use crate::ir::Tensor;
     use crate::ir::node::ValueId;
 
-    fn vid(n: usize) -> ValueId { ValueId(n) }
+    fn vid(n: usize) -> ValueId {
+        ValueId(n)
+    }
 
     #[test]
     fn loss_scaling_multiplies_correctly() {
@@ -244,8 +243,11 @@ mod tests {
             trainer.unscale_and_check(&mut grads);
         }
 
-        assert!((trainer.state.current_scale - 16.0).abs() < 1e-4,
-            "scale should have doubled after 3 clean steps, got {}", trainer.state.current_scale);
+        assert!(
+            (trainer.state.current_scale - 16.0).abs() < 1e-4,
+            "scale should have doubled after 3 clean steps, got {}",
+            trainer.state.current_scale
+        );
     }
 
     #[test]

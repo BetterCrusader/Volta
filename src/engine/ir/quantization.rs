@@ -38,7 +38,11 @@ impl CalibrationStats {
     pub fn symmetric_scale(&self, bits: u8) -> f32 {
         let max_abs = self.min.abs().max(self.max.abs());
         let max_int = ((1i32 << (bits - 1)) - 1) as f32;
-        if max_abs < 1e-8 { 1e-8 } else { max_abs / max_int }
+        if max_abs < 1e-8 {
+            1e-8
+        } else {
+            max_abs / max_int
+        }
     }
 }
 
@@ -99,20 +103,26 @@ impl Pass for QuantizationPass {
         // Since we can't insert nodes mid-iteration (node indices would shift),
         // we collect targets first then process them.
 
-        let targets: Vec<(usize, Op)> = graph.nodes.iter()
+        let targets: Vec<(usize, Op)> = graph
+            .nodes
+            .iter()
             .enumerate()
-            .filter_map(|(i, node)| {
-                match &node.op {
-                    Op::Gemm { .. } | Op::MatMul(_, _) => Some((i, node.op.clone())),
-                    _ => None,
-                }
+            .filter_map(|(i, node)| match &node.op {
+                Op::Gemm { .. } | Op::MatMul(_, _) => Some((i, node.op.clone())),
+                _ => None,
             })
             .collect();
 
         // For each target op, wrap inputs with Q/DQ
         for (node_idx, op) in targets {
             match op {
-                Op::Gemm { lhs, rhs, bias, alpha, beta } => {
+                Op::Gemm {
+                    lhs,
+                    rhs,
+                    bias,
+                    alpha,
+                    beta,
+                } => {
                     // Get the block containing this node
                     let block_id = find_block_for_node(graph, node_idx);
                     let Some(block_id) = block_id else { continue };
@@ -121,40 +131,52 @@ impl Pass for QuantizationPass {
                     let rhs_scale = self.config.scale_for(rhs.0);
 
                     // Insert Q(lhs) and DQ(Q(lhs)) before this node
-                    let (_, q_lhs_val) = match graph.add_op(block_id, Op::QuantizeLinear {
-                        input: lhs,
-                        scale: lhs_scale,
-                        zero_point: 0,
-                        bits: self.config.mode.bits(),
-                    }) {
+                    let (_, q_lhs_val) = match graph.add_op(
+                        block_id,
+                        Op::QuantizeLinear {
+                            input: lhs,
+                            scale: lhs_scale,
+                            zero_point: 0,
+                            bits: self.config.mode.bits(),
+                        },
+                    ) {
                         Ok(v) => v,
                         Err(_) => continue,
                     };
 
-                    let (_, dq_lhs_val) = match graph.add_op(block_id, Op::DequantizeLinear {
-                        input: q_lhs_val,
-                        scale: lhs_scale,
-                        zero_point: 0,
-                    }) {
+                    let (_, dq_lhs_val) = match graph.add_op(
+                        block_id,
+                        Op::DequantizeLinear {
+                            input: q_lhs_val,
+                            scale: lhs_scale,
+                            zero_point: 0,
+                        },
+                    ) {
                         Ok(v) => v,
                         Err(_) => continue,
                     };
 
-                    let (_, q_rhs_val) = match graph.add_op(block_id, Op::QuantizeLinear {
-                        input: rhs,
-                        scale: rhs_scale,
-                        zero_point: 0,
-                        bits: self.config.mode.bits(),
-                    }) {
+                    let (_, q_rhs_val) = match graph.add_op(
+                        block_id,
+                        Op::QuantizeLinear {
+                            input: rhs,
+                            scale: rhs_scale,
+                            zero_point: 0,
+                            bits: self.config.mode.bits(),
+                        },
+                    ) {
                         Ok(v) => v,
                         Err(_) => continue,
                     };
 
-                    let (_, dq_rhs_val) = match graph.add_op(block_id, Op::DequantizeLinear {
-                        input: q_rhs_val,
-                        scale: rhs_scale,
-                        zero_point: 0,
-                    }) {
+                    let (_, dq_rhs_val) = match graph.add_op(
+                        block_id,
+                        Op::DequantizeLinear {
+                            input: q_rhs_val,
+                            scale: rhs_scale,
+                            zero_point: 0,
+                        },
+                    ) {
                         Ok(v) => v,
                         Err(_) => continue,
                     };
@@ -175,38 +197,50 @@ impl Pass for QuantizationPass {
                     let lhs_scale = self.config.scale_for(lhs.0);
                     let rhs_scale = self.config.scale_for(rhs.0);
 
-                    let (_, q_lhs_val) = match graph.add_op(block_id, Op::QuantizeLinear {
-                        input: lhs,
-                        scale: lhs_scale,
-                        zero_point: 0,
-                        bits: self.config.mode.bits(),
-                    }) {
+                    let (_, q_lhs_val) = match graph.add_op(
+                        block_id,
+                        Op::QuantizeLinear {
+                            input: lhs,
+                            scale: lhs_scale,
+                            zero_point: 0,
+                            bits: self.config.mode.bits(),
+                        },
+                    ) {
                         Ok(v) => v,
                         Err(_) => continue,
                     };
-                    let (_, dq_lhs_val) = match graph.add_op(block_id, Op::DequantizeLinear {
-                        input: q_lhs_val,
-                        scale: lhs_scale,
-                        zero_point: 0,
-                    }) {
+                    let (_, dq_lhs_val) = match graph.add_op(
+                        block_id,
+                        Op::DequantizeLinear {
+                            input: q_lhs_val,
+                            scale: lhs_scale,
+                            zero_point: 0,
+                        },
+                    ) {
                         Ok(v) => v,
                         Err(_) => continue,
                     };
 
-                    let (_, q_rhs_val) = match graph.add_op(block_id, Op::QuantizeLinear {
-                        input: rhs,
-                        scale: rhs_scale,
-                        zero_point: 0,
-                        bits: self.config.mode.bits(),
-                    }) {
+                    let (_, q_rhs_val) = match graph.add_op(
+                        block_id,
+                        Op::QuantizeLinear {
+                            input: rhs,
+                            scale: rhs_scale,
+                            zero_point: 0,
+                            bits: self.config.mode.bits(),
+                        },
+                    ) {
                         Ok(v) => v,
                         Err(_) => continue,
                     };
-                    let (_, dq_rhs_val) = match graph.add_op(block_id, Op::DequantizeLinear {
-                        input: q_rhs_val,
-                        scale: rhs_scale,
-                        zero_point: 0,
-                    }) {
+                    let (_, dq_rhs_val) = match graph.add_op(
+                        block_id,
+                        Op::DequantizeLinear {
+                            input: q_rhs_val,
+                            scale: rhs_scale,
+                            zero_point: 0,
+                        },
+                    ) {
                         Ok(v) => v,
                         Err(_) => continue,
                     };
@@ -225,7 +259,10 @@ impl Pass for QuantizationPass {
 
 fn find_block_for_node(graph: &Graph, node_idx: usize) -> Option<crate::ir::block::BasicBlockId> {
     let node_id = graph.nodes.get(node_idx)?.id;
-    graph.blocks.iter().find(|b| b.nodes.contains(&node_id))
+    graph
+        .blocks
+        .iter()
+        .find(|b| b.nodes.contains(&node_id))
         .map(|b| b.id)
 }
 
@@ -242,7 +279,10 @@ mod tests {
 
     #[test]
     fn calibration_scale_int8_symmetric() {
-        let stats = CalibrationStats { min: -1.0, max: 1.0 };
+        let stats = CalibrationStats {
+            min: -1.0,
+            max: 1.0,
+        };
         let scale = stats.symmetric_scale(8);
         // 1.0 / 127 ≈ 0.00787
         assert!((scale - 1.0 / 127.0).abs() < 1e-5, "scale={scale}");

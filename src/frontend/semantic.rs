@@ -390,13 +390,12 @@ impl SemanticAnalyzer {
                 self.pop_scope();
                 result?;
             }
-            Stmt::Struct {
-                name,
-                fields,
-                span,
-            } => {
+            Stmt::Struct { name, fields, span } => {
                 if self.structs.contains_key(name) {
-                    return Err(Self::error(format!("Struct '{}' is already defined", name), *span));
+                    return Err(Self::error(
+                        format!("Struct '{}' is already defined", name),
+                        *span,
+                    ));
                 }
                 self.structs.insert(name.clone(), fields.clone());
             }
@@ -848,7 +847,9 @@ impl SemanticAnalyzer {
                         return Err(Self::error(
                             format!(
                                 "Function '{}' expects {} argument(s), found {}",
-                                callee, sig.arity, args.len()
+                                callee,
+                                sig.arity,
+                                args.len()
                             ),
                             *span,
                         ));
@@ -862,7 +863,9 @@ impl SemanticAnalyzer {
                         return Err(Self::error(
                             format!(
                                 "Struct '{}' constructor expects {} argument(s), found {}",
-                                callee, fields.len(), args.len()
+                                callee,
+                                fields.len(),
+                                args.len()
                             ),
                             *span,
                         ));
@@ -879,12 +882,21 @@ impl SemanticAnalyzer {
                             ));
                         }
                     }
-                    Ok(ValueType::Object { name: callee.clone() })
+                    Ok(ValueType::Object {
+                        name: callee.clone(),
+                    })
                 } else {
-                    Err(Self::error(format!("Undefined function or struct: '{}'", callee), *span))
+                    Err(Self::error(
+                        format!("Undefined function or struct: '{}'", callee),
+                        *span,
+                    ))
                 }
             }
-            Expr::MemberAccess { object, member, span } => {
+            Expr::MemberAccess {
+                object,
+                member,
+                span,
+            } => {
                 let obj_ty = self.infer_expr_type(object)?;
                 if let ValueType::Object { name } = obj_ty {
                     if let Some(fields) = self.structs.get(&name) {
@@ -897,14 +909,17 @@ impl SemanticAnalyzer {
                             ))
                         }
                     } else {
-                         Err(Self::error(
+                        Err(Self::error(
                             format!("Unknown struct type: '{}'", name),
                             object.span(),
                         ))
                     }
                 } else {
                     Err(Self::error(
-                        format!("Cannot access member '{}' on non-object type {:?}", member, obj_ty),
+                        format!(
+                            "Cannot access member '{}' on non-object type {:?}",
+                            member, obj_ty
+                        ),
                         *span,
                     ))
                 }

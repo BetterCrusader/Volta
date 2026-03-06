@@ -112,9 +112,9 @@ fn classify_op(op: &Op) -> KernelKind {
         | Op::Identity(_)
         | Op::LayerNorm { .. } => KernelKind::Elementwise,
         Op::MatMul(_, _) | Op::Gemm { .. } => KernelKind::MatMul,
-        Op::Conv2D(_, _)
-        | Op::Conv2DBackwardInput(_, _, _)
-        | Op::Conv2DBackwardWeight(_, _, _) => KernelKind::Conv2D,
+        Op::Conv2D(_, _) | Op::Conv2DBackwardInput(_, _, _) | Op::Conv2DBackwardWeight(_, _, _) => {
+            KernelKind::Conv2D
+        }
         Op::ConstInt(_)
         | Op::ConstFloat(_)
         | Op::ConstTensor { .. }

@@ -71,30 +71,38 @@ impl TrainingLogger {
         let wall = wall_time_secs();
         let run_id = (wall * 1000.0) as u64;
 
-        let (jsonl_path, jsonl_file) = if matches!(config.target, LogTarget::JsonLines | LogTarget::Both) {
-            let p = dir.join("events.jsonl");
-            let f = OpenOptions::new().create(true).append(true).open(&p)
-                .map_err(|e| TrainApiError {
-                    message: format!("Failed to open JSONL log file: {e}"),
-                })?;
-            (Some(p), Some(f))
-        } else {
-            (None, None)
-        };
+        let (jsonl_path, jsonl_file) =
+            if matches!(config.target, LogTarget::JsonLines | LogTarget::Both) {
+                let p = dir.join("events.jsonl");
+                let f = OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&p)
+                    .map_err(|e| TrainApiError {
+                        message: format!("Failed to open JSONL log file: {e}"),
+                    })?;
+                (Some(p), Some(f))
+            } else {
+                (None, None)
+            };
 
-        let (tfevents_path, tfevents_file) = if matches!(config.target, LogTarget::TfEvents | LogTarget::Both) {
-            let filename = format!("events.out.tfevents.{run_id}.volta");
-            let p = dir.join(&filename);
-            let mut f = OpenOptions::new().create(true).append(true).open(&p)
-                .map_err(|e| TrainApiError {
-                    message: format!("Failed to open TFEvents file: {e}"),
-                })?;
-            // Write file_version event (empty summary at step 0)
-            write_tfevents_file_header(&mut f, wall)?;
-            (Some(p), Some(f))
-        } else {
-            (None, None)
-        };
+        let (tfevents_path, tfevents_file) =
+            if matches!(config.target, LogTarget::TfEvents | LogTarget::Both) {
+                let filename = format!("events.out.tfevents.{run_id}.volta");
+                let p = dir.join(&filename);
+                let mut f = OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&p)
+                    .map_err(|e| TrainApiError {
+                        message: format!("Failed to open TFEvents file: {e}"),
+                    })?;
+                // Write file_version event (empty summary at step 0)
+                write_tfevents_file_header(&mut f, wall)?;
+                (Some(p), Some(f))
+            } else {
+                (None, None)
+            };
 
         Ok(Self {
             config,
@@ -348,7 +356,8 @@ mod tests {
         let mut logger = TrainingLogger::new(LoggerConfig {
             dir: dir.clone(),
             target: LogTarget::JsonLines,
-        }).unwrap();
+        })
+        .unwrap();
 
         logger.log_scalar("loss", 0.5, 1);
         logger.log_scalar("acc", 0.8, 1);
@@ -368,7 +377,8 @@ mod tests {
         let mut logger = TrainingLogger::new(LoggerConfig {
             dir: dir.clone(),
             target: LogTarget::TfEvents,
-        }).unwrap();
+        })
+        .unwrap();
 
         logger.log_scalar("loss", 1.23, 10);
         logger.flush().unwrap();
@@ -384,7 +394,8 @@ mod tests {
         let mut logger = TrainingLogger::new(LoggerConfig {
             dir: dir.clone(),
             target: LogTarget::Both,
-        }).unwrap();
+        })
+        .unwrap();
 
         logger.log_scalar("train/loss", 0.1, 5);
         logger.flush().unwrap();

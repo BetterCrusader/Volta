@@ -15,8 +15,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::ir::{
-    Backend, BackendError, CompiledProgram, DeterminismLevel, Graph,
-    build_execution_plan, graph_fingerprint,
+    Backend, BackendError, CompiledProgram, DeterminismLevel, Graph, build_execution_plan,
+    graph_fingerprint,
 };
 
 /// Configuration for the JIT compiler.
@@ -113,7 +113,8 @@ impl JitCache {
             }
         }
 
-        self.entries.insert(fp, JitEntry::Compiled(compiled.clone()));
+        self.entries
+            .insert(fp, JitEntry::Compiled(compiled.clone()));
         Ok(Some(compiled))
     }
 
@@ -132,10 +133,14 @@ impl JitCache {
         }
 
         let plan = build_execution_plan(graph, &HashSet::new()).map_err(|e| BackendError {
-            message: format!("JIT force_compile: failed to build execution plan: {}", e.message),
+            message: format!(
+                "JIT force_compile: failed to build execution plan: {}",
+                e.message
+            ),
         })?;
         let compiled = backend.compile(&plan)?;
-        self.entries.insert(fp, JitEntry::Compiled(compiled.clone()));
+        self.entries
+            .insert(fp, JitEntry::Compiled(compiled.clone()));
         Ok(compiled)
     }
 
@@ -168,14 +173,16 @@ impl JitCache {
 
     /// Number of compiled entries in cache.
     pub fn compiled_count(&self) -> usize {
-        self.entries.values()
+        self.entries
+            .values()
             .filter(|e| matches!(e, JitEntry::Compiled(_)))
             .count()
     }
 
     /// Number of graphs currently in warmup phase.
     pub fn warming_count(&self) -> usize {
-        self.entries.values()
+        self.entries
+            .values()
             .filter(|e| matches!(e, JitEntry::Warming { .. }))
             .count()
     }
@@ -261,7 +268,10 @@ mod tests {
         });
 
         let result = jit.get_or_compile(&graph, &backend).unwrap();
-        assert!(result.is_some(), "Should compile immediately with threshold=1");
+        assert!(
+            result.is_some(),
+            "Should compile immediately with threshold=1"
+        );
     }
 
     #[test]

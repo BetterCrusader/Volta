@@ -16,7 +16,10 @@ pub trait OpImportPlugin: Send + Sync {
     }
 
     /// Creates an operator for the given op_type.
-    fn create_operator(&self, op_type: &str) -> Option<std::sync::Arc<dyn crate::ir::operator::Operator>>;
+    fn create_operator(
+        &self,
+        op_type: &str,
+    ) -> Option<std::sync::Arc<dyn crate::ir::operator::Operator>>;
 }
 
 #[derive(Default, Clone)]
@@ -45,7 +48,10 @@ impl PluginRegistry {
     }
 
     #[must_use]
-    pub fn create_operator(&self, op_type: &str) -> Option<std::sync::Arc<dyn crate::ir::operator::Operator>> {
+    pub fn create_operator(
+        &self,
+        op_type: &str,
+    ) -> Option<std::sync::Arc<dyn crate::ir::operator::Operator>> {
         for plugin in &self.plugins {
             if let Some(op) = plugin.create_operator(op_type) {
                 return Some(op);

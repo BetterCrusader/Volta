@@ -1637,29 +1637,43 @@ mod tests {
 
     #[test]
     fn executes_imported_plugin_on_cpu() {
-        use crate::ir::{Graph, Op, ShapeFact};
+        use crate::ir::interpreter::{ExecutionContext, InterpreterError, RuntimeValue};
         use crate::ir::operator::Operator;
-        use crate::ir::interpreter::{RuntimeValue, ExecutionContext, InterpreterError};
+        use crate::ir::{Graph, Op, ShapeFact};
         use std::sync::Arc;
 
         #[derive(Debug)]
         struct PlusOneOp;
         impl Operator for PlusOneOp {
-            fn name(&self) -> &str { "PlusOne" }
+            fn name(&self) -> &str {
+                "PlusOne"
+            }
             fn fingerprint(&self, hasher: &mut dyn std::hash::Hasher) {
                 hasher.write(b"PlusOne");
             }
             fn infer_shape(&self, inputs: &[ShapeFact]) -> Result<ShapeFact, String> {
                 Ok(inputs[0].clone())
             }
-            fn execute(&self, inputs: &[RuntimeValue], _context: &ExecutionContext) -> Result<RuntimeValue, InterpreterError> {
+            fn execute(
+                &self,
+                inputs: &[RuntimeValue],
+                _context: &ExecutionContext,
+            ) -> Result<RuntimeValue, InterpreterError> {
                 if let RuntimeValue::Int(v) = inputs[0] {
                     Ok(RuntimeValue::Int(v + 1))
                 } else {
-                    Err(InterpreterError { message: "Expected Int".to_string(), node: None })
+                    Err(InterpreterError {
+                        message: "Expected Int".to_string(),
+                        node: None,
+                    })
                 }
             }
-            fn get_backward_ops(&self, _inputs: &[crate::ir::ValueId], _output: crate::ir::ValueId, _grads: &[crate::ir::ValueId]) -> Vec<(crate::ir::ValueId, Op)> {
+            fn get_backward_ops(
+                &self,
+                _inputs: &[crate::ir::ValueId],
+                _output: crate::ir::ValueId,
+                _grads: &[crate::ir::ValueId],
+            ) -> Vec<(crate::ir::ValueId, Op)> {
                 vec![]
             }
         }
@@ -1667,13 +1681,20 @@ mod tests {
         let mut graph = Graph::new();
         let block = graph.create_block();
         let (_, x) = graph.add_op(block, Op::Input("x".to_string())).unwrap();
-        graph.add_op(block, Op::Plugin {
-            operator: Arc::new(PlusOneOp),
-            inputs: vec![x],
-        }).unwrap();
+        graph
+            .add_op(
+                block,
+                Op::Plugin {
+                    operator: Arc::new(PlusOneOp),
+                    inputs: vec![x],
+                },
+            )
+            .unwrap();
 
         let mut context = ExecutionContext::default();
-        context.inputs.insert("x".to_string(), RuntimeValue::Int(10));
+        context
+            .inputs
+            .insert("x".to_string(), RuntimeValue::Int(10));
 
         let result = crate::ir::interpreter::execute_with_context(&graph, &context)
             .expect("Execution failed")

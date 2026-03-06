@@ -2,7 +2,9 @@ use crate::engine::ir::tensor::{Tensor, TensorError};
 
 pub fn conv2d(input: &Tensor, weight: &Tensor) -> Result<Tensor, TensorError> {
     if input.shape.len() != 2 || weight.shape.len() != 2 {
-        return Err(TensorError { message: "Conv2D expects 2D input and 2D kernel".to_string() });
+        return Err(TensorError {
+            message: "Conv2D expects 2D input and 2D kernel".to_string(),
+        });
     }
 
     let input_c = input.make_contiguous()?;
@@ -14,7 +16,10 @@ pub fn conv2d(input: &Tensor, weight: &Tensor) -> Result<Tensor, TensorError> {
     let k_w = weight_c.shape[1];
     if k_h == 0 || k_w == 0 || k_h > in_h || k_w > in_w {
         return Err(TensorError {
-            message: format!("Shape mismatch in Conv2D: input {:?}, kernel {:?}", input_c.shape, weight_c.shape),
+            message: format!(
+                "Shape mismatch in Conv2D: input {:?}, kernel {:?}",
+                input_c.shape, weight_c.shape
+            ),
         });
     }
 
@@ -46,37 +51,56 @@ pub fn pool2d_nchw(
     is_max: bool,
 ) -> Result<Tensor, TensorError> {
     if input.shape.len() != 4 {
-        return Err(TensorError { message: format!("Pool expects rank-4 NCHW input, got {:?}", input.shape) });
+        return Err(TensorError {
+            message: format!("Pool expects rank-4 NCHW input, got {:?}", input.shape),
+        });
     }
     if kernel_shape.len() != 2 {
-        return Err(TensorError { message: "Pool kernel_shape must have 2 values".to_string() });
+        return Err(TensorError {
+            message: "Pool kernel_shape must have 2 values".to_string(),
+        });
     }
 
     let input_c = input.make_contiguous()?;
-    let (n, c, h, w) = (input_c.shape[0], input_c.shape[1], input_c.shape[2], input_c.shape[3]);
+    let (n, c, h, w) = (
+        input_c.shape[0],
+        input_c.shape[1],
+        input_c.shape[2],
+        input_c.shape[3],
+    );
     let kh = kernel_shape[0];
     let kw = kernel_shape[1];
     if kh == 0 || kw == 0 {
-        return Err(TensorError { message: "Pool kernel values must be > 0".to_string() });
+        return Err(TensorError {
+            message: "Pool kernel values must be > 0".to_string(),
+        });
     }
     let sh = strides.first().copied().unwrap_or(1);
     let sw = strides.get(1).copied().unwrap_or(1);
     if sh == 0 || sw == 0 {
-        return Err(TensorError { message: "Pool strides must be > 0".to_string() });
+        return Err(TensorError {
+            message: "Pool strides must be > 0".to_string(),
+        });
     }
     let (pt, pl, pb, pr) = if pads.is_empty() {
         (0_usize, 0_usize, 0_usize, 0_usize)
     } else if pads.len() == 4 {
         (pads[0], pads[1], pads[2], pads[3])
     } else {
-        return Err(TensorError { message: "Pool pads must be empty or [top,left,bottom,right]".to_string() });
+        return Err(TensorError {
+            message: "Pool pads must be empty or [top,left,bottom,right]".to_string(),
+        });
     };
 
     let h_padded = h + pt + pb;
     let w_padded = w + pl + pr;
     if h_padded < kh || w_padded < kw {
         return Err(TensorError {
-            message: format!("Pool kernel {:?} too large for padded input {:?}", kernel_shape, [n, c, h_padded, w_padded]),
+            message: format!(
+                "Pool kernel {:?} too large for padded input {:?}",
+                kernel_shape,
+                [n, c, h_padded, w_padded]
+            ),
         });
     }
 
@@ -105,7 +129,9 @@ pub fn pool2d_nchw(
                             let idx = ((ni * c + ci) * h + iy) * w + ix;
                             let v = input_c.data[idx];
                             if is_max {
-                                if v > acc { acc = v; }
+                                if v > acc {
+                                    acc = v;
+                                }
                             } else {
                                 acc += v;
                             }
@@ -138,16 +164,29 @@ pub fn max_pool2d_backward_nchw(
     strides: &[usize],
     pads: &[usize],
 ) -> Result<Tensor, TensorError> {
-    if input.shape.len() != 4 { return Err(TensorError { message: "MaxPoolBackward expects rank-4".to_string() }); }
+    if input.shape.len() != 4 {
+        return Err(TensorError {
+            message: "MaxPoolBackward expects rank-4".to_string(),
+        });
+    }
     let input_c = input.make_contiguous()?;
     let upstream_c = upstream.make_contiguous()?;
 
-    let (n, c, h, w) = (input_c.shape[0], input_c.shape[1], input_c.shape[2], input_c.shape[3]);
+    let (n, c, h, w) = (
+        input_c.shape[0],
+        input_c.shape[1],
+        input_c.shape[2],
+        input_c.shape[3],
+    );
     let kh = kernel_shape[0];
     let kw = kernel_shape[1];
     let sh = strides.first().copied().unwrap_or(1);
     let sw = strides.get(1).copied().unwrap_or(1);
-    let (pt, pl, _pb, _pr) = if pads.is_empty() { (0, 0, 0, 0) } else { (pads[0], pads[1], pads[2], pads[3]) };
+    let (pt, pl, _pb, _pr) = if pads.is_empty() {
+        (0, 0, 0, 0)
+    } else {
+        (pads[0], pads[1], pads[2], pads[3])
+    };
 
     let h_padded = h + pt + (if pads.len() == 4 { pads[2] } else { 0 });
     let w_padded = w + pl + (if pads.len() == 4 { pads[3] } else { 0 });
@@ -171,11 +210,16 @@ pub fn max_pool2d_backward_nchw(
                                 let (iy, ix) = (py - pt, px - pl);
                                 let idx = ((ni * c + ci) * h + iy) * w + ix;
                                 let v = input_c.data[idx];
-                                if v > max_v { max_v = v; max_idx = Some(idx); }
+                                if v > max_v {
+                                    max_v = v;
+                                    max_idx = Some(idx);
+                                }
                             }
                         }
                     }
-                    if let Some(idx) = max_idx { grad[idx] += dy; }
+                    if let Some(idx) = max_idx {
+                        grad[idx] += dy;
+                    }
                 }
             }
         }
@@ -190,16 +234,29 @@ pub fn avg_pool2d_backward_nchw(
     strides: &[usize],
     pads: &[usize],
 ) -> Result<Tensor, TensorError> {
-    if input.shape.len() != 4 { return Err(TensorError { message: "AvgPoolBackward expects rank-4".to_string() }); }
+    if input.shape.len() != 4 {
+        return Err(TensorError {
+            message: "AvgPoolBackward expects rank-4".to_string(),
+        });
+    }
     let input_c = input.make_contiguous()?;
     let upstream_c = upstream.make_contiguous()?;
 
-    let (n, c, h, w) = (input_c.shape[0], input_c.shape[1], input_c.shape[2], input_c.shape[3]);
+    let (n, c, h, w) = (
+        input_c.shape[0],
+        input_c.shape[1],
+        input_c.shape[2],
+        input_c.shape[3],
+    );
     let kh = kernel_shape[0];
     let kw = kernel_shape[1];
     let sh = strides.first().copied().unwrap_or(1);
     let sw = strides.get(1).copied().unwrap_or(1);
-    let (pt, pl, _pb, _pr) = if pads.is_empty() { (0, 0, 0, 0) } else { (pads[0], pads[1], pads[2], pads[3]) };
+    let (pt, pl, _pb, _pr) = if pads.is_empty() {
+        (0, 0, 0, 0)
+    } else {
+        (pads[0], pads[1], pads[2], pads[3])
+    };
 
     let h_padded = h + pt + (if pads.len() == 4 { pads[2] } else { 0 });
     let w_padded = w + pl + (if pads.len() == 4 { pads[3] } else { 0 });
@@ -218,7 +275,9 @@ pub fn avg_pool2d_backward_nchw(
                     for ky in 0..kh {
                         for kx in 0..kw {
                             let (py, px) = (y0 + ky, x0 + kx);
-                            if py >= pt && py < pt + h && px >= pl && px < pl + w { count += 1; }
+                            if py >= pt && py < pt + h && px >= pl && px < pl + w {
+                                count += 1;
+                            }
                         }
                     }
                     if count > 0 {
@@ -240,10 +299,20 @@ pub fn avg_pool2d_backward_nchw(
     Tensor::new(input_c.shape.clone(), grad)
 }
 
-pub fn conv2d_backward_input(input: &Tensor, kernel: &Tensor, grad_output: &Tensor) -> Result<Tensor, TensorError> {
-    let (input_c, k_c, go_c) = (input.make_contiguous()?, kernel.make_contiguous()?, grad_output.make_contiguous()?);
+pub fn conv2d_backward_input(
+    input: &Tensor,
+    kernel: &Tensor,
+    grad_output: &Tensor,
+) -> Result<Tensor, TensorError> {
+    let (input_c, k_c, go_c) = (
+        input.make_contiguous()?,
+        kernel.make_contiguous()?,
+        grad_output.make_contiguous()?,
+    );
     if input_c.shape.len() != 2 || k_c.shape.len() != 2 || go_c.shape.len() != 2 {
-        return Err(TensorError { message: "Conv2d_backward_input expects 2D tensors".to_string() });
+        return Err(TensorError {
+            message: "Conv2d_backward_input expects 2D tensors".to_string(),
+        });
     }
     let (in_h, in_w) = (input_c.shape[0], input_c.shape[1]);
     let (kh, kw) = (k_c.shape[0], k_c.shape[1]);
@@ -266,10 +335,16 @@ pub fn conv2d_backward_input(input: &Tensor, kernel: &Tensor, grad_output: &Tens
     Tensor::new(input_c.shape.clone(), grad_input)
 }
 
-pub fn conv2d_backward_weight(input: &Tensor, kernel_shape: Vec<usize>, grad_output: &Tensor) -> Result<Tensor, TensorError> {
+pub fn conv2d_backward_weight(
+    input: &Tensor,
+    kernel_shape: Vec<usize>,
+    grad_output: &Tensor,
+) -> Result<Tensor, TensorError> {
     let (input_c, go_c) = (input.make_contiguous()?, grad_output.make_contiguous()?);
     if input_c.shape.len() != 2 || kernel_shape.len() != 2 || go_c.shape.len() != 2 {
-        return Err(TensorError { message: "Conv2d_backward_weight expects 2D tensors".to_string() });
+        return Err(TensorError {
+            message: "Conv2d_backward_weight expects 2D tensors".to_string(),
+        });
     }
     let (in_h, in_w) = (input_c.shape[0], input_c.shape[1]);
     let (kh, kw) = (kernel_shape[0], kernel_shape[1]);
@@ -305,7 +380,9 @@ pub fn conv_transpose2d(
     let inp = input.make_contiguous()?;
     let w = weight.make_contiguous()?;
     if inp.shape.len() != 2 || w.shape.len() != 2 {
-        return Err(TensorError { message: "ConvTranspose2D expects 2D input and kernel".to_string() });
+        return Err(TensorError {
+            message: "ConvTranspose2D expects 2D input and kernel".to_string(),
+        });
     }
     let (in_h, in_w) = (inp.shape[0], inp.shape[1]);
     let (kh, kw) = (w.shape[0], w.shape[1]);
@@ -349,11 +426,19 @@ pub fn conv_transpose2d_nchw(
     let inp = input.make_contiguous()?;
     let w = weight.make_contiguous()?;
     if inp.shape.len() != 4 || w.shape.len() != 4 {
-        return Err(TensorError { message: "ConvTranspose2DNCHW expects rank-4 input and weight [C_in,C_out,kH,kW]".to_string() });
+        return Err(TensorError {
+            message: "ConvTranspose2DNCHW expects rank-4 input and weight [C_in,C_out,kH,kW]"
+                .to_string(),
+        });
     }
     let (n, c_in, in_h, in_w) = (inp.shape[0], inp.shape[1], inp.shape[2], inp.shape[3]);
     if w.shape[0] != c_in {
-        return Err(TensorError { message: format!("ConvTranspose2D weight C_in={} != input C={}", w.shape[0], c_in) });
+        return Err(TensorError {
+            message: format!(
+                "ConvTranspose2D weight C_in={} != input C={}",
+                w.shape[0], c_in
+            ),
+        });
     }
     let (c_out, kh, kw) = (w.shape[1], w.shape[2], w.shape[3]);
     let (sh, sw) = stride;
@@ -377,8 +462,11 @@ pub fn conv_transpose2d_nchw(
                                     let r = out_i - ph;
                                     let oc = out_j - pw;
                                     if r < out_h && oc < out_w {
-                                        out[((ni * c_out + co) * out_h + r) * out_w + oc] +=
-                                            val * w.data[ci * c_out * kh * kw + co * kh * kw + ki * kw + kj];
+                                        out[((ni * c_out + co) * out_h + r) * out_w + oc] += val
+                                            * w.data[ci * c_out * kh * kw
+                                                + co * kh * kw
+                                                + ki * kw
+                                                + kj];
                                     }
                                 }
                             }
@@ -393,10 +481,16 @@ pub fn conv_transpose2d_nchw(
 
 /// Upsample 2D — Nearest neighbor interpolation.
 /// input: [N, C, H, W], scale_h and scale_w are integer scale factors.
-pub fn upsample_nearest2d(input: &Tensor, scale_h: usize, scale_w: usize) -> Result<Tensor, TensorError> {
+pub fn upsample_nearest2d(
+    input: &Tensor,
+    scale_h: usize,
+    scale_w: usize,
+) -> Result<Tensor, TensorError> {
     let inp = input.make_contiguous()?;
     if inp.shape.len() != 4 {
-        return Err(TensorError { message: "Upsample expects rank-4 NCHW input".to_string() });
+        return Err(TensorError {
+            message: "Upsample expects rank-4 NCHW input".to_string(),
+        });
     }
     let (n, c, h, w) = (inp.shape[0], inp.shape[1], inp.shape[2], inp.shape[3]);
     let (out_h, out_w) = (h * scale_h, w * scale_w);
@@ -418,10 +512,16 @@ pub fn upsample_nearest2d(input: &Tensor, scale_h: usize, scale_w: usize) -> Res
 
 /// Upsample 2D — Bilinear interpolation.
 /// scale_h, scale_w: float scale factors.
-pub fn upsample_bilinear2d(input: &Tensor, scale_h: f32, scale_w: f32) -> Result<Tensor, TensorError> {
+pub fn upsample_bilinear2d(
+    input: &Tensor,
+    scale_h: f32,
+    scale_w: f32,
+) -> Result<Tensor, TensorError> {
     let inp = input.make_contiguous()?;
     if inp.shape.len() != 4 {
-        return Err(TensorError { message: "UpsampleBilinear expects rank-4 NCHW input".to_string() });
+        return Err(TensorError {
+            message: "UpsampleBilinear expects rank-4 NCHW input".to_string(),
+        });
     }
     let (n, c, h, w) = (inp.shape[0], inp.shape[1], inp.shape[2], inp.shape[3]);
     let out_h = (h as f32 * scale_h).round() as usize;
@@ -443,8 +543,10 @@ pub fn upsample_bilinear2d(input: &Tensor, scale_h: f32, scale_w: f32) -> Result
                     let dx = src_x - x0 as f32;
 
                     let clamp = |v: isize, max: usize| v.max(0).min(max as isize - 1) as usize;
-                    let y0c = clamp(y0, h); let y1c = clamp(y1, h);
-                    let x0c = clamp(x0, w); let x1c = clamp(x1, w);
+                    let y0c = clamp(y0, h);
+                    let y1c = clamp(y1, h);
+                    let x0c = clamp(x0, w);
+                    let x1c = clamp(x1, w);
 
                     let base = (ni * c + ci) * h;
                     let v00 = inp.data[(base + y0c) * w + x0c];
@@ -453,9 +555,9 @@ pub fn upsample_bilinear2d(input: &Tensor, scale_h: f32, scale_w: f32) -> Result
                     let v11 = inp.data[(base + y1c) * w + x1c];
 
                     let val = v00 * (1.0 - dy) * (1.0 - dx)
-                            + v01 * (1.0 - dy) * dx
-                            + v10 * dy * (1.0 - dx)
-                            + v11 * dy * dx;
+                        + v01 * (1.0 - dy) * dx
+                        + v10 * dy * (1.0 - dx)
+                        + v11 * dy * dx;
 
                     out[((ni * c + ci) * out_h + i) * out_w + j] = val;
                 }
@@ -466,10 +568,18 @@ pub fn upsample_bilinear2d(input: &Tensor, scale_h: f32, scale_w: f32) -> Result
 }
 
 /// Upsample backward (nearest neighbor) — scatter gradient back to source pixels.
-pub fn upsample_nearest2d_backward(upstream: &Tensor, orig_h: usize, orig_w: usize, scale_h: usize, scale_w: usize) -> Result<Tensor, TensorError> {
+pub fn upsample_nearest2d_backward(
+    upstream: &Tensor,
+    orig_h: usize,
+    orig_w: usize,
+    scale_h: usize,
+    scale_w: usize,
+) -> Result<Tensor, TensorError> {
     let up = upstream.make_contiguous()?;
     if up.shape.len() != 4 {
-        return Err(TensorError { message: "UpsampleNearestBackward expects rank-4 input".to_string() });
+        return Err(TensorError {
+            message: "UpsampleNearestBackward expects rank-4 input".to_string(),
+        });
     }
     let (n, c, out_h, out_w) = (up.shape[0], up.shape[1], up.shape[2], up.shape[3]);
     let mut grad = vec![0.0_f32; n * c * orig_h * orig_w];
@@ -506,17 +616,26 @@ pub fn depthwise_separable_conv_nchw(
 ) -> Result<Tensor, TensorError> {
     if input.shape.len() != 4 {
         return Err(TensorError {
-            message: format!("DepthwiseSeparableConv expects rank-4 NCHW input, got {:?}", input.shape),
+            message: format!(
+                "DepthwiseSeparableConv expects rank-4 NCHW input, got {:?}",
+                input.shape
+            ),
         });
     }
     if dw_weight.shape.len() != 3 {
         return Err(TensorError {
-            message: format!("DepthwiseSeparableConv dw_weight must be rank-3 [C, kH, kW], got {:?}", dw_weight.shape),
+            message: format!(
+                "DepthwiseSeparableConv dw_weight must be rank-3 [C, kH, kW], got {:?}",
+                dw_weight.shape
+            ),
         });
     }
     if pw_weight.shape.len() != 2 {
         return Err(TensorError {
-            message: format!("DepthwiseSeparableConv pw_weight must be rank-2 [C_out, C], got {:?}", pw_weight.shape),
+            message: format!(
+                "DepthwiseSeparableConv pw_weight must be rank-2 [C_out, C], got {:?}",
+                pw_weight.shape
+            ),
         });
     }
 
@@ -549,10 +668,14 @@ pub fn depthwise_separable_conv_nchw(
                         for kx in 0..kw {
                             let iy = oy * str_h + ky;
                             let ix = ox * str_w + kx;
-                            if iy < pad_h || ix < pad_w { continue; }
+                            if iy < pad_h || ix < pad_w {
+                                continue;
+                            }
                             let iy = iy - pad_h;
                             let ix = ix - pad_w;
-                            if iy >= h || ix >= w { continue; }
+                            if iy >= h || ix >= w {
+                                continue;
+                            }
                             let inp_idx = ((ni * c + ci) * h + iy) * w + ix;
                             let ker_idx = (ci * kh + ky) * kw + kx;
                             acc += input.data[inp_idx] * dw_weight.data[ker_idx];

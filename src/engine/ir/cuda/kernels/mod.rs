@@ -2,11 +2,11 @@ pub mod add;
 pub mod backward;
 pub mod batchnorm;
 pub mod conv;
+pub mod layernorm;
 pub mod matmul;
 pub mod pool;
 pub mod relu;
 pub mod softmax;
-pub mod layernorm;
 
 use crate::ir::{KernelKind, NodeId};
 

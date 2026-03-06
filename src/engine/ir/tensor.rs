@@ -9,9 +9,7 @@ use std::sync::Arc;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
-use crate::engine::ir::kernels::{
-    activations, math, norm, reduce, utils,
-};
+use crate::engine::ir::kernels::{activations, math, norm, reduce, utils};
 
 /// Maximum number of elements allowed in a single tensor (512 Mi f32 = 2 GiB).
 /// Exceeding this limit returns a `TensorError` instead of attempting allocation.
@@ -34,7 +32,9 @@ pub struct Tensor {
 
 impl PartialEq for Tensor {
     fn eq(&self, other: &Self) -> bool {
-        if self.shape != other.shape { return false; }
+        if self.shape != other.shape {
+            return false;
+        }
 
         // Logical comparison following strides.
         let self_contig = self.make_contiguous().unwrap();
@@ -140,8 +140,12 @@ impl Tensor {
     /// Returns true if the tensor elements are stored contiguously in memory (C-style)
     /// and the offset is zero (starts at the beginning of the storage).
     pub fn is_contiguous(&self) -> bool {
-        if self.offset != 0 { return false; }
-        if self.shape.is_empty() { return true; }
+        if self.offset != 0 {
+            return false;
+        }
+        if self.shape.is_empty() {
+            return true;
+        }
         let mut acc = 1;
         for i in (0..self.shape.len()).rev() {
             if self.shape[i] > 1 && self.strides[i] != acc {
@@ -195,7 +199,7 @@ impl Tensor {
             message: "Invalid tensor shape: overflow while computing element count".to_string(),
         })?;
         if new_count != self.logical_len() {
-             return Err(TensorError {
+            return Err(TensorError {
                 message: format!(
                     "Shape mismatch in reshape: current size {} vs new size {}",
                     self.logical_len(),
@@ -242,7 +246,12 @@ impl Tensor {
     }
 
     /// O(1) Slice.
-    pub fn slice(&self, starts: &[usize], ends: &[usize], axes: &[usize]) -> Result<Self, TensorError> {
+    pub fn slice(
+        &self,
+        starts: &[usize],
+        ends: &[usize],
+        axes: &[usize],
+    ) -> Result<Self, TensorError> {
         if starts.len() != ends.len() || starts.len() != axes.len() {
             return Err(TensorError {
                 message: "slice starts/ends/axes lengths must match".to_string(),
@@ -258,10 +267,14 @@ impl Tensor {
             let end = ends[i];
 
             if axis >= self.shape.len() {
-                return Err(TensorError { message: format!("slice axis {axis} out of bounds") });
+                return Err(TensorError {
+                    message: format!("slice axis {axis} out of bounds"),
+                });
             }
             if start > end || end > self.shape[axis] {
-                return Err(TensorError { message: format!("invalid slice range for axis {axis}") });
+                return Err(TensorError {
+                    message: format!("invalid slice range for axis {axis}"),
+                });
             }
 
             new_offset += start * self.strides[axis];
@@ -278,17 +291,37 @@ impl Tensor {
 
     // ── Kernel Wrappers ──
 
-    pub fn add(&self, other: &Self) -> Result<Self, TensorError> { math::add(self, other) }
-    pub fn sub(&self, other: &Self) -> Result<Self, TensorError> { math::sub(self, other) }
-    pub fn mul_elementwise(&self, other: &Self) -> Result<Self, TensorError> { math::mul_elementwise(self, other) }
-    pub fn matmul(&self, other: &Self) -> Result<Self, TensorError> { math::matmul(self, other) }
+    pub fn add(&self, other: &Self) -> Result<Self, TensorError> {
+        math::add(self, other)
+    }
+    pub fn sub(&self, other: &Self) -> Result<Self, TensorError> {
+        math::sub(self, other)
+    }
+    pub fn mul_elementwise(&self, other: &Self) -> Result<Self, TensorError> {
+        math::mul_elementwise(self, other)
+    }
+    pub fn matmul(&self, other: &Self) -> Result<Self, TensorError> {
+        math::matmul(self, other)
+    }
 
-    pub fn add_broadcast(&self, other: &Self) -> Result<Self, TensorError> { utils::elementwise_broadcast_binary(self, other, "add_broadcast", |a, b| Ok(a + b)) }
-    pub fn sub_broadcast(&self, other: &Self) -> Result<Self, TensorError> { utils::elementwise_broadcast_binary(self, other, "sub_broadcast", |a, b| Ok(a - b)) }
-    pub fn mul_broadcast(&self, other: &Self) -> Result<Self, TensorError> { utils::elementwise_broadcast_binary(self, other, "mul_broadcast", |a, b| Ok(a * b)) }
+    pub fn add_broadcast(&self, other: &Self) -> Result<Self, TensorError> {
+        utils::elementwise_broadcast_binary(self, other, "add_broadcast", |a, b| Ok(a + b))
+    }
+    pub fn sub_broadcast(&self, other: &Self) -> Result<Self, TensorError> {
+        utils::elementwise_broadcast_binary(self, other, "sub_broadcast", |a, b| Ok(a - b))
+    }
+    pub fn mul_broadcast(&self, other: &Self) -> Result<Self, TensorError> {
+        utils::elementwise_broadcast_binary(self, other, "mul_broadcast", |a, b| Ok(a * b))
+    }
     pub fn div_broadcast(&self, other: &Self) -> Result<Self, TensorError> {
         utils::elementwise_broadcast_binary(self, other, "div_broadcast", |a, b| {
-            if b == 0.0 { Err(TensorError { message: "Division by zero".to_string() }) } else { Ok(a / b) }
+            if b == 0.0 {
+                Err(TensorError {
+                    message: "Division by zero".to_string(),
+                })
+            } else {
+                Ok(a / b)
+            }
         })
     }
 
@@ -298,38 +331,78 @@ impl Tensor {
             let data = &contig.data;
             #[cfg(feature = "parallel")]
             {
-                if utils::should_par(data.len()) { data.par_iter().map(|v| v * factor).collect() }
-                else { data.iter().map(|v| v * factor).collect() }
+                if utils::should_par(data.len()) {
+                    data.par_iter().map(|v| v * factor).collect()
+                } else {
+                    data.iter().map(|v| v * factor).collect()
+                }
             }
             #[cfg(not(feature = "parallel"))]
-            { data.iter().map(|v| v * factor).collect() }
+            {
+                data.iter().map(|v| v * factor).collect()
+            }
         };
         Self::new(self.shape.clone(), out)
     }
 
     pub fn add_inplace_scaled(&mut self, grad: &Self, scale: f32) -> Result<(), TensorError> {
-        if self.shape != grad.shape { return Err(TensorError { message: "shape mismatch".to_string() }); }
-        if !self.is_contiguous() { *self = self.make_contiguous()?; }
+        if self.shape != grad.shape {
+            return Err(TensorError {
+                message: "shape mismatch".to_string(),
+            });
+        }
+        if !self.is_contiguous() {
+            *self = self.make_contiguous()?;
+        }
         let data = Arc::make_mut(&mut self.data);
         let grad_contig = grad.make_contiguous()?;
-        for (value, delta) in data.iter_mut().zip(grad_contig.data.iter()) { *value += *delta * scale; }
+        for (value, delta) in data.iter_mut().zip(grad_contig.data.iter()) {
+            *value += *delta * scale;
+        }
         Ok(())
     }
 
-    pub fn neg_elementwise(&self) -> Result<Self, TensorError> { math::neg_elementwise(self) }
-    pub fn relu(&self) -> Result<Self, TensorError> { activations::relu(self) }
-    pub fn sigmoid(&self) -> Result<Self, TensorError> { activations::sigmoid(self) }
-    pub fn gelu(&self) -> Result<Self, TensorError> { activations::gelu(self) }
-    pub fn gelu_exact(&self) -> Result<Self, TensorError> { activations::gelu_exact(self) }
+    pub fn neg_elementwise(&self) -> Result<Self, TensorError> {
+        math::neg_elementwise(self)
+    }
+    pub fn relu(&self) -> Result<Self, TensorError> {
+        activations::relu(self)
+    }
+    pub fn sigmoid(&self) -> Result<Self, TensorError> {
+        activations::sigmoid(self)
+    }
+    pub fn gelu(&self) -> Result<Self, TensorError> {
+        activations::gelu(self)
+    }
+    pub fn gelu_exact(&self) -> Result<Self, TensorError> {
+        activations::gelu_exact(self)
+    }
 
-    pub fn log_elementwise(&self) -> Result<Self, TensorError> { math::log_elementwise(self) }
-    pub fn exp_elementwise(&self) -> Result<Self, TensorError> { math::exp_elementwise(self) }
+    pub fn log_elementwise(&self) -> Result<Self, TensorError> {
+        math::log_elementwise(self)
+    }
+    pub fn exp_elementwise(&self) -> Result<Self, TensorError> {
+        math::exp_elementwise(self)
+    }
 
-    pub fn layer_norm(&self, weight: &Self, bias: &Self, epsilon: f32) -> Result<Self, TensorError> { norm::layer_norm(self, weight, bias, epsilon) }
+    pub fn layer_norm(
+        &self,
+        weight: &Self,
+        bias: &Self,
+        epsilon: f32,
+    ) -> Result<Self, TensorError> {
+        norm::layer_norm(self, weight, bias, epsilon)
+    }
 
-    pub fn reduce_sum(&self, axis: Option<usize>) -> Result<Self, TensorError> { reduce::reduce_sum(self, axis) }
-    pub fn reduce_mean(&self, axis: Option<usize>) -> Result<Self, TensorError> { reduce::reduce_mean(self, axis) }
-    pub fn reduce_max(&self, axis: Option<usize>) -> Result<Self, TensorError> { reduce::reduce_max(self, axis) }
+    pub fn reduce_sum(&self, axis: Option<usize>) -> Result<Self, TensorError> {
+        reduce::reduce_sum(self, axis)
+    }
+    pub fn reduce_mean(&self, axis: Option<usize>) -> Result<Self, TensorError> {
+        reduce::reduce_mean(self, axis)
+    }
+    pub fn reduce_max(&self, axis: Option<usize>) -> Result<Self, TensorError> {
+        reduce::reduce_max(self, axis)
+    }
     pub fn reduce_sum_keepdims(&self, axis: Option<usize>) -> Result<Self, TensorError> {
         let target = utils::reduce_keepdims_shape(&self.shape, axis)?;
         self.reduce_sum(axis)?.reshape(target)
@@ -343,7 +416,9 @@ impl Tensor {
         self.reduce_max(axis)?.reshape(target)
     }
 
-    pub fn softmax(&self) -> Result<Self, TensorError> { reduce::softmax(self) }
+    pub fn softmax(&self) -> Result<Self, TensorError> {
+        reduce::softmax(self)
+    }
     pub fn mean(&self) -> Result<Self, TensorError> {
         let contig = self.make_contiguous()?;
         let sum: f32 = contig.data.iter().copied().sum();
@@ -351,30 +426,57 @@ impl Tensor {
     }
     pub fn argmax_axis_1(&self) -> Result<Vec<usize>, TensorError> {
         let contig = self.make_contiguous()?;
-        if contig.shape.len() != 2 { return Err(TensorError { message: "argmax_axis_1 expects rank-2".to_string() }); }
+        if contig.shape.len() != 2 {
+            return Err(TensorError {
+                message: "argmax_axis_1 expects rank-2".to_string(),
+            });
+        }
         let (batch, classes) = (contig.shape[0], contig.shape[1]);
         let mut out = Vec::with_capacity(batch);
         for i in 0..batch {
             let row = &contig.data[i * classes..(i + 1) * classes];
             let (mut max_idx, mut max_val) = (0, row[0]);
-            for (j, &val) in row.iter().enumerate().skip(1) { if val > max_val { max_val = val; max_idx = j; } }
+            for (j, &val) in row.iter().enumerate().skip(1) {
+                if val > max_val {
+                    max_val = val;
+                    max_idx = j;
+                }
+            }
             out.push(max_idx);
         }
         Ok(out)
     }
 
-    pub fn gemm(&self, rhs: &Self, bias: Option<&Self>, alpha: f32, beta: f32) -> Result<Self, TensorError> {
+    pub fn gemm(
+        &self,
+        rhs: &Self,
+        bias: Option<&Self>,
+        alpha: f32,
+        beta: f32,
+    ) -> Result<Self, TensorError> {
         let mut out = self.matmul(rhs)?;
-        if (alpha - 1.0).abs() > f32::EPSILON { out = out.scale(alpha)?; }
-        if let Some(b) = bias && beta != 0.0 {
-            let scaled_bias = if (beta - 1.0).abs() > f32::EPSILON { b.scale(beta)? } else { b.clone() };
+        if (alpha - 1.0).abs() > f32::EPSILON {
+            out = out.scale(alpha)?;
+        }
+        if let Some(b) = bias
+            && beta != 0.0
+        {
+            let scaled_bias = if (beta - 1.0).abs() > f32::EPSILON {
+                b.scale(beta)?
+            } else {
+                b.clone()
+            };
             out = out.add_broadcast(&scaled_bias)?;
         }
         Ok(out)
     }
 
-    pub fn concat(tensors: &[Self], axis: usize) -> Result<Self, TensorError> { math::concat(tensors, axis) }
-    pub fn gather(&self, indices: &[usize], axis: usize) -> Result<Self, TensorError> { math::gather(self, indices, axis) }
+    pub fn concat(tensors: &[Self], axis: usize) -> Result<Self, TensorError> {
+        math::concat(tensors, axis)
+    }
+    pub fn gather(&self, indices: &[usize], axis: usize) -> Result<Self, TensorError> {
+        math::gather(self, indices, axis)
+    }
 }
 
 #[cfg(test)]
@@ -437,7 +539,9 @@ mod tests {
         let a = Tensor::new(vec![1024], (0..1024).map(|i| i as f32).collect()).unwrap();
         let b = Tensor::new(vec![1024], (0..1024).map(|i| i as f32 * 2.0).collect()).unwrap();
         let res = a.add(&b).unwrap();
-        for (i, &v) in res.data.iter().enumerate() { assert!((v - i as f32 * 3.0).abs() < 1e-6); }
+        for (i, &v) in res.data.iter().enumerate() {
+            assert!((v - i as f32 * 3.0).abs() < 1e-6);
+        }
     }
 
     #[test]
@@ -455,7 +559,12 @@ mod tests {
         let b = Tensor::new(vec![1, 4], vec![10.0, 20.0, 30.0, 40.0]).unwrap();
         let out = a.add_broadcast(&b).unwrap();
         assert_eq!(out.shape, vec![3, 4]);
-        assert_eq!(*out.data, vec![11.0, 21.0, 31.0, 41.0, 12.0, 22.0, 32.0, 42.0, 13.0, 23.0, 33.0, 43.0]);
+        assert_eq!(
+            *out.data,
+            vec![
+                11.0, 21.0, 31.0, 41.0, 12.0, 22.0, 32.0, 42.0, 13.0, 23.0, 33.0, 43.0
+            ]
+        );
     }
 
     #[test]
@@ -499,7 +608,14 @@ mod tests {
         let w = Tensor::new(vec![3], vec![2.0, 2.0, 2.0]).unwrap();
         let b = Tensor::new(vec![3], vec![1.0, 1.0, 1.0]).unwrap();
         let out = x.layer_norm(&w, &b, 1e-5).unwrap();
-        let expected = vec![-1.449_489_7, 1.0, 3.449_489_8, -1.449_489_7, 1.0, 3.449_489_8];
+        let expected = vec![
+            -1.449_489_7,
+            1.0,
+            3.449_489_8,
+            -1.449_489_7,
+            1.0,
+            3.449_489_8,
+        ];
         assert_eq!(out.shape, vec![2, 3]);
         for (&got, &exp) in out.data.iter().zip(expected.iter()) {
             assert!((got - exp).abs() < 1e-4);

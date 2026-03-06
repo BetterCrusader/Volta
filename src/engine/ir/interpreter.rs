@@ -1,11 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::engine::ir::kernels::{
-    activations, arithmetic, conv, math, norm, reduce,
-};
+use crate::engine::ir::kernels::{activations, arithmetic, conv, math, norm, reduce};
 use crate::ir::tensor::Tensor;
-use crate::ir::{Graph, NodeId, Op, ValueId, build_schedule, ExecutionPhase};
+use crate::ir::{ExecutionPhase, Graph, NodeId, Op, ValueId, build_schedule};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RuntimeValue {
@@ -41,8 +39,7 @@ pub fn execute_with_context(
     })?;
 
     if let Some(target) = terminal_value_id(graph) {
-        execute_value_with_context_scheduled(graph, target, context, schedule.nodes())
-            .map(Some)
+        execute_value_with_context_scheduled(graph, target, context, schedule.nodes()).map(Some)
     } else {
         Ok(None)
     }
@@ -241,17 +238,25 @@ fn run_nodes_into_buffer_inner(
     skip_prefilled: bool,
 ) -> Result<(), InterpreterError> {
     for node_id in ordered_nodes {
-        let node = graph.node(*node_id).ok_or_else(|| error(format!("Invalid NodeId in schedule: {node_id:?}"), None))?;
+        let node = graph
+            .node(*node_id)
+            .ok_or_else(|| error(format!("Invalid NodeId in schedule: {node_id:?}"), None))?;
         let output_index = node.output.0;
         if output_index >= values.len() {
-            return Err(error(format!("Output ValueId out of range: {output_index}"), Some(node.id)));
+            return Err(error(
+                format!("Output ValueId out of range: {output_index}"),
+                Some(node.id),
+            ));
         }
         if values[output_index].is_some() {
             if skip_prefilled {
                 // Pre-filled with a saved activation — skip recomputation.
                 continue;
             }
-            return Err(error(format!("SSA violation: ValueId {output_index} assigned more than once"), Some(node.id)));
+            return Err(error(
+                format!("SSA violation: ValueId {output_index} assigned more than once"),
+                Some(node.id),
+            ));
         }
         if matches!(node.op, Op::Removed) {
             continue;
@@ -356,13 +361,17 @@ fn evaluate_op(
         }
         Op::Concat { inputs, axis } => {
             if inputs.len() < 2 {
-                return Err(error("concat requires at least two inputs".to_string(), Some(node_id)));
+                return Err(error(
+                    "concat requires at least two inputs".to_string(),
+                    Some(node_id),
+                ));
             }
             let mut tensors = Vec::with_capacity(inputs.len());
             for input in inputs {
                 tensors.push((*read_tensor(values, *input, node_id)?).clone());
             }
-            let out = math::concat(&tensors, *axis).map_err(|err| error(err.message, Some(node_id)))?;
+            let out =
+                math::concat(&tensors, *axis).map_err(|err| error(err.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
         Op::Gather {
@@ -375,38 +384,76 @@ fn evaluate_op(
                 .map_err(|err| error(err.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
-        Op::ConvTranspose2D { input, weight, stride, padding } => {
+        Op::ConvTranspose2D {
+            input,
+            weight,
+            stride,
+            padding,
+        } => {
             let input_t = read_tensor(values, *input, node_id)?;
             let weight_t = read_tensor(values, *weight, node_id)?;
             let out = crate::engine::ir::kernels::conv::conv_transpose2d_nchw(
-                &input_t, &weight_t, (stride[0], stride[1]), (padding[0], padding[1])
-            ).map_err(|e| error(e.message, Some(node_id)))?;
+                &input_t,
+                &weight_t,
+                (stride[0], stride[1]),
+                (padding[0], padding[1]),
+            )
+            .map_err(|e| error(e.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
-        Op::Upsample2D { input, scale_h, scale_w, mode } => {
+        Op::Upsample2D {
+            input,
+            scale_h,
+            scale_w,
+            mode,
+        } => {
             let input_t = read_tensor(values, *input, node_id)?;
             let out = if *mode == 0 {
                 crate::engine::ir::kernels::conv::upsample_nearest2d(
-                    &input_t, scale_h.round() as usize, scale_w.round() as usize
-                ).map_err(|e| error(e.message, Some(node_id)))?
+                    &input_t,
+                    scale_h.round() as usize,
+                    scale_w.round() as usize,
+                )
+                .map_err(|e| error(e.message, Some(node_id)))?
             } else {
                 crate::engine::ir::kernels::conv::upsample_bilinear2d(&input_t, *scale_h, *scale_w)
                     .map_err(|e| error(e.message, Some(node_id)))?
             };
             Ok(runtime_from_tensor(out))
         }
-        Op::Upsample2DBackward { upstream, orig_h, orig_w, scale_h, scale_w } => {
+        Op::Upsample2DBackward {
+            upstream,
+            orig_h,
+            orig_w,
+            scale_h,
+            scale_w,
+        } => {
             let upstream_t = read_tensor(values, *upstream, node_id)?;
             let out = crate::engine::ir::kernels::conv::upsample_nearest2d_backward(
-                &upstream_t, *orig_h, *orig_w, *scale_h, *scale_w
-            ).map_err(|e| error(e.message, Some(node_id)))?;
+                &upstream_t,
+                *orig_h,
+                *orig_w,
+                *scale_h,
+                *scale_w,
+            )
+            .map_err(|e| error(e.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
         Op::MultiHeadAttention {
-            q_input, k_input, v_input,
-            w_q, w_k, w_v, w_o,
-            bias_q, bias_k, bias_v, bias_o,
-            num_heads, causal, output_idx
+            q_input,
+            k_input,
+            v_input,
+            w_q,
+            w_k,
+            w_v,
+            w_o,
+            bias_q,
+            bias_k,
+            bias_v,
+            bias_o,
+            num_heads,
+            causal,
+            output_idx,
         } => {
             let qt = read_tensor(values, *q_input, node_id)?;
             let kt = read_tensor(values, *k_input, node_id)?;
@@ -420,9 +467,9 @@ fn evaluate_op(
             let bvt = read_tensor(values, *bias_v, node_id)?;
             let bot = read_tensor(values, *bias_o, node_id)?;
             let out = crate::engine::ir::kernels::attention::multi_head_attention(
-                &qt, &kt, &vt, &wqt, &wkt, &wvt, &wot,
-                &bqt, &bkt, &bvt, &bot, *num_heads, *causal
-            ).map_err(|e| error(e.message, Some(node_id)))?;
+                &qt, &kt, &vt, &wqt, &wkt, &wvt, &wot, &bqt, &bkt, &bvt, &bot, *num_heads, *causal,
+            )
+            .map_err(|e| error(e.message, Some(node_id)))?;
             let tensor = match output_idx {
                 0 => out.output,
                 1 => out.attn_weights,
@@ -430,7 +477,12 @@ fn evaluate_op(
                 3 => out.k_proj,
                 4 => out.v_proj,
                 5 => out.context,
-                _ => return Err(error("MultiHeadAttention invalid output_idx".to_string(), Some(node_id))),
+                _ => {
+                    return Err(error(
+                        "MultiHeadAttention invalid output_idx".to_string(),
+                        Some(node_id),
+                    ));
+                }
             };
             Ok(runtime_from_tensor(tensor))
         }
@@ -459,7 +511,11 @@ fn evaluate_op(
                 .map_err(|e| error(e.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
-        Op::EmbeddingBackward { weight, indices, upstream } => {
+        Op::EmbeddingBackward {
+            weight,
+            indices,
+            upstream,
+        } => {
             let weight_t = read_tensor(values, *weight, node_id)?;
             let indices_t = read_tensor(values, *indices, node_id)?;
             let upstream_t = read_tensor(values, *upstream, node_id)?;
@@ -467,7 +523,15 @@ fn evaluate_op(
                 .map_err(|e| error(e.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
-        Op::LstmCell { x, h_prev, c_prev, weight_ih, weight_hh, bias, output_idx } => {
+        Op::LstmCell {
+            x,
+            h_prev,
+            c_prev,
+            weight_ih,
+            weight_hh,
+            bias,
+            output_idx,
+        } => {
             let x_t = read_tensor(values, *x, node_id)?;
             let h_t = read_tensor(values, *h_prev, node_id)?;
             let c_t = read_tensor(values, *c_prev, node_id)?;
@@ -481,11 +545,27 @@ fn evaluate_op(
                 1 => out.c_next,
                 2 => out.gates_raw,
                 3 => out.tanh_c_next,
-                _ => return Err(error("LstmCell invalid output_idx".to_string(), Some(node_id))),
+                _ => {
+                    return Err(error(
+                        "LstmCell invalid output_idx".to_string(),
+                        Some(node_id),
+                    ));
+                }
             };
             Ok(runtime_from_tensor(tensor))
         }
-        Op::LstmCellBackward { x, h_prev, c_prev, weight_ih, weight_hh, gates_raw, tanh_c_next, dh_next, dc_next, grad_target } => {
+        Op::LstmCellBackward {
+            x,
+            h_prev,
+            c_prev,
+            weight_ih,
+            weight_hh,
+            gates_raw,
+            tanh_c_next,
+            dh_next,
+            dc_next,
+            grad_target,
+        } => {
             let x_t = read_tensor(values, *x, node_id)?;
             let h_t = read_tensor(values, *h_prev, node_id)?;
             let c_t = read_tensor(values, *c_prev, node_id)?;
@@ -496,8 +576,9 @@ fn evaluate_op(
             let dhn = read_tensor(values, *dh_next, node_id)?;
             let dcn = read_tensor(values, *dc_next, node_id)?;
             let grads = crate::engine::ir::kernels::rnn::lstm_cell_backward(
-                &x_t, &h_t, &c_t, &wih, &whh, &gr, &tc, &dhn, &dcn
-            ).map_err(|e| error(e.message, Some(node_id)))?;
+                &x_t, &h_t, &c_t, &wih, &whh, &gr, &tc, &dhn, &dcn,
+            )
+            .map_err(|e| error(e.message, Some(node_id)))?;
             let tensor = match grad_target {
                 0 => grads.dx,
                 1 => grads.dh_prev,
@@ -505,11 +586,24 @@ fn evaluate_op(
                 3 => grads.dweight_ih,
                 4 => grads.dweight_hh,
                 5 => grads.dbias,
-                _ => return Err(error("LstmCellBackward invalid grad_target".to_string(), Some(node_id))),
+                _ => {
+                    return Err(error(
+                        "LstmCellBackward invalid grad_target".to_string(),
+                        Some(node_id),
+                    ));
+                }
             };
             Ok(runtime_from_tensor(tensor))
         }
-        Op::GruCell { x, h_prev, weight_ih, weight_hh, bias_ih, bias_hh, output_idx } => {
+        Op::GruCell {
+            x,
+            h_prev,
+            weight_ih,
+            weight_hh,
+            bias_ih,
+            bias_hh,
+            output_idx,
+        } => {
             let x_t = read_tensor(values, *x, node_id)?;
             let h_t = read_tensor(values, *h_prev, node_id)?;
             let wih = read_tensor(values, *weight_ih, node_id)?;
@@ -523,11 +617,26 @@ fn evaluate_op(
                 1 => out.z_gate,
                 2 => out.r_gate,
                 3 => out.n_gate,
-                _ => return Err(error("GruCell invalid output_idx".to_string(), Some(node_id))),
+                _ => {
+                    return Err(error(
+                        "GruCell invalid output_idx".to_string(),
+                        Some(node_id),
+                    ));
+                }
             };
             Ok(runtime_from_tensor(tensor))
         }
-        Op::GruCellBackward { x, h_prev, weight_ih, weight_hh, z_gate, r_gate, n_gate, dh_next, grad_target } => {
+        Op::GruCellBackward {
+            x,
+            h_prev,
+            weight_ih,
+            weight_hh,
+            z_gate,
+            r_gate,
+            n_gate,
+            dh_next,
+            grad_target,
+        } => {
             let x_t = read_tensor(values, *x, node_id)?;
             let h_t = read_tensor(values, *h_prev, node_id)?;
             let wih = read_tensor(values, *weight_ih, node_id)?;
@@ -537,8 +646,9 @@ fn evaluate_op(
             let n = read_tensor(values, *n_gate, node_id)?;
             let dhn = read_tensor(values, *dh_next, node_id)?;
             let grads = crate::engine::ir::kernels::rnn::gru_cell_backward(
-                &x_t, &h_t, &wih, &whh, &z, &r, &n, &dhn
-            ).map_err(|e| error(e.message, Some(node_id)))?;
+                &x_t, &h_t, &wih, &whh, &z, &r, &n, &dhn,
+            )
+            .map_err(|e| error(e.message, Some(node_id)))?;
             let tensor = match grad_target {
                 0 => grads.dx,
                 1 => grads.dh_prev,
@@ -546,7 +656,12 @@ fn evaluate_op(
                 3 => grads.dweight_hh,
                 4 => grads.dbias_ih,
                 5 => grads.dbias_hh,
-                _ => return Err(error("GruCellBackward invalid grad_target".to_string(), Some(node_id))),
+                _ => {
+                    return Err(error(
+                        "GruCellBackward invalid grad_target".to_string(),
+                        Some(node_id),
+                    ));
+                }
             };
             Ok(runtime_from_tensor(tensor))
         }
@@ -572,8 +687,7 @@ fn evaluate_op(
         Op::MatMul(left, right) => {
             let lhs = read_tensor(values, *left, node_id)?;
             let rhs = read_tensor(values, *right, node_id)?;
-            let out = math::matmul(&lhs, &rhs)
-                .map_err(|err| error(err.message, Some(node_id)))?;
+            let out = math::matmul(&lhs, &rhs).map_err(|err| error(err.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
         Op::Plugin { operator, inputs } => {
@@ -581,12 +695,12 @@ fn evaluate_op(
             for input in inputs {
                 input_values.push(read_value(values, *input, Some(node_id))?);
             }
-            operator
-                .execute(&input_values, context)
+            operator.execute(&input_values, context)
         }
         Op::Relu(value) => {
             let tensor = read_tensor(values, *value, node_id)?;
-            let out = activations::relu(&tensor).map_err(|err| error(err.message, Some(node_id)))?;
+            let out =
+                activations::relu(&tensor).map_err(|err| error(err.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
         Op::ReluBackward(input, grad) => {
@@ -598,35 +712,37 @@ fn evaluate_op(
         }
         Op::Softmax(value) => {
             let tensor = read_tensor(values, *value, node_id)?;
-            let out = reduce::softmax(&tensor)
-                .map_err(|err| error(err.message, Some(node_id)))?;
+            let out = reduce::softmax(&tensor).map_err(|err| error(err.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
         Op::Log(value) => {
             let tensor = read_tensor(values, *value, node_id)?;
-            let out = math::log_elementwise(&tensor)
-                .map_err(|err| error(err.message, Some(node_id)))?;
+            let out =
+                math::log_elementwise(&tensor).map_err(|err| error(err.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
         Op::Exp(value) => {
             let tensor = read_tensor(values, *value, node_id)?;
-            let out = math::exp_elementwise(&tensor)
-                .map_err(|err| error(err.message, Some(node_id)))?;
+            let out =
+                math::exp_elementwise(&tensor).map_err(|err| error(err.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
         Op::Sigmoid(value) => {
             let tensor = read_tensor(values, *value, node_id)?;
-            let out = activations::sigmoid(&tensor).map_err(|err| error(err.message, Some(node_id)))?;
+            let out =
+                activations::sigmoid(&tensor).map_err(|err| error(err.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
         Op::Gelu(value) => {
             let tensor = read_tensor(values, *value, node_id)?;
-            let out = activations::gelu(&tensor).map_err(|err| error(err.message, Some(node_id)))?;
+            let out =
+                activations::gelu(&tensor).map_err(|err| error(err.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
         Op::GeluExact(value) => {
             let tensor = read_tensor(values, *value, node_id)?;
-            let out = activations::gelu_exact(&tensor).map_err(|err| error(err.message, Some(node_id)))?;
+            let out = activations::gelu_exact(&tensor)
+                .map_err(|err| error(err.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
         Op::SigmoidBackward(input, grad) => {
@@ -778,37 +894,81 @@ fn evaluate_op(
             let input_tensor = read_tensor(values, *input, node_id)?;
             let weight_tensor = read_tensor(values, *weight, node_id)?;
             let grad_tensor = read_tensor(values, *grad, node_id)?;
-            let out = conv::conv2d_backward_weight(&input_tensor, weight_tensor.shape.clone(), &grad_tensor)
-                .map_err(|err| error(err.message, Some(node_id)))?;
+            let out = conv::conv2d_backward_weight(
+                &input_tensor,
+                weight_tensor.shape.clone(),
+                &grad_tensor,
+            )
+            .map_err(|err| error(err.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
-        Op::MaxPool { input, kernel_shape, strides, pads } => {
+        Op::MaxPool {
+            input,
+            kernel_shape,
+            strides,
+            pads,
+        } => {
             let input_tensor = read_tensor(values, *input, node_id)?;
             let out = conv::pool2d_nchw(&input_tensor, kernel_shape, strides, pads, true)
                 .map_err(|err| error(err.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
-        Op::AvgPool { input, kernel_shape, strides, pads } => {
+        Op::AvgPool {
+            input,
+            kernel_shape,
+            strides,
+            pads,
+        } => {
             let input_tensor = read_tensor(values, *input, node_id)?;
             let out = conv::pool2d_nchw(&input_tensor, kernel_shape, strides, pads, false)
                 .map_err(|err| error(err.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
-        Op::MaxPoolBackward { input, upstream, kernel_shape, strides, pads } => {
+        Op::MaxPoolBackward {
+            input,
+            upstream,
+            kernel_shape,
+            strides,
+            pads,
+        } => {
             let input_tensor = read_tensor(values, *input, node_id)?;
             let upstream_tensor = read_tensor(values, *upstream, node_id)?;
-            let out = conv::max_pool2d_backward_nchw(&input_tensor, &upstream_tensor, kernel_shape, strides, pads)
-                .map_err(|err| error(err.message, Some(node_id)))?;
+            let out = conv::max_pool2d_backward_nchw(
+                &input_tensor,
+                &upstream_tensor,
+                kernel_shape,
+                strides,
+                pads,
+            )
+            .map_err(|err| error(err.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
-        Op::AvgPoolBackward { input, upstream, kernel_shape, strides, pads } => {
+        Op::AvgPoolBackward {
+            input,
+            upstream,
+            kernel_shape,
+            strides,
+            pads,
+        } => {
             let input_tensor = read_tensor(values, *input, node_id)?;
             let upstream_tensor = read_tensor(values, *upstream, node_id)?;
-            let out = conv::avg_pool2d_backward_nchw(&input_tensor, &upstream_tensor, kernel_shape, strides, pads)
-                .map_err(|err| error(err.message, Some(node_id)))?;
+            let out = conv::avg_pool2d_backward_nchw(
+                &input_tensor,
+                &upstream_tensor,
+                kernel_shape,
+                strides,
+                pads,
+            )
+            .map_err(|err| error(err.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
-        Op::BatchNorm { input, weight, bias, mean, var } => {
+        Op::BatchNorm {
+            input,
+            weight,
+            bias,
+            mean,
+            var,
+        } => {
             let input_t = read_tensor(values, *input, node_id)?;
             let weight_t = read_tensor(values, *weight, node_id)?;
             let bias_t = read_tensor(values, *bias, node_id)?;
@@ -818,22 +978,39 @@ fn evaluate_op(
                 .map_err(|err| error(err.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
-        Op::BatchNormBackwardInput { input, upstream, weight, var } => {
+        Op::BatchNormBackwardInput {
+            input,
+            upstream,
+            weight,
+            var,
+        } => {
             let input_t = read_tensor(values, *input, node_id)?;
             let upstream_t = read_tensor(values, *upstream, node_id)?;
             let weight_t = read_tensor(values, *weight, node_id)?;
             let var_t = read_tensor(values, *var, node_id)?;
-            let out = norm::batch_norm_backward_input_nchw(&input_t, &upstream_t, &weight_t, &var_t, 1e-5)
-                .map_err(|err| error(err.message, Some(node_id)))?;
+            let out = norm::batch_norm_backward_input_nchw(
+                &input_t,
+                &upstream_t,
+                &weight_t,
+                &var_t,
+                1e-5,
+            )
+            .map_err(|err| error(err.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
-        Op::BatchNormBackwardWeight { input, upstream, mean, var } => {
+        Op::BatchNormBackwardWeight {
+            input,
+            upstream,
+            mean,
+            var,
+        } => {
             let input_t = read_tensor(values, *input, node_id)?;
             let upstream_t = read_tensor(values, *upstream, node_id)?;
             let mean_t = read_tensor(values, *mean, node_id)?;
             let var_t = read_tensor(values, *var, node_id)?;
-            let out = norm::batch_norm_backward_weight_nchw(&input_t, &upstream_t, &mean_t, &var_t, 1e-5)
-                .map_err(|err| error(err.message, Some(node_id)))?;
+            let out =
+                norm::batch_norm_backward_weight_nchw(&input_t, &upstream_t, &mean_t, &var_t, 1e-5)
+                    .map_err(|err| error(err.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
         Op::BatchNormBackwardBias { upstream } => {
@@ -842,7 +1019,12 @@ fn evaluate_op(
                 .map_err(|err| error(err.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
-        Op::LayerNorm { input, weight, bias, epsilon } => {
+        Op::LayerNorm {
+            input,
+            weight,
+            bias,
+            epsilon,
+        } => {
             let input_t = read_tensor(values, *input, node_id)?;
             let weight_t = read_tensor(values, *weight, node_id)?;
             let bias_t = read_tensor(values, *bias, node_id)?;
@@ -850,7 +1032,12 @@ fn evaluate_op(
                 .map_err(|err| error(err.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
-        Op::LayerNormBackwardInput { input, upstream, weight, epsilon } => {
+        Op::LayerNormBackwardInput {
+            input,
+            upstream,
+            weight,
+            epsilon,
+        } => {
             let x = read_tensor(values, *input, node_id)?;
             let dy = read_tensor(values, *upstream, node_id)?;
             let w = read_tensor(values, *weight, node_id)?;
@@ -858,7 +1045,11 @@ fn evaluate_op(
                 .map_err(|err| error(err.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
-        Op::LayerNormBackwardWeight { input, upstream, epsilon } => {
+        Op::LayerNormBackwardWeight {
+            input,
+            upstream,
+            epsilon,
+        } => {
             let x = read_tensor(values, *input, node_id)?;
             let dy = read_tensor(values, *upstream, node_id)?;
             let out = norm::layer_norm_backward_weight(&x, &dy, *epsilon)
@@ -875,14 +1066,21 @@ fn evaluate_op(
             let tensor = read_tensor(values, *input, node_id)?;
             let left = tensor.shape[..*axis].iter().product::<usize>().max(1);
             let right = tensor.shape[*axis..].iter().product::<usize>().max(1);
-            let out = tensor.reshape(vec![left, right]).map_err(|err| error(err.message, Some(node_id)))?;
+            let out = tensor
+                .reshape(vec![left, right])
+                .map_err(|err| error(err.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
         Op::GlobalAveragePool { input } => {
             let tensor = read_tensor(values, *input, node_id)?;
-            let contig = tensor.make_contiguous().map_err(|e| error(e.message, Some(node_id)))?;
+            let contig = tensor
+                .make_contiguous()
+                .map_err(|e| error(e.message, Some(node_id)))?;
             if contig.shape.len() < 2 {
-                return Err(error("GlobalAveragePool expects at least rank-2 input".to_string(), Some(node_id)));
+                return Err(error(
+                    "GlobalAveragePool expects at least rank-2 input".to_string(),
+                    Some(node_id),
+                ));
             }
             let n = contig.shape[0];
             let c = contig.shape[1];
@@ -897,17 +1095,24 @@ fn evaluate_op(
                 }
             }
             // Output shape: [N, C] (flatten spatial dims)
-            let out = Tensor::new(vec![n, c], out_data)
-                .map_err(|e| error(e.message, Some(node_id)))?;
+            let out =
+                Tensor::new(vec![n, c], out_data).map_err(|e| error(e.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
         Op::GlobalAveragePoolBackward { input, upstream } => {
             let input_t = read_tensor(values, *input, node_id)?;
             let upstream_t = read_tensor(values, *upstream, node_id)?;
-            let contig = input_t.make_contiguous().map_err(|e| error(e.message, Some(node_id)))?;
-            let up_c = upstream_t.make_contiguous().map_err(|e| error(e.message, Some(node_id)))?;
+            let contig = input_t
+                .make_contiguous()
+                .map_err(|e| error(e.message, Some(node_id)))?;
+            let up_c = upstream_t
+                .make_contiguous()
+                .map_err(|e| error(e.message, Some(node_id)))?;
             if contig.shape.len() < 2 {
-                return Err(error("GlobalAveragePoolBackward expects at least rank-2 input".to_string(), Some(node_id)));
+                return Err(error(
+                    "GlobalAveragePoolBackward expects at least rank-2 input".to_string(),
+                    Some(node_id),
+                ));
             }
             let n = contig.shape[0];
             let c = contig.shape[1];
@@ -918,34 +1123,70 @@ fn evaluate_op(
                 for j in 0..c {
                     let g = up_c.data[i * c + j] * scale;
                     let base = (i * c + j) * spatial;
-                    for k in 0..spatial { grad[base + k] = g; }
+                    for k in 0..spatial {
+                        grad[base + k] = g;
+                    }
                 }
             }
             let out = Tensor::new(contig.shape.clone(), grad)
                 .map_err(|e| error(e.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
-        Op::GroupNorm { input, weight, bias, num_groups, epsilon } => {
+        Op::GroupNorm {
+            input,
+            weight,
+            bias,
+            num_groups,
+            epsilon,
+        } => {
             let input_t = read_tensor(values, *input, node_id)?;
             let weight_t = read_tensor(values, *weight, node_id)?;
             let bias_t = read_tensor(values, *bias, node_id)?;
-            let out = crate::engine::ir::kernels::norm::group_norm(&input_t, &weight_t, &bias_t, *num_groups, *epsilon)
-                .map_err(|e| error(e.message, Some(node_id)))?;
+            let out = crate::engine::ir::kernels::norm::group_norm(
+                &input_t,
+                &weight_t,
+                &bias_t,
+                *num_groups,
+                *epsilon,
+            )
+            .map_err(|e| error(e.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
-        Op::GroupNormBackwardInput { input, upstream, weight, num_groups, epsilon } => {
+        Op::GroupNormBackwardInput {
+            input,
+            upstream,
+            weight,
+            num_groups,
+            epsilon,
+        } => {
             let input_t = read_tensor(values, *input, node_id)?;
             let upstream_t = read_tensor(values, *upstream, node_id)?;
             let weight_t = read_tensor(values, *weight, node_id)?;
-            let out = crate::engine::ir::kernels::norm::group_norm_backward_input(&input_t, &upstream_t, &weight_t, *num_groups, *epsilon)
-                .map_err(|e| error(e.message, Some(node_id)))?;
+            let out = crate::engine::ir::kernels::norm::group_norm_backward_input(
+                &input_t,
+                &upstream_t,
+                &weight_t,
+                *num_groups,
+                *epsilon,
+            )
+            .map_err(|e| error(e.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
-        Op::GroupNormBackwardWeight { input, upstream, num_groups, epsilon } => {
+        Op::GroupNormBackwardWeight {
+            input,
+            upstream,
+            num_groups,
+            epsilon,
+        } => {
             let input_t = read_tensor(values, *input, node_id)?;
             let upstream_t = read_tensor(values, *upstream, node_id)?;
-            let out = crate::engine::ir::kernels::norm::group_norm_backward_weight(&input_t, &upstream_t, *num_groups, *epsilon)
-                .map_err(|e| error(e.message, Some(node_id)))?;
+            let out = crate::engine::ir::kernels::norm::group_norm_backward_weight(
+                &input_t,
+                &upstream_t,
+                *num_groups,
+                *epsilon,
+            )
+            .map_err(|e| error(e.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
         Op::GroupNormBackwardBias { upstream } => {
@@ -954,27 +1195,52 @@ fn evaluate_op(
                 .map_err(|e| error(e.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
-        Op::InstanceNorm { input, weight, bias, epsilon } => {
+        Op::InstanceNorm {
+            input,
+            weight,
+            bias,
+            epsilon,
+        } => {
             let input_t = read_tensor(values, *input, node_id)?;
             let weight_t = read_tensor(values, *weight, node_id)?;
             let bias_t = read_tensor(values, *bias, node_id)?;
-            let out = crate::engine::ir::kernels::norm::instance_norm(&input_t, &weight_t, &bias_t, *epsilon)
-                .map_err(|e| error(e.message, Some(node_id)))?;
+            let out = crate::engine::ir::kernels::norm::instance_norm(
+                &input_t, &weight_t, &bias_t, *epsilon,
+            )
+            .map_err(|e| error(e.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
-        Op::InstanceNormBackwardInput { input, upstream, weight, epsilon } => {
+        Op::InstanceNormBackwardInput {
+            input,
+            upstream,
+            weight,
+            epsilon,
+        } => {
             let input_t = read_tensor(values, *input, node_id)?;
             let upstream_t = read_tensor(values, *upstream, node_id)?;
             let weight_t = read_tensor(values, *weight, node_id)?;
-            let out = crate::engine::ir::kernels::norm::instance_norm_backward_input(&input_t, &upstream_t, &weight_t, *epsilon)
-                .map_err(|e| error(e.message, Some(node_id)))?;
+            let out = crate::engine::ir::kernels::norm::instance_norm_backward_input(
+                &input_t,
+                &upstream_t,
+                &weight_t,
+                *epsilon,
+            )
+            .map_err(|e| error(e.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
-        Op::InstanceNormBackwardWeight { input, upstream, epsilon } => {
+        Op::InstanceNormBackwardWeight {
+            input,
+            upstream,
+            epsilon,
+        } => {
             let input_t = read_tensor(values, *input, node_id)?;
             let upstream_t = read_tensor(values, *upstream, node_id)?;
-            let out = crate::engine::ir::kernels::norm::instance_norm_backward_weight(&input_t, &upstream_t, *epsilon)
-                .map_err(|e| error(e.message, Some(node_id)))?;
+            let out = crate::engine::ir::kernels::norm::instance_norm_backward_weight(
+                &input_t,
+                &upstream_t,
+                *epsilon,
+            )
+            .map_err(|e| error(e.message, Some(node_id)))?;
             Ok(runtime_from_tensor(out))
         }
         Op::InstanceNormBackwardBias { upstream } => {
@@ -1022,39 +1288,68 @@ fn evaluate_op(
                 Some(node_id),
             ))
         }
-        Op::QuantizeLinear { input, scale, zero_point, bits } => {
+        Op::QuantizeLinear {
+            input,
+            scale,
+            zero_point,
+            bits,
+        } => {
             let inp = read_tensor(values, *input, node_id)?;
             let clamp_min = -(1i32 << (*bits - 1)) as f32;
             let clamp_max = ((1i32 << (*bits - 1)) - 1) as f32;
-            let data: Vec<f32> = inp.data.iter().map(|&v| {
-                let q = (v / scale).round() + *zero_point as f32;
-                let q_clamped = q.max(clamp_min).min(clamp_max);
-                // Dequantize back: store as f32
-                (q_clamped - *zero_point as f32) * scale
-            }).collect();
+            let data: Vec<f32> = inp
+                .data
+                .iter()
+                .map(|&v| {
+                    let q = (v / scale).round() + *zero_point as f32;
+                    let q_clamped = q.max(clamp_min).min(clamp_max);
+                    // Dequantize back: store as f32
+                    (q_clamped - *zero_point as f32) * scale
+                })
+                .collect();
             Ok(runtime_from_tensor(
                 Tensor::new(inp.shape.clone(), data)
                     .map_err(|e| error(e.message, Some(node_id)))?,
             ))
         }
-        Op::DequantizeLinear { input, scale, zero_point } => {
+        Op::DequantizeLinear {
+            input,
+            scale,
+            zero_point,
+        } => {
             let inp = read_tensor(values, *input, node_id)?;
-            let data: Vec<f32> = inp.data.iter().map(|&v| {
-                // Input is already dequantized float; just scale for correctness
-                v - *zero_point as f32 * scale
-            }).collect();
+            let data: Vec<f32> = inp
+                .data
+                .iter()
+                .map(|&v| {
+                    // Input is already dequantized float; just scale for correctness
+                    v - *zero_point as f32 * scale
+                })
+                .collect();
             Ok(runtime_from_tensor(
                 Tensor::new(inp.shape.clone(), data)
                     .map_err(|e| error(e.message, Some(node_id)))?,
             ))
         }
-        Op::DepthwiseSeparableConv { input, dw_weight, pw_weight, stride, padding } => {
+        Op::DepthwiseSeparableConv {
+            input,
+            dw_weight,
+            pw_weight,
+            stride,
+            padding,
+        } => {
             let inp = read_tensor(values, *input, node_id)?;
             let dw_w = read_tensor(values, *dw_weight, node_id)?;
             let pw_w = read_tensor(values, *pw_weight, node_id)?;
             let result = crate::engine::ir::kernels::conv::depthwise_separable_conv_nchw(
                 &inp, &dw_w, &pw_w, *stride, *padding,
-            ).map_err(|e| error(format!("DepthwiseSeparableConv: {}", e.message), Some(node_id)))?;
+            )
+            .map_err(|e| {
+                error(
+                    format!("DepthwiseSeparableConv: {}", e.message),
+                    Some(node_id),
+                )
+            })?;
             Ok(runtime_from_tensor(result))
         }
         Op::Identity(value) => read_value(values, *value, Some(node_id)),
@@ -1099,7 +1394,9 @@ fn error(message: String, node: Option<NodeId>) -> InterpreterError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{Graph, Op, RuntimeValue, ValueId, execute, execute_value, execute_with_context};
+    use crate::ir::{
+        Graph, Op, RuntimeValue, ValueId, execute, execute_value, execute_with_context,
+    };
 
     #[test]
     fn executes_linear_integer_arithmetic() {

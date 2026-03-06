@@ -7,14 +7,18 @@ pub fn sinusoidal_pe(input: &Tensor) -> Result<Tensor, TensorError> {
     let inp = input.make_contiguous()?;
     let rank = inp.shape.len();
     if rank < 2 {
-        return Err(TensorError { message: "SinusoidalPE expects rank >= 2".to_string() });
+        return Err(TensorError {
+            message: "SinusoidalPE expects rank >= 2".to_string(),
+        });
     }
     let d_model = *inp.shape.last().unwrap();
     let seq_len = inp.shape[rank - 2];
     let outer: usize = inp.shape[..rank - 2].iter().product::<usize>().max(1);
 
     if d_model % 2 != 0 {
-        return Err(TensorError { message: format!("SinusoidalPE: d_model must be even, got {d_model}") });
+        return Err(TensorError {
+            message: format!("SinusoidalPE: d_model must be even, got {d_model}"),
+        });
     }
 
     // Precompute PE table [seq_len, d_model]
@@ -47,12 +51,16 @@ pub fn rope(input: &Tensor, offset: usize) -> Result<Tensor, TensorError> {
     let inp = input.make_contiguous()?;
     let rank = inp.shape.len();
     if rank < 2 {
-        return Err(TensorError { message: "RoPE expects rank >= 2".to_string() });
+        return Err(TensorError {
+            message: "RoPE expects rank >= 2".to_string(),
+        });
     }
     let head_dim = *inp.shape.last().unwrap();
     let seq_len = inp.shape[rank - 2];
     if head_dim % 2 != 0 {
-        return Err(TensorError { message: format!("RoPE: head_dim must be even, got {head_dim}") });
+        return Err(TensorError {
+            message: format!("RoPE: head_dim must be even, got {head_dim}"),
+        });
     }
     let outer: usize = inp.shape[..rank - 2].iter().product::<usize>().max(1);
 
@@ -66,7 +74,7 @@ pub fn rope(input: &Tensor, offset: usize) -> Result<Tensor, TensorError> {
                 let (sin_t, cos_t) = (theta.sin() as f32, theta.cos() as f32);
                 let x0 = inp.data[base + 2 * i];
                 let x1 = inp.data[base + 2 * i + 1];
-                out[base + 2 * i]     = x0 * cos_t - x1 * sin_t;
+                out[base + 2 * i] = x0 * cos_t - x1 * sin_t;
                 out[base + 2 * i + 1] = x0 * sin_t + x1 * cos_t;
             }
         }
@@ -93,7 +101,7 @@ pub fn rope_backward(upstream: &Tensor, offset: usize) -> Result<Tensor, TensorE
                 // Inverse rotation: multiply by R^T (negate sin)
                 let dy0 = up.data[base + 2 * i];
                 let dy1 = up.data[base + 2 * i + 1];
-                grad[base + 2 * i]     = dy0 * cos_t + dy1 * sin_t;
+                grad[base + 2 * i] = dy0 * cos_t + dy1 * sin_t;
                 grad[base + 2 * i + 1] = -dy0 * sin_t + dy1 * cos_t;
             }
         }

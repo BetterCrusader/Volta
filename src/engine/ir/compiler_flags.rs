@@ -1,5 +1,5 @@
-use std::sync::OnceLock;
 use crate::ir::DeterminismLevel;
+use std::sync::OnceLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CompilerFlags {

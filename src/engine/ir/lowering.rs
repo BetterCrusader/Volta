@@ -272,15 +272,15 @@ mod tests {
                 | Op::Gelu(_)
                 | Op::GeluBackward(_, _)
                 | Op::GeluExactBackward(_, _)
-        | Op::ReduceMaxBackward { .. }
+                | Op::ReduceMaxBackward { .. }
                 | Op::Gemm { .. }
                 | Op::GemmBackward { .. }
                 | Op::ReduceSum { .. }
                 | Op::ReduceMax { .. }
                 | Op::ReduceMean { .. }
                 | Op::Conv2D(_, _)
-        | Op::Conv2DBackwardInput(_, _, _)
-        | Op::Conv2DBackwardWeight(_, _, _)
+                | Op::Conv2DBackwardInput(_, _, _)
+                | Op::Conv2DBackwardWeight(_, _, _)
                 | Op::MaxPool { .. }
                 | Op::AvgPool { .. }
                 | Op::BatchNorm { .. }
@@ -329,8 +329,7 @@ mod tests {
                 | Op::QuantizeLinear { .. }
                 | Op::DequantizeLinear { .. }
                 | Op::DepthwiseSeparableConv { .. }
-                | Op::CustomCall { .. }
-                => {}
+                | Op::CustomCall { .. } => {}
             }
         }
     }

@@ -1,13 +1,13 @@
+use crate::ir::InterpreterError;
+use crate::ir::interpreter::{ExecutionContext, RuntimeValue};
+use crate::ir::scheduler::build_schedule;
+use crate::ir::{Graph, NodeId};
 /// Node-level execution profiler for Volta IR graphs.
 ///
 /// Records timing for each op in a graph execution pass,
 /// then reports per-op statistics sorted by total time.
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use crate::ir::{Graph, NodeId};
-use crate::ir::interpreter::{ExecutionContext, RuntimeValue};
-use crate::ir::scheduler::{build_schedule};
-use crate::ir::{InterpreterError};
 
 /// Per-node timing record.
 #[derive(Debug, Clone)]
@@ -22,7 +22,11 @@ pub struct NodeProfile {
 
 impl NodeProfile {
     pub fn avg_time(&self) -> Duration {
-        if self.calls == 0 { Duration::ZERO } else { self.total_time / self.calls as u32 }
+        if self.calls == 0 {
+            Duration::ZERO
+        } else {
+            self.total_time / self.calls as u32
+        }
     }
 }
 
@@ -86,8 +90,9 @@ impl Profiler {
             })?;
 
             let t0 = Instant::now();
-            let result = crate::ir::interpreter::evaluate_op_public(&node.op, &values, node_id, context)
-                .map_err(|e| ProfilerError { message: e.message })?;
+            let result =
+                crate::ir::interpreter::evaluate_op_public(&node.op, &values, node_id, context)
+                    .map_err(|e| ProfilerError { message: e.message })?;
             let elapsed = t0.elapsed();
 
             let output_idx = node.output.0;
@@ -106,8 +111,12 @@ impl Profiler {
             });
             entry.calls += 1;
             entry.total_time += elapsed;
-            if elapsed < entry.min_time { entry.min_time = elapsed; }
-            if elapsed > entry.max_time { entry.max_time = elapsed; }
+            if elapsed < entry.min_time {
+                entry.min_time = elapsed;
+            }
+            if elapsed > entry.max_time {
+                entry.max_time = elapsed;
+            }
         }
 
         Ok(())
@@ -129,14 +138,19 @@ impl Profiler {
         }
         let total: Duration = profiles.iter().map(|p| p.total_time).sum();
         println!("\n=== Volta Profiler Report ===");
-        println!("{:<8} {:<30} {:>8} {:>12} {:>12} {:>12} {:>7}",
-            "NodeId", "Op", "Calls", "Total (µs)", "Avg (µs)", "Max (µs)", "%");
+        println!(
+            "{:<8} {:<30} {:>8} {:>12} {:>12} {:>12} {:>7}",
+            "NodeId", "Op", "Calls", "Total (µs)", "Avg (µs)", "Max (µs)", "%"
+        );
         println!("{}", "-".repeat(95));
         for p in &profiles {
-            let pct = if total.is_zero() { 0.0 } else {
+            let pct = if total.is_zero() {
+                0.0
+            } else {
                 p.total_time.as_secs_f64() / total.as_secs_f64() * 100.0
             };
-            println!("{:<8} {:<30} {:>8} {:>12.1} {:>12.1} {:>12.1} {:>6.1}%",
+            println!(
+                "{:<8} {:<30} {:>8} {:>12.1} {:>12.1} {:>12.1} {:>6.1}%",
                 p.node_id.0,
                 &p.op_name[..p.op_name.len().min(29)],
                 p.calls,
@@ -147,12 +161,18 @@ impl Profiler {
             );
         }
         println!("{}", "-".repeat(95));
-        println!("Total: {:.1} µs across {} nodes", total.as_micros() as f64, profiles.len());
+        println!(
+            "Total: {:.1} µs across {} nodes",
+            total.as_micros() as f64,
+            profiles.len()
+        );
     }
 }
 
 impl Default for Profiler {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[derive(Debug)]
@@ -171,7 +191,8 @@ fn run_graph_once(
             message: format!("Invalid NodeId: {:?}", node_id),
             node: None,
         })?;
-        let result = crate::ir::interpreter::evaluate_op_public(&node.op, &values, node_id, context)?;
+        let result =
+            crate::ir::interpreter::evaluate_op_public(&node.op, &values, node_id, context)?;
         let output_idx = node.output.0;
         if output_idx < values.len() {
             values[output_idx] = Some(result);

@@ -1,12 +1,14 @@
-use crate::engine::ir::kernels::activations::{gelu_backward, gelu_exact_backward, sigmoid_backward};
+use crate::engine::ir::kernels::activations::{
+    gelu_backward, gelu_exact_backward, sigmoid_backward,
+};
 use crate::ir::cuda::LoweredCudaPlan;
 use crate::ir::cuda::device::CudaDevice;
 use crate::ir::cuda::kernels::{
     add::{add_f32, div_f32, mul_f32, neg_f32, sub_f32},
     backward::transpose_2d_f32,
     batchnorm::{
-        batch_norm_backward_bias_nchw_f32, batch_norm_backward_input_nchw_f32,
-        batch_norm_backward_weight_nchw_f32, batch_norm_nchw_f32, BatchNormParams,
+        BatchNormParams, batch_norm_backward_bias_nchw_f32, batch_norm_backward_input_nchw_f32,
+        batch_norm_backward_weight_nchw_f32, batch_norm_nchw_f32,
     },
     execute_node,
     matmul::matmul_f32,
@@ -536,9 +538,11 @@ fn evaluate_node_cuda(
                 crate::ir::tensor::Tensor::new(out_shape, out).unwrap(),
             )))
         }
-        Op::Conv2D(_, _) | Op::Conv2DBackwardInput(_, _, _) | Op::Conv2DBackwardWeight(_, _, _) => Err(CudaExecutionError {
-            message: "CUDA Conv2D execution is not implemented".to_string(),
-        }),
+        Op::Conv2D(_, _) | Op::Conv2DBackwardInput(_, _, _) | Op::Conv2DBackwardWeight(_, _, _) => {
+            Err(CudaExecutionError {
+                message: "CUDA Conv2D execution is not implemented".to_string(),
+            })
+        }
         Op::Sigmoid(input) => {
             let (shape, data) = read_tensor(values, *input)?;
             let tensor =
@@ -665,7 +669,8 @@ fn evaluate_node_cuda(
             Ok(RuntimeValue::Tensor(std::sync::Arc::new(out)))
         }
         Op::GemmBackward { .. } => Err(CudaExecutionError {
-            message: "GemmBackward should be decomposed into MatMul/Add ops during autograd".to_string(),
+            message: "GemmBackward should be decomposed into MatMul/Add ops during autograd"
+                .to_string(),
         }),
         Op::BatchNorm {
             input,
@@ -677,10 +682,7 @@ fn evaluate_node_cuda(
             let (input_shape, input_data) = read_tensor(values, *input)?;
             if input_shape.len() != 4 {
                 return Err(CudaExecutionError {
-                    message: format!(
-                        "BatchNorm expects rank-4 NCHW input, got {:?}",
-                        input_shape
-                    ),
+                    message: format!("BatchNorm expects rank-4 NCHW input, got {:?}", input_shape),
                 });
             }
             let (_, weight_data) = read_tensor(values, *weight)?;

@@ -62,7 +62,13 @@ fn hash_op(op: &Op, hasher: &mut DefaultHasher) {
             a.0.hash(hasher);
             b.0.hash(hasher);
         }
-        Op::ReduceMaxBackward { input, output_max, upstream, axis, keepdims } => {
+        Op::ReduceMaxBackward {
+            input,
+            output_max,
+            upstream,
+            axis,
+            keepdims,
+        } => {
             input.0.hash(hasher);
             output_max.0.hash(hasher);
             upstream.0.hash(hasher);
@@ -191,98 +197,238 @@ fn hash_op(op: &Op, hasher: &mut DefaultHasher) {
             input.0.hash(hasher);
             upstream.0.hash(hasher);
         }
-        Op::GroupNorm { input, weight, bias, num_groups, epsilon } => {
+        Op::GroupNorm {
+            input,
+            weight,
+            bias,
+            num_groups,
+            epsilon,
+        } => {
             input.0.hash(hasher);
             weight.0.hash(hasher);
             bias.0.hash(hasher);
             num_groups.hash(hasher);
             epsilon.to_bits().hash(hasher);
         }
-        Op::GroupNormBackwardInput { input, upstream, weight, num_groups, epsilon } => {
+        Op::GroupNormBackwardInput {
+            input,
+            upstream,
+            weight,
+            num_groups,
+            epsilon,
+        } => {
             input.0.hash(hasher);
             upstream.0.hash(hasher);
             weight.0.hash(hasher);
             num_groups.hash(hasher);
             epsilon.to_bits().hash(hasher);
         }
-        Op::GroupNormBackwardWeight { input, upstream, num_groups, epsilon } => {
+        Op::GroupNormBackwardWeight {
+            input,
+            upstream,
+            num_groups,
+            epsilon,
+        } => {
             input.0.hash(hasher);
             upstream.0.hash(hasher);
             num_groups.hash(hasher);
             epsilon.to_bits().hash(hasher);
         }
-        Op::GroupNormBackwardBias { upstream } => { upstream.0.hash(hasher); }
-        Op::InstanceNorm { input, weight, bias, epsilon } => {
+        Op::GroupNormBackwardBias { upstream } => {
+            upstream.0.hash(hasher);
+        }
+        Op::InstanceNorm {
+            input,
+            weight,
+            bias,
+            epsilon,
+        } => {
             input.0.hash(hasher);
             weight.0.hash(hasher);
             bias.0.hash(hasher);
             epsilon.to_bits().hash(hasher);
         }
-        Op::InstanceNormBackwardInput { input, upstream, weight, epsilon } => {
+        Op::InstanceNormBackwardInput {
+            input,
+            upstream,
+            weight,
+            epsilon,
+        } => {
             input.0.hash(hasher);
             upstream.0.hash(hasher);
             weight.0.hash(hasher);
             epsilon.to_bits().hash(hasher);
         }
-        Op::InstanceNormBackwardWeight { input, upstream, epsilon } => {
+        Op::InstanceNormBackwardWeight {
+            input,
+            upstream,
+            epsilon,
+        } => {
             input.0.hash(hasher);
             upstream.0.hash(hasher);
             epsilon.to_bits().hash(hasher);
         }
-        Op::InstanceNormBackwardBias { upstream } => { upstream.0.hash(hasher); }
+        Op::InstanceNormBackwardBias { upstream } => {
+            upstream.0.hash(hasher);
+        }
         Op::Embedding { weight, indices } => {
             weight.0.hash(hasher);
             indices.0.hash(hasher);
         }
-        Op::EmbeddingBackward { weight, indices, upstream } => {
+        Op::EmbeddingBackward {
+            weight,
+            indices,
+            upstream,
+        } => {
             weight.0.hash(hasher);
             indices.0.hash(hasher);
             upstream.0.hash(hasher);
         }
-        Op::LstmCell { x, h_prev, c_prev, weight_ih, weight_hh, bias, output_idx } => {
-            x.0.hash(hasher); h_prev.0.hash(hasher); c_prev.0.hash(hasher);
-            weight_ih.0.hash(hasher); weight_hh.0.hash(hasher); bias.0.hash(hasher);
+        Op::LstmCell {
+            x,
+            h_prev,
+            c_prev,
+            weight_ih,
+            weight_hh,
+            bias,
+            output_idx,
+        } => {
+            x.0.hash(hasher);
+            h_prev.0.hash(hasher);
+            c_prev.0.hash(hasher);
+            weight_ih.0.hash(hasher);
+            weight_hh.0.hash(hasher);
+            bias.0.hash(hasher);
             output_idx.hash(hasher);
         }
-        Op::LstmCellBackward { x, h_prev, c_prev, weight_ih, weight_hh, gates_raw, tanh_c_next, dh_next, dc_next, grad_target } => {
-            x.0.hash(hasher); h_prev.0.hash(hasher); c_prev.0.hash(hasher);
-            weight_ih.0.hash(hasher); weight_hh.0.hash(hasher);
-            gates_raw.0.hash(hasher); tanh_c_next.0.hash(hasher);
-            dh_next.0.hash(hasher); dc_next.0.hash(hasher);
+        Op::LstmCellBackward {
+            x,
+            h_prev,
+            c_prev,
+            weight_ih,
+            weight_hh,
+            gates_raw,
+            tanh_c_next,
+            dh_next,
+            dc_next,
+            grad_target,
+        } => {
+            x.0.hash(hasher);
+            h_prev.0.hash(hasher);
+            c_prev.0.hash(hasher);
+            weight_ih.0.hash(hasher);
+            weight_hh.0.hash(hasher);
+            gates_raw.0.hash(hasher);
+            tanh_c_next.0.hash(hasher);
+            dh_next.0.hash(hasher);
+            dc_next.0.hash(hasher);
             grad_target.hash(hasher);
         }
-        Op::GruCell { x, h_prev, weight_ih, weight_hh, bias_ih, bias_hh, output_idx } => {
-            x.0.hash(hasher); h_prev.0.hash(hasher);
-            weight_ih.0.hash(hasher); weight_hh.0.hash(hasher);
-            bias_ih.0.hash(hasher); bias_hh.0.hash(hasher);
+        Op::GruCell {
+            x,
+            h_prev,
+            weight_ih,
+            weight_hh,
+            bias_ih,
+            bias_hh,
+            output_idx,
+        } => {
+            x.0.hash(hasher);
+            h_prev.0.hash(hasher);
+            weight_ih.0.hash(hasher);
+            weight_hh.0.hash(hasher);
+            bias_ih.0.hash(hasher);
+            bias_hh.0.hash(hasher);
             output_idx.hash(hasher);
         }
-        Op::ConvTranspose2D { input, weight, stride, padding } => {
-            input.0.hash(hasher); weight.0.hash(hasher);
-            stride.hash(hasher); padding.hash(hasher);
-        }
-        Op::Upsample2D { input, scale_h, scale_w, mode } => {
+        Op::ConvTranspose2D {
+            input,
+            weight,
+            stride,
+            padding,
+        } => {
             input.0.hash(hasher);
-            scale_h.to_bits().hash(hasher); scale_w.to_bits().hash(hasher);
+            weight.0.hash(hasher);
+            stride.hash(hasher);
+            padding.hash(hasher);
+        }
+        Op::Upsample2D {
+            input,
+            scale_h,
+            scale_w,
+            mode,
+        } => {
+            input.0.hash(hasher);
+            scale_h.to_bits().hash(hasher);
+            scale_w.to_bits().hash(hasher);
             mode.hash(hasher);
         }
-        Op::Upsample2DBackward { upstream, orig_h, orig_w, scale_h, scale_w } => {
+        Op::Upsample2DBackward {
+            upstream,
+            orig_h,
+            orig_w,
+            scale_h,
+            scale_w,
+        } => {
             upstream.0.hash(hasher);
-            orig_h.hash(hasher); orig_w.hash(hasher);
-            scale_h.hash(hasher); scale_w.hash(hasher);
+            orig_h.hash(hasher);
+            orig_w.hash(hasher);
+            scale_h.hash(hasher);
+            scale_w.hash(hasher);
         }
-        Op::MultiHeadAttention { q_input, k_input, v_input, w_q, w_k, w_v, w_o, num_heads, causal, output_idx, .. } => {
-            q_input.0.hash(hasher); k_input.0.hash(hasher); v_input.0.hash(hasher);
-            w_q.0.hash(hasher); w_k.0.hash(hasher); w_v.0.hash(hasher); w_o.0.hash(hasher);
-            num_heads.hash(hasher); causal.hash(hasher); output_idx.hash(hasher);
+        Op::MultiHeadAttention {
+            q_input,
+            k_input,
+            v_input,
+            w_q,
+            w_k,
+            w_v,
+            w_o,
+            num_heads,
+            causal,
+            output_idx,
+            ..
+        } => {
+            q_input.0.hash(hasher);
+            k_input.0.hash(hasher);
+            v_input.0.hash(hasher);
+            w_q.0.hash(hasher);
+            w_k.0.hash(hasher);
+            w_v.0.hash(hasher);
+            w_o.0.hash(hasher);
+            num_heads.hash(hasher);
+            causal.hash(hasher);
+            output_idx.hash(hasher);
         }
-        Op::SinusoidalPE { input } => { input.0.hash(hasher); }
-        Op::RoPE { input, offset } => { input.0.hash(hasher); offset.hash(hasher); }
-        Op::RoPEBackward { upstream, offset } => { upstream.0.hash(hasher); offset.hash(hasher); }
-        Op::GruCellBackward { x, h_prev, weight_ih, weight_hh, z_gate, r_gate, n_gate, dh_next, grad_target } => {
-            x.0.hash(hasher); h_prev.0.hash(hasher);
-            weight_ih.0.hash(hasher); weight_hh.0.hash(hasher);
-            z_gate.0.hash(hasher); r_gate.0.hash(hasher); n_gate.0.hash(hasher);
+        Op::SinusoidalPE { input } => {
+            input.0.hash(hasher);
+        }
+        Op::RoPE { input, offset } => {
+            input.0.hash(hasher);
+            offset.hash(hasher);
+        }
+        Op::RoPEBackward { upstream, offset } => {
+            upstream.0.hash(hasher);
+            offset.hash(hasher);
+        }
+        Op::GruCellBackward {
+            x,
+            h_prev,
+            weight_ih,
+            weight_hh,
+            z_gate,
+            r_gate,
+            n_gate,
+            dh_next,
+            grad_target,
+        } => {
+            x.0.hash(hasher);
+            h_prev.0.hash(hasher);
+            weight_ih.0.hash(hasher);
+            weight_hh.0.hash(hasher);
+            z_gate.0.hash(hasher);
+            r_gate.0.hash(hasher);
+            n_gate.0.hash(hasher);
             dh_next.0.hash(hasher);
             grad_target.hash(hasher);
         }
@@ -338,19 +484,33 @@ fn hash_op(op: &Op, hasher: &mut DefaultHasher) {
         Op::BatchNormBackwardBias { upstream } => {
             upstream.0.hash(hasher);
         }
-        Op::LayerNorm { epsilon, input, weight, bias } => {
+        Op::LayerNorm {
+            epsilon,
+            input,
+            weight,
+            bias,
+        } => {
             epsilon.to_bits().hash(hasher);
             input.0.hash(hasher);
             weight.0.hash(hasher);
             bias.0.hash(hasher);
         }
-        Op::LayerNormBackwardInput { epsilon, input, upstream, weight } => {
+        Op::LayerNormBackwardInput {
+            epsilon,
+            input,
+            upstream,
+            weight,
+        } => {
             epsilon.to_bits().hash(hasher);
             input.0.hash(hasher);
             upstream.0.hash(hasher);
             weight.0.hash(hasher);
         }
-        Op::LayerNormBackwardWeight { epsilon, input, upstream } => {
+        Op::LayerNormBackwardWeight {
+            epsilon,
+            input,
+            upstream,
+        } => {
             epsilon.to_bits().hash(hasher);
             input.0.hash(hasher);
             upstream.0.hash(hasher);
@@ -369,20 +529,35 @@ fn hash_op(op: &Op, hasher: &mut DefaultHasher) {
             target.hash(hasher);
             inputs.iter().for_each(|v| v.0.hash(hasher));
         }
-        Op::DepthwiseSeparableConv { input, dw_weight, pw_weight, stride, padding } => {
+        Op::DepthwiseSeparableConv {
+            input,
+            dw_weight,
+            pw_weight,
+            stride,
+            padding,
+        } => {
             input.0.hash(hasher);
             dw_weight.0.hash(hasher);
             pw_weight.0.hash(hasher);
             stride.hash(hasher);
             padding.hash(hasher);
         }
-        Op::QuantizeLinear { input, scale, zero_point, bits } => {
+        Op::QuantizeLinear {
+            input,
+            scale,
+            zero_point,
+            bits,
+        } => {
             input.0.hash(hasher);
             scale.to_bits().hash(hasher);
             zero_point.hash(hasher);
             bits.hash(hasher);
         }
-        Op::DequantizeLinear { input, scale, zero_point } => {
+        Op::DequantizeLinear {
+            input,
+            scale,
+            zero_point,
+        } => {
             input.0.hash(hasher);
             scale.to_bits().hash(hasher);
             zero_point.hash(hasher);

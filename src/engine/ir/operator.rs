@@ -1,4 +1,4 @@
-use crate::ir::{ValueId, RuntimeValue, ExecutionContext, InterpreterError, ShapeFact, Op};
+use crate::ir::{ExecutionContext, InterpreterError, Op, RuntimeValue, ShapeFact, ValueId};
 
 pub trait Operator: std::fmt::Debug + Send + Sync {
     fn name(&self) -> &str;
@@ -11,15 +11,9 @@ pub trait Operator: std::fmt::Debug + Send + Sync {
         context: &ExecutionContext,
     ) -> Result<RuntimeValue, InterpreterError>;
 
-    fn infer_shape(
-        &self,
-        input_shapes: &[ShapeFact],
-    ) -> Result<ShapeFact, String>;
+    fn infer_shape(&self, input_shapes: &[ShapeFact]) -> Result<ShapeFact, String>;
 
-    fn check_constraints(
-        &self,
-        _input_shapes: &[ShapeFact],
-    ) -> Result<(), String> {
+    fn check_constraints(&self, _input_shapes: &[ShapeFact]) -> Result<(), String> {
         Ok(())
     }
 
@@ -49,12 +43,11 @@ pub trait Operator: std::fmt::Debug + Send + Sync {
 pub struct AddOperator;
 
 impl Operator for AddOperator {
-    fn name(&self) -> &str { "Add" }
+    fn name(&self) -> &str {
+        "Add"
+    }
 
-    fn check_constraints(
-        &self,
-        input_shapes: &[ShapeFact],
-    ) -> Result<(), String> {
+    fn check_constraints(&self, input_shapes: &[ShapeFact]) -> Result<(), String> {
         if input_shapes.len() != 2 {
             return Err("Add requires exactly 2 inputs".to_string());
         }
@@ -71,20 +64,23 @@ impl Operator for AddOperator {
         _context: &ExecutionContext,
     ) -> Result<RuntimeValue, InterpreterError> {
         if inputs.len() != 2 {
-            return Err(InterpreterError { message: "Add requires 2 inputs".to_string(), node: None });
+            return Err(InterpreterError {
+                message: "Add requires 2 inputs".to_string(),
+                node: None,
+            });
         }
         // Simplified for PoC, real impl should handle broadcasting and types
         match (&inputs[0], &inputs[1]) {
             (RuntimeValue::Float(a), RuntimeValue::Float(b)) => Ok(RuntimeValue::Float(a + b)),
             (RuntimeValue::Int(a), RuntimeValue::Int(b)) => Ok(RuntimeValue::Int(a + b)),
-            _ => Err(InterpreterError { message: "Type mismatch in Add".to_string(), node: None }),
+            _ => Err(InterpreterError {
+                message: "Type mismatch in Add".to_string(),
+                node: None,
+            }),
         }
     }
 
-    fn infer_shape(
-        &self,
-        input_shapes: &[ShapeFact],
-    ) -> Result<ShapeFact, String> {
+    fn infer_shape(&self, input_shapes: &[ShapeFact]) -> Result<ShapeFact, String> {
         if input_shapes.len() != 2 {
             return Err("Add requires 2 inputs".to_string());
         }

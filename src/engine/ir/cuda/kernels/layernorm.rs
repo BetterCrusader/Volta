@@ -21,7 +21,11 @@ pub fn layer_norm_f32(
     }
     let d = *shape.last().unwrap();
     if weight.len() != d || bias.len() != d {
-        return Err(format!("LayerNorm expected weight/bias len {d}, got {}/{}", weight.len(), bias.len()));
+        return Err(format!(
+            "LayerNorm expected weight/bias len {d}, got {}/{}",
+            weight.len(),
+            bias.len()
+        ));
     }
     if input.is_empty() {
         return Ok(Vec::new());

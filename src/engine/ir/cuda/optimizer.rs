@@ -68,12 +68,11 @@ fn apply_sgd_cuda(
                 message: format!("CUDA SGD scale kernel failed for '{value_id}': {message}"),
             }
         })?;
-        parameter.data =
-            sub_f32(device, &parameter.data, &scaled, determinism).map_err(|message| {
-                OptimizerError {
-                    message: format!("CUDA SGD update kernel failed for '{value_id}': {message}"),
-                }
-            })?.into();
+        parameter.data = sub_f32(device, &parameter.data, &scaled, determinism)
+            .map_err(|message| OptimizerError {
+                message: format!("CUDA SGD update kernel failed for '{value_id}': {message}"),
+            })?
+            .into();
     }
     Ok(())
 }
@@ -210,7 +209,8 @@ fn apply_adam_cuda(
             determinism,
             *value_id,
             "adam-m update",
-        )?.into();
+        )?
+        .into();
 
         let v_beta =
             scale_f32(device, &v.data, beta2, determinism).map_err(|message| OptimizerError {
@@ -239,7 +239,8 @@ fn apply_adam_cuda(
             determinism,
             *value_id,
             "adam-v update",
-        )?.into();
+        )?
+        .into();
 
         let m_hat = div_scalar_f32(device, &m.data, bias1, determinism).map_err(|message| {
             OptimizerError {
@@ -274,7 +275,8 @@ fn apply_adam_cuda(
             determinism,
             *value_id,
             "adam update",
-        )?.into();
+        )?
+        .into();
     }
 
     Ok(())

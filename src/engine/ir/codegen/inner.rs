@@ -5,10 +5,13 @@
 ///
 /// All loops over tensor elements are emitted as proper LLVM loops (not
 /// unrolled), so even 1024×1024 matrices work without IR bloat.
-
 use std::collections::HashMap;
 use std::path::Path;
 
+use inkwell::AddressSpace;
+use inkwell::IntPredicate;
+use inkwell::OptimizationLevel;
+use inkwell::attributes::{Attribute, AttributeLoc};
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
@@ -16,11 +19,7 @@ use inkwell::passes::PassBuilderOptions;
 use inkwell::targets::{
     CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine,
 };
-use inkwell::attributes::{Attribute, AttributeLoc};
 use inkwell::values::PointerValue;
-use inkwell::AddressSpace;
-use inkwell::IntPredicate;
-use inkwell::OptimizationLevel;
 
 use crate::ir::{Graph, NodeId, Op, ValueId, build_schedule};
 
@@ -116,8 +115,7 @@ pub fn link_object_to_exe(obj: &Path, exe: &Path) -> Result<(), CodegenError> {
         .unwrap_or_else(|| std::path::PathBuf::from("clang"));
 
     // Compile gemm_shim.c → gemm_shim.o next to the IR object
-    let shim_src = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("src/engine/ir/codegen/gemm_shim.c");
+    let shim_src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/engine/ir/codegen/gemm_shim.c");
     let shim_obj = obj.with_file_name("gemm_shim.o");
 
     let shim_status = std::process::Command::new(&clang)
@@ -138,12 +136,12 @@ pub fn link_object_to_exe(obj: &Path, exe: &Path) -> Result<(), CodegenError> {
     // Link IR object + shim → shared library
     let mut cmd = std::process::Command::new(&clang);
     cmd.arg(obj)
-       .arg(&shim_obj)
-       .arg("-shared")
-       .arg("-O3")
-       .arg("-march=native")
-       .arg("-o")
-       .arg(exe);
+        .arg(&shim_obj)
+        .arg("-shared")
+        .arg("-O3")
+        .arg("-march=native")
+        .arg("-o")
+        .arg(exe);
     #[cfg(target_os = "windows")]
     {
         cmd.arg("-Wl,/EXPORT:volta_infer");
@@ -152,7 +150,8 @@ pub fn link_object_to_exe(obj: &Path, exe: &Path) -> Result<(), CodegenError> {
     #[cfg(not(target_os = "windows"))]
     cmd.arg("-lm");
 
-    let status = cmd.status()
+    let status = cmd
+        .status()
         .map_err(|e| cg_err!("clang link failed: {}", e))?;
     if !status.success() {
         return Err(cg_err!("link failed with status {}", status));
@@ -193,8 +192,7 @@ fn emit_infer_fn<'ctx>(
     let entry = ctx.append_basic_block(function, "entry");
     builder.position_at_end(entry);
 
-    let schedule = build_schedule(graph)
-        .map_err(|e| cg_err!("schedule: {}", e.message))?;
+    let schedule = build_schedule(graph).map_err(|e| cg_err!("schedule: {}", e.message))?;
 
     // Build consumer map: value_id → list of node_ids that consume it
     // Used to detect fuseable Add+ReLU patterns.
@@ -234,7 +232,8 @@ fn emit_infer_fn<'ctx>(
     // Embed weight globals
     for node in &graph.nodes {
         if let Op::Parameter(name) = &node.op {
-            let data = params.get(name)
+            let data = params
+                .get(name)
                 .ok_or_else(|| cg_err!("missing param '{}'", name))?;
             let gptr = embed_f32_global(ctx, module, name, data);
             value_map.insert(node.output.0, gptr);
@@ -244,7 +243,8 @@ fn emit_infer_fn<'ctx>(
     let input_ptr = function.get_nth_param(0).unwrap().into_pointer_value();
 
     for &node_id in schedule.nodes() {
-        let node = graph.node(node_id)
+        let node = graph
+            .node(node_id)
             .ok_or_else(|| cg_err!("missing node {:?}", node_id))?;
 
         match &node.op {
@@ -280,8 +280,18 @@ fn emit_infer_fn<'ctx>(
                 } else {
                     let n = infer_numel(graph, *l);
                     let out = global_f32(ctx, module, n, &format!("ew_{}", node.output.0));
-                    emit_loop_binop(ctx, module, builder, &value_map, function, *l, *r, out, n,
-                        |b, a, bv| b.build_float_add(a, bv, "r").unwrap())?;
+                    emit_loop_binop(
+                        ctx,
+                        module,
+                        builder,
+                        &value_map,
+                        function,
+                        *l,
+                        *r,
+                        out,
+                        n,
+                        |b, a, bv| b.build_float_add(a, bv, "r").unwrap(),
+                    )?;
                     value_map.insert(node.output.0, out);
                 }
             }
@@ -289,16 +299,36 @@ fn emit_infer_fn<'ctx>(
             Op::Sub(l, r) => {
                 let n = infer_numel(graph, *l);
                 let out = global_f32(ctx, module, n, &format!("ew_{}", node.output.0));
-                emit_loop_binop(ctx, module, builder, &value_map, function, *l, *r, out, n,
-                    |b, a, bv| b.build_float_sub(a, bv, "r").unwrap())?;
+                emit_loop_binop(
+                    ctx,
+                    module,
+                    builder,
+                    &value_map,
+                    function,
+                    *l,
+                    *r,
+                    out,
+                    n,
+                    |b, a, bv| b.build_float_sub(a, bv, "r").unwrap(),
+                )?;
                 value_map.insert(node.output.0, out);
             }
 
             Op::Mul(l, r) => {
                 let n = infer_numel(graph, *l);
                 let out = global_f32(ctx, module, n, &format!("ew_{}", node.output.0));
-                emit_loop_binop(ctx, module, builder, &value_map, function, *l, *r, out, n,
-                    |b, a, bv| b.build_float_mul(a, bv, "r").unwrap())?;
+                emit_loop_binop(
+                    ctx,
+                    module,
+                    builder,
+                    &value_map,
+                    function,
+                    *l,
+                    *r,
+                    out,
+                    n,
+                    |b, a, bv| b.build_float_mul(a, bv, "r").unwrap(),
+                )?;
                 value_map.insert(node.output.0, out);
             }
 
@@ -320,8 +350,7 @@ fn emit_infer_fn<'ctx>(
             Op::Transpose(v) => {
                 let (rows, cols) = infer_2d_shape(graph, *v);
                 let src = get_ptr(&value_map, *v)?;
-                let out = global_f32(ctx, module, rows * cols,
-                    &format!("tr_{}", node.output.0));
+                let out = global_f32(ctx, module, rows * cols, &format!("tr_{}", node.output.0));
                 emit_transpose_loops(ctx, module, builder, function, src, out, rows, cols);
                 value_map.insert(node.output.0, out);
             }
@@ -399,7 +428,9 @@ fn get_ptr<'ctx>(
     map: &HashMap<usize, PointerValue<'ctx>>,
     id: ValueId,
 ) -> Result<PointerValue<'ctx>, CodegenError> {
-    map.get(&id.0).copied().ok_or_else(|| cg_err!("value {} not in map", id.0))
+    map.get(&id.0)
+        .copied()
+        .ok_or_else(|| cg_err!("value {} not in map", id.0))
 }
 
 fn call_volta_gemm<'ctx>(
@@ -416,20 +447,33 @@ fn call_volta_gemm<'ctx>(
     let f32p = ctx.f32_type().ptr_type(AddressSpace::default());
     let i64t = ctx.i64_type();
     let fn_type = ctx.void_type().fn_type(
-        &[f32p.into(), f32p.into(), f32p.into(),
-          i64t.into(), i64t.into(), i64t.into()],
+        &[
+            f32p.into(),
+            f32p.into(),
+            f32p.into(),
+            i64t.into(),
+            i64t.into(),
+            i64t.into(),
+        ],
         false,
     );
-    let func = module.get_function("volta_gemm_f32")
+    let func = module
+        .get_function("volta_gemm_f32")
         .unwrap_or_else(|| module.add_function("volta_gemm_f32", fn_type, None));
-    builder.build_call(
-        func,
-        &[c.into(), a.into(), b.into(),
-          i64t.const_int(m as u64, false).into(),
-          i64t.const_int(k as u64, false).into(),
-          i64t.const_int(n as u64, false).into()],
-        "gemm",
-    ).unwrap();
+    builder
+        .build_call(
+            func,
+            &[
+                c.into(),
+                a.into(),
+                b.into(),
+                i64t.const_int(m as u64, false).into(),
+                i64t.const_int(k as u64, false).into(),
+                i64t.const_int(n as u64, false).into(),
+            ],
+            "gemm",
+        )
+        .unwrap();
     Ok(())
 }
 
@@ -439,9 +483,9 @@ fn emit_matmul_loops<'ctx>(
     _module: &Module<'ctx>,
     builder: &Builder<'ctx>,
     function: inkwell::values::FunctionValue<'ctx>,
-    a: PointerValue<'ctx>,  // m×k row-major
-    b: PointerValue<'ctx>,  // k×n row-major
-    c: PointerValue<'ctx>,  // m×n output (pre-zeroed)
+    a: PointerValue<'ctx>, // m×k row-major
+    b: PointerValue<'ctx>, // k×n row-major
+    c: PointerValue<'ctx>, // m×n output (pre-zeroed)
     m: usize,
     k: usize,
     n: usize,
@@ -490,23 +534,33 @@ fn emit_matmul_loops<'ctx>(
     let ik = builder.build_int_mul(i, kv, "ik").unwrap();
     let a_idx = builder.build_int_add(ik, p, "ai").unwrap();
     let ap = unsafe { builder.build_gep(f32t, a, &[a_idx], "ap").unwrap() };
-    let av = builder.build_load(f32t, ap, "av").unwrap().into_float_value();
+    let av = builder
+        .build_load(f32t, ap, "av")
+        .unwrap()
+        .into_float_value();
 
     // b_idx = p*n + j
     let pn = builder.build_int_mul(p, nv, "pn").unwrap();
     let b_idx = builder.build_int_add(pn, j, "bi").unwrap();
     let bp = unsafe { builder.build_gep(f32t, b, &[b_idx], "bp").unwrap() };
-    let bv = builder.build_load(f32t, bp, "bv").unwrap().into_float_value();
+    let bv = builder
+        .build_load(f32t, bp, "bv")
+        .unwrap()
+        .into_float_value();
 
     let prod = builder.build_float_mul(av, bv, "prod").unwrap();
     let new_acc = builder.build_float_add(acc, prod, "nacc").unwrap();
 
     let p_next = builder.build_int_add(p, one, "pnxt").unwrap();
-    let p_cond = builder.build_int_compare(IntPredicate::SLT, p_next, kv, "pc").unwrap();
+    let p_cond = builder
+        .build_int_compare(IntPredicate::SLT, p_next, kv, "pc")
+        .unwrap();
     let p_latch = builder.get_insert_block().unwrap();
     p_phi.add_incoming(&[(&p_next, p_latch)]);
     acc_phi.add_incoming(&[(&new_acc, p_latch)]);
-    builder.build_conditional_branch(p_cond, p_hdr, p_exit).unwrap();
+    builder
+        .build_conditional_branch(p_cond, p_hdr, p_exit)
+        .unwrap();
     builder.position_at_end(p_exit);
 
     // c_idx = i*n + j
@@ -516,17 +570,25 @@ fn emit_matmul_loops<'ctx>(
     builder.build_store(cp, new_acc).unwrap();
 
     let j_next = builder.build_int_add(j, one, "jnxt").unwrap();
-    let j_cond = builder.build_int_compare(IntPredicate::SLT, j_next, nv, "jc").unwrap();
+    let j_cond = builder
+        .build_int_compare(IntPredicate::SLT, j_next, nv, "jc")
+        .unwrap();
     let j_latch = builder.get_insert_block().unwrap();
     j_phi.add_incoming(&[(&j_next, j_latch)]);
-    builder.build_conditional_branch(j_cond, j_hdr, j_exit).unwrap();
+    builder
+        .build_conditional_branch(j_cond, j_hdr, j_exit)
+        .unwrap();
     builder.position_at_end(j_exit);
 
     let i_next = builder.build_int_add(i, one, "inxt").unwrap();
-    let i_cond = builder.build_int_compare(IntPredicate::SLT, i_next, mv, "ic").unwrap();
+    let i_cond = builder
+        .build_int_compare(IntPredicate::SLT, i_next, mv, "ic")
+        .unwrap();
     let i_latch = builder.get_insert_block().unwrap();
     i_phi.add_incoming(&[(&i_next, i_latch)]);
-    builder.build_conditional_branch(i_cond, i_hdr, i_exit).unwrap();
+    builder
+        .build_conditional_branch(i_cond, i_hdr, i_exit)
+        .unwrap();
     builder.position_at_end(i_exit);
 }
 
@@ -562,19 +624,34 @@ fn emit_loop_add_relu<'ctx>(
 
     let lp = unsafe { builder.build_gep(f32t, lptr, &[i], "lp").unwrap() };
     let rp = unsafe { builder.build_gep(f32t, rptr, &[i], "rp").unwrap() };
-    let lv = builder.build_load(f32t, lp, "lv").unwrap().into_float_value();
-    let rv = builder.build_load(f32t, rp, "rv").unwrap().into_float_value();
+    let lv = builder
+        .build_load(f32t, lp, "lv")
+        .unwrap()
+        .into_float_value();
+    let rv = builder
+        .build_load(f32t, rp, "rv")
+        .unwrap()
+        .into_float_value();
     let sum = builder.build_float_add(lv, rv, "sum").unwrap();
-    let cmp = builder.build_float_compare(inkwell::FloatPredicate::OGT, sum, zero_f, "c").unwrap();
-    let res = builder.build_select(cmp, sum, zero_f, "r").unwrap().into_float_value();
+    let cmp = builder
+        .build_float_compare(inkwell::FloatPredicate::OGT, sum, zero_f, "c")
+        .unwrap();
+    let res = builder
+        .build_select(cmp, sum, zero_f, "r")
+        .unwrap()
+        .into_float_value();
     let dp = unsafe { builder.build_gep(f32t, out, &[i], "dp").unwrap() };
     builder.build_store(dp, res).unwrap();
 
     let next = builder.build_int_add(i, one, "next").unwrap();
-    let cond = builder.build_int_compare(IntPredicate::SLT, next, count, "cond").unwrap();
+    let cond = builder
+        .build_int_compare(IntPredicate::SLT, next, count, "cond")
+        .unwrap();
     let latch = builder.get_insert_block().unwrap();
     phi.add_incoming(&[(&next, latch)]);
-    builder.build_conditional_branch(cond, loop_bb, exit_bb).unwrap();
+    builder
+        .build_conditional_branch(cond, loop_bb, exit_bb)
+        .unwrap();
     builder.position_at_end(exit_bb);
 }
 
@@ -589,8 +666,11 @@ fn emit_loop_binop<'ctx>(
     r: ValueId,
     out: PointerValue<'ctx>,
     n: usize,
-    op: impl Fn(&Builder<'ctx>, inkwell::values::FloatValue<'ctx>, inkwell::values::FloatValue<'ctx>)
-        -> inkwell::values::FloatValue<'ctx>,
+    op: impl Fn(
+        &Builder<'ctx>,
+        inkwell::values::FloatValue<'ctx>,
+        inkwell::values::FloatValue<'ctx>,
+    ) -> inkwell::values::FloatValue<'ctx>,
 ) -> Result<(), CodegenError> {
     let lptr = get_ptr(map, l)?;
     let rptr = get_ptr(map, r)?;
@@ -613,18 +693,28 @@ fn emit_loop_binop<'ctx>(
     let i = phi.as_basic_value().into_int_value();
     let lp = unsafe { builder.build_gep(f32t, lptr, &[i], "lp").unwrap() };
     let rp = unsafe { builder.build_gep(f32t, rptr, &[i], "rp").unwrap() };
-    let lv = builder.build_load(f32t, lp, "lv").unwrap().into_float_value();
-    let rv = builder.build_load(f32t, rp, "rv").unwrap().into_float_value();
+    let lv = builder
+        .build_load(f32t, lp, "lv")
+        .unwrap()
+        .into_float_value();
+    let rv = builder
+        .build_load(f32t, rp, "rv")
+        .unwrap()
+        .into_float_value();
     let res = op(builder, lv, rv);
     let dp = unsafe { builder.build_gep(f32t, out, &[i], "dp").unwrap() };
     builder.build_store(dp, res).unwrap();
 
     let next = builder.build_int_add(i, one, "next").unwrap();
-    let cond = builder.build_int_compare(IntPredicate::SLT, next, count, "cond").unwrap();
+    let cond = builder
+        .build_int_compare(IntPredicate::SLT, next, count, "cond")
+        .unwrap();
     // Second incoming: i=next from loop_bb
     let latch_bb = builder.get_insert_block().unwrap();
     phi.add_incoming(&[(&next, latch_bb)]);
-    builder.build_conditional_branch(cond, loop_bb, exit_bb).unwrap();
+    builder
+        .build_conditional_branch(cond, loop_bb, exit_bb)
+        .unwrap();
     builder.position_at_end(exit_bb);
     Ok(())
 }
@@ -656,17 +746,29 @@ fn emit_loop_relu<'ctx>(
     let i = phi.as_basic_value().into_int_value();
 
     let sp = unsafe { builder.build_gep(f32t, src, &[i], "sp").unwrap() };
-    let sv = builder.build_load(f32t, sp, "sv").unwrap().into_float_value();
-    let cmp = builder.build_float_compare(inkwell::FloatPredicate::OGT, sv, zero_f, "c").unwrap();
-    let res = builder.build_select(cmp, sv, zero_f, "r").unwrap().into_float_value();
+    let sv = builder
+        .build_load(f32t, sp, "sv")
+        .unwrap()
+        .into_float_value();
+    let cmp = builder
+        .build_float_compare(inkwell::FloatPredicate::OGT, sv, zero_f, "c")
+        .unwrap();
+    let res = builder
+        .build_select(cmp, sv, zero_f, "r")
+        .unwrap()
+        .into_float_value();
     let dp = unsafe { builder.build_gep(f32t, out, &[i], "dp").unwrap() };
     builder.build_store(dp, res).unwrap();
 
     let next = builder.build_int_add(i, one, "next").unwrap();
-    let cond = builder.build_int_compare(IntPredicate::SLT, next, count, "cond").unwrap();
+    let cond = builder
+        .build_int_compare(IntPredicate::SLT, next, count, "cond")
+        .unwrap();
     let latch = builder.get_insert_block().unwrap();
     phi.add_incoming(&[(&next, latch)]);
-    builder.build_conditional_branch(cond, loop_bb, exit_bb).unwrap();
+    builder
+        .build_conditional_branch(cond, loop_bb, exit_bb)
+        .unwrap();
     builder.position_at_end(exit_bb);
 }
 
@@ -719,16 +821,24 @@ fn emit_transpose_loops<'ctx>(
     builder.build_store(dp, sv).unwrap();
 
     let c_next = builder.build_int_add(c, one, "cnext").unwrap();
-    let c_cond = builder.build_int_compare(IntPredicate::SLT, c_next, cols_v, "cc").unwrap();
+    let c_cond = builder
+        .build_int_compare(IntPredicate::SLT, c_next, cols_v, "cc")
+        .unwrap();
     let c_latch = builder.get_insert_block().unwrap();
     c_phi.add_incoming(&[(&c_next, c_latch)]);
-    builder.build_conditional_branch(c_cond, c_loop, c_exit).unwrap();
+    builder
+        .build_conditional_branch(c_cond, c_loop, c_exit)
+        .unwrap();
     builder.position_at_end(c_exit);
 
     let r_next = builder.build_int_add(r, one, "rnext").unwrap();
-    let r_cond = builder.build_int_compare(IntPredicate::SLT, r_next, rows_v, "rc2").unwrap();
+    let r_cond = builder
+        .build_int_compare(IntPredicate::SLT, r_next, rows_v, "rc2")
+        .unwrap();
     r_phi.add_incoming(&[(&r_next, c_exit)]);
-    builder.build_conditional_branch(r_cond, r_loop, r_exit).unwrap();
+    builder
+        .build_conditional_branch(r_cond, r_loop, r_exit)
+        .unwrap();
     builder.position_at_end(r_exit);
 }
 
@@ -763,10 +873,14 @@ fn emit_loop_memcpy<'ctx>(
     builder.build_store(dp, sv).unwrap();
 
     let next = builder.build_int_add(i, one, "next").unwrap();
-    let cond = builder.build_int_compare(IntPredicate::SLT, next, count, "cond").unwrap();
+    let cond = builder
+        .build_int_compare(IntPredicate::SLT, next, count, "cond")
+        .unwrap();
     let cpy_latch = builder.get_insert_block().unwrap();
     phi.add_incoming(&[(&next, cpy_latch)]);
-    builder.build_conditional_branch(cond, loop_bb, exit_bb).unwrap();
+    builder
+        .build_conditional_branch(cond, loop_bb, exit_bb)
+        .unwrap();
     builder.position_at_end(exit_bb);
 }
 
@@ -805,10 +919,14 @@ fn emit_volatile_memcpy<'ctx>(
     st.set_volatile(true).unwrap();
 
     let next = builder.build_int_add(i, one, "vnxt").unwrap();
-    let cond = builder.build_int_compare(IntPredicate::SLT, next, count, "vcond").unwrap();
+    let cond = builder
+        .build_int_compare(IntPredicate::SLT, next, count, "vcond")
+        .unwrap();
     let latch = builder.get_insert_block().unwrap();
     phi.add_incoming(&[(&next, latch)]);
-    builder.build_conditional_branch(cond, loop_bb, exit_bb).unwrap();
+    builder
+        .build_conditional_branch(cond, loop_bb, exit_bb)
+        .unwrap();
     builder.position_at_end(exit_bb);
 }
 
@@ -846,10 +964,18 @@ fn infer_shape(graph: &Graph, v: ValueId) -> Vec<usize> {
     };
     match &node.op {
         Op::ConstTensor { shape, .. } => shape.clone(),
-        Op::Parameter(name) => graph.shape_signature.parameters
-            .get(name).cloned().unwrap_or_else(|| vec![1]),
-        Op::Input(name) => graph.shape_signature.inputs
-            .get(name).cloned().unwrap_or_else(|| vec![1]),
+        Op::Parameter(name) => graph
+            .shape_signature
+            .parameters
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| vec![1]),
+        Op::Input(name) => graph
+            .shape_signature
+            .inputs
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| vec![1]),
         Op::MatMul(l, r) => {
             let ls = infer_shape(graph, *l);
             let rs = infer_shape(graph, *r);

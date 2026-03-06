@@ -110,7 +110,8 @@ pub fn plan_memory(graph: &Graph) -> Result<MemoryPlan, MemoryPlanError> {
             let mut conflict = false;
             for active in &active_intervals {
                 // Check if intervals overlap
-                let overlap = val.start_node <= active.end_node && active.start_node <= val.end_node;
+                let overlap =
+                    val.start_node <= active.end_node && active.start_node <= val.end_node;
                 if overlap {
                     if let Some(active_offset) = offsets.get(&active.value) {
                         let active_end = active_offset + active.estimated_bytes;

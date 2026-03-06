@@ -1,16 +1,14 @@
-use std::collections::HashMap;
+use crate::ir::interpreter::{
+    execute_multiple_values_with_buffer, execute_multiple_values_with_saved_activations,
+    execute_multiple_values_with_schedule_context, execute_terminal_and_save_all,
+    execute_terminal_with_buffer,
+};
 use crate::ir::{
     Backend, CompilerFlags, DeterminismLevel, ExecutionContext, ExecutionPlan, Graph, NodeId,
     RuntimeValue, ValueId, compile_or_get_cached, verify_allocation,
     verify_no_undecomposed_backward_ops, verify_schedule,
 };
-use crate::ir::interpreter::{
-    execute_multiple_values_with_schedule_context,
-    execute_multiple_values_with_buffer,
-    execute_terminal_with_buffer,
-    execute_terminal_and_save_all,
-    execute_multiple_values_with_saved_activations,
-};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct RuntimeGatewayError {
@@ -59,10 +57,11 @@ pub fn execute_multiple_values_with_backend(
     context: &ExecutionContext,
 ) -> Result<HashMap<ValueId, RuntimeValue>, RuntimeGatewayError> {
     let _ = compile_plan_for_backend(graph, plan, backend)?;
-    execute_multiple_values_with_schedule_context(graph, ordered_nodes, targets, context)
-        .map_err(|err| RuntimeGatewayError {
+    execute_multiple_values_with_schedule_context(graph, ordered_nodes, targets, context).map_err(
+        |err| RuntimeGatewayError {
             message: format!("Runtime execute-multiple failed: {}", err.message),
-        })
+        },
+    )
 }
 
 /// Execute the terminal value reusing a pre-allocated buffer (avoids per-call heap allocation).
@@ -76,10 +75,11 @@ pub fn execute_terminal_with_backend_buffered(
     buf: &mut Vec<Option<RuntimeValue>>,
 ) -> Result<Option<RuntimeValue>, RuntimeGatewayError> {
     let _ = compile_plan_for_backend(graph, plan, backend)?;
-    execute_terminal_with_buffer(graph, ordered_nodes, context, buf)
-        .map_err(|err| RuntimeGatewayError {
+    execute_terminal_with_buffer(graph, ordered_nodes, context, buf).map_err(|err| {
+        RuntimeGatewayError {
             message: format!("Runtime execute-terminal-buffered failed: {}", err.message),
-        })
+        }
+    })
 }
 
 /// Execute multiple values reusing a pre-allocated buffer.
@@ -93,10 +93,11 @@ pub fn execute_multiple_values_with_backend_buffered(
     buf: &mut Vec<Option<RuntimeValue>>,
 ) -> Result<HashMap<ValueId, RuntimeValue>, RuntimeGatewayError> {
     let _ = compile_plan_for_backend(graph, plan, backend)?;
-    execute_multiple_values_with_buffer(graph, ordered_nodes, targets, context, buf)
-        .map_err(|err| RuntimeGatewayError {
+    execute_multiple_values_with_buffer(graph, ordered_nodes, targets, context, buf).map_err(
+        |err| RuntimeGatewayError {
             message: format!("Runtime execute-multiple-buffered failed: {}", err.message),
-        })
+        },
+    )
 }
 
 /// Forward pass that saves all intermediate activations into `fwd_buf`.
@@ -111,10 +112,11 @@ pub fn execute_forward_and_save(
     fwd_buf: &mut Vec<Option<RuntimeValue>>,
 ) -> Result<Option<RuntimeValue>, RuntimeGatewayError> {
     let _ = compile_plan_for_backend(graph, plan, backend)?;
-    execute_terminal_and_save_all(graph, ordered_nodes, context, fwd_buf)
-        .map_err(|err| RuntimeGatewayError {
+    execute_terminal_and_save_all(graph, ordered_nodes, context, fwd_buf).map_err(|err| {
+        RuntimeGatewayError {
             message: format!("Runtime forward-and-save failed: {}", err.message),
-        })
+        }
+    })
 }
 
 /// Backward pass reusing saved forward activations (avoids re-running the
@@ -131,7 +133,12 @@ pub fn execute_backward_with_saved_activations(
 ) -> Result<HashMap<ValueId, RuntimeValue>, RuntimeGatewayError> {
     let _ = compile_plan_for_backend(graph, plan, backend)?;
     execute_multiple_values_with_saved_activations(
-        graph, ordered_nodes, targets, context, fwd_saved, bwd_buf,
+        graph,
+        ordered_nodes,
+        targets,
+        context,
+        fwd_saved,
+        bwd_buf,
     )
     .map_err(|err| RuntimeGatewayError {
         message: format!("Runtime backward-with-activations failed: {}", err.message),

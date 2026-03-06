@@ -74,25 +74,33 @@ fn parse_safetensors_header(
             message: format!("Tensor entry '{name}' is not a JSON object"),
         })?;
 
-        let dtype = info_obj.get("dtype")
+        let dtype = info_obj
+            .get("dtype")
             .and_then(|v| v.as_str())
             .ok_or_else(|| TrainApiError {
                 message: format!("Missing 'dtype' for tensor '{name}'"),
             })?;
 
-        let shape_arr = info_obj.get("shape")
+        let shape_arr = info_obj
+            .get("shape")
             .and_then(|v| v.as_array())
             .ok_or_else(|| TrainApiError {
                 message: format!("Missing 'shape' for tensor '{name}'"),
             })?;
 
-        let shape: Vec<usize> = shape_arr.iter()
-            .map(|v| v.as_u64().ok_or_else(|| TrainApiError {
-                message: format!("Invalid shape element for tensor '{name}'"),
-            }).map(|x| x as usize))
+        let shape: Vec<usize> = shape_arr
+            .iter()
+            .map(|v| {
+                v.as_u64()
+                    .ok_or_else(|| TrainApiError {
+                        message: format!("Invalid shape element for tensor '{name}'"),
+                    })
+                    .map(|x| x as usize)
+            })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let offsets = info_obj.get("data_offsets")
+        let offsets = info_obj
+            .get("data_offsets")
             .and_then(|v| v.as_array())
             .ok_or_else(|| TrainApiError {
                 message: format!("Missing 'data_offsets' for tensor '{name}'"),
@@ -135,61 +143,89 @@ fn bytes_to_f32(dtype: &str, bytes: &[u8], name: &str) -> Result<Vec<f32>, Train
         "F32" => {
             if bytes.len() % 4 != 0 {
                 return Err(TrainApiError {
-                    message: format!("F32 tensor '{name}' byte length {} not divisible by 4", bytes.len()),
+                    message: format!(
+                        "F32 tensor '{name}' byte length {} not divisible by 4",
+                        bytes.len()
+                    ),
                 });
             }
-            Ok(bytes.chunks_exact(4)
+            Ok(bytes
+                .chunks_exact(4)
                 .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
                 .collect())
         }
         "F16" => {
             if bytes.len() % 2 != 0 {
                 return Err(TrainApiError {
-                    message: format!("F16 tensor '{name}' byte length {} not divisible by 2", bytes.len()),
+                    message: format!(
+                        "F16 tensor '{name}' byte length {} not divisible by 2",
+                        bytes.len()
+                    ),
                 });
             }
-            Ok(bytes.chunks_exact(2)
+            Ok(bytes
+                .chunks_exact(2)
                 .map(|b| f16_to_f32(u16::from_le_bytes([b[0], b[1]])))
                 .collect())
         }
         "BF16" => {
             if bytes.len() % 2 != 0 {
                 return Err(TrainApiError {
-                    message: format!("BF16 tensor '{name}' byte length {} not divisible by 2", bytes.len()),
+                    message: format!(
+                        "BF16 tensor '{name}' byte length {} not divisible by 2",
+                        bytes.len()
+                    ),
                 });
             }
-            Ok(bytes.chunks_exact(2)
+            Ok(bytes
+                .chunks_exact(2)
                 .map(|b| bf16_to_f32(u16::from_le_bytes([b[0], b[1]])))
                 .collect())
         }
         "F64" => {
             if bytes.len() % 8 != 0 {
                 return Err(TrainApiError {
-                    message: format!("F64 tensor '{name}' byte length {} not divisible by 8", bytes.len()),
+                    message: format!(
+                        "F64 tensor '{name}' byte length {} not divisible by 8",
+                        bytes.len()
+                    ),
                 });
             }
-            Ok(bytes.chunks_exact(8)
-                .map(|b| f64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]) as f32)
+            Ok(bytes
+                .chunks_exact(8)
+                .map(|b| {
+                    f64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]) as f32
+                })
                 .collect())
         }
         "I32" => {
             if bytes.len() % 4 != 0 {
                 return Err(TrainApiError {
-                    message: format!("I32 tensor '{name}' byte length {} not divisible by 4", bytes.len()),
+                    message: format!(
+                        "I32 tensor '{name}' byte length {} not divisible by 4",
+                        bytes.len()
+                    ),
                 });
             }
-            Ok(bytes.chunks_exact(4)
+            Ok(bytes
+                .chunks_exact(4)
                 .map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]) as f32)
                 .collect())
         }
         "I64" => {
             if bytes.len() % 8 != 0 {
                 return Err(TrainApiError {
-                    message: format!("I64 tensor '{name}' byte length {} not divisible by 8", bytes.len()),
+                    message: format!(
+                        "I64 tensor '{name}' byte length {} not divisible by 8",
+                        bytes.len()
+                    ),
                 });
             }
-            Ok(bytes.chunks_exact(8)
-                .map(|b| i64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]) as f32)
+            Ok(bytes
+                .chunks_exact(8)
+                .map(|b| {
+                    i64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]) as f32
+                })
                 .collect())
         }
         other => Err(TrainApiError {
@@ -251,7 +287,9 @@ pub fn save_safetensors(
         }
         let end = tensor_data.len();
 
-        let shape_str = tensor.shape.iter()
+        let shape_str = tensor
+            .shape
+            .iter()
             .map(|d| d.to_string())
             .collect::<Vec<_>>()
             .join(",");

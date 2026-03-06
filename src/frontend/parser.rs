@@ -305,7 +305,11 @@ impl Parser {
                                 self.advance();
                                 row.push(-v);
                             }
-                            _ => return Err(self.error_here("Expected number after '-' in infer input")),
+                            _ => {
+                                return Err(
+                                    self.error_here("Expected number after '-' in infer input")
+                                );
+                            }
                         }
                     }
                     _ => break,
@@ -410,7 +414,10 @@ impl Parser {
         let mut fields = Vec::new();
         for stmt in fields_raw {
             if let Stmt::VarDecl { name, value, span } = stmt {
-                if let Expr::Symbol { name: type_name, .. } = value {
+                if let Expr::Symbol {
+                    name: type_name, ..
+                } = value
+                {
                     let field_type = match type_name.as_str() {
                         "int" => ValueType::Int,
                         "float" => ValueType::Float,
@@ -810,7 +817,9 @@ impl Parser {
         let (callee, callee_span) = match expr {
             Expr::Ident { name, span } => (name, span),
             _ => {
-                return Err(self.error_here("Only identifier or member access can be used as function callee"));
+                return Err(self.error_here(
+                    "Only identifier or member access can be used as function callee",
+                ));
             }
         };
 
@@ -1101,8 +1110,8 @@ fn suggest_top_level_keyword(candidate: &str) -> Option<&'static str> {
     best_suggestion(
         candidate,
         &[
-            "model", "dataset", "train", "save", "load", "print", "fn", "return", "struct", "if", "elif",
-            "else", "loop", "for", "in", "on", "as",
+            "model", "dataset", "train", "save", "load", "print", "fn", "return", "struct", "if",
+            "elif", "else", "loop", "for", "in", "on", "as",
         ],
     )
 }
