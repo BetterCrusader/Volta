@@ -15,6 +15,7 @@ const USAGE: &str = "Usage:
   volta check <file.vt> [--quiet]
   volta info <file.vt>
   volta extract <model_name>
+  volta export-py <file.vt>
   volta compile <file.vt> [-o <output>]
   volta compile-train <file.vt> [-o <output.dll>]
   volta doctor [--json] [--strict]
@@ -58,6 +59,7 @@ enum CommandKind {
 struct CommandSpec {
     kind: CommandKind,
     path: Option<String>,
+    output_path: Option<String>,
     doctor_json: bool,
     doctor_strict: bool,
     quiet: bool,
@@ -154,7 +156,6 @@ fn main() -> ExitCode {
             #[cfg(feature = "llvm-codegen")]
             {
                 use volta::executor::Executor;
-                use volta::ir::codegen::{compile_graph_to_object, link_object_to_exe};
                 let path = _path;
                 let source = match read_source(path) {
                     Ok(s) => s,
@@ -181,7 +182,9 @@ fn main() -> ExitCode {
                         return ExitCode::from(1);
                     }
                 }
-                match executor.compile_first_model_to_object(path) {
+                match executor
+                    .compile_first_model_to_object(path, command.output_path.as_deref())
+                {
                     Ok(exe_path) => {
                         println!("Compiled: {exe_path}");
                         ExitCode::SUCCESS
@@ -231,9 +234,12 @@ fn main() -> ExitCode {
                 }
             }
             let result = if command.use_rust {
-                executor.compile_first_model_to_train_rust_dll(path)
+                executor.compile_first_model_to_train_rust_dll(
+                    path,
+                    command.output_path.as_deref(),
+                )
             } else {
-                executor.compile_first_model_to_train_dll(path)
+                executor.compile_first_model_to_train_dll(path, command.output_path.as_deref())
             };
             match result {
                 Ok(dll_path) => {
@@ -363,6 +369,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
         return Ok(CommandSpec {
             kind: CommandKind::Help,
             path: None,
+            output_path: None,
             doctor_json: false,
             doctor_strict: false,
             quiet: false,
@@ -375,6 +382,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
         return Ok(CommandSpec {
             kind: CommandKind::LegacyBenchInfer,
             path: None,
+            output_path: None,
             doctor_json: false,
             doctor_strict: false,
             quiet: false,
@@ -385,6 +393,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
         return Ok(CommandSpec {
             kind: CommandKind::LegacyTuneMatmul,
             path: None,
+            output_path: None,
             doctor_json: false,
             doctor_strict: false,
             quiet: false,
@@ -406,6 +415,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
             Ok(CommandSpec {
                 kind: CommandKind::Surgeon,
                 path: Some(args[1].clone()),
+                output_path: None,
                 doctor_json: false,
                 doctor_strict: false,
                 quiet: false,
@@ -439,6 +449,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
             Ok(CommandSpec {
                 kind: CommandKind::Doctor,
                 path: None,
+                output_path: None,
                 doctor_json,
                 doctor_strict,
                 quiet: false,
@@ -453,6 +464,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
             Ok(CommandSpec {
                 kind: CommandKind::Version,
                 path: None,
+                output_path: None,
                 doctor_json: false,
                 doctor_strict: false,
                 quiet: false,
@@ -466,6 +478,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
             Ok(CommandSpec {
                 kind: CommandKind::Help,
                 path: None,
+                output_path: None,
                 doctor_json: false,
                 doctor_strict: false,
                 quiet: false,
@@ -484,6 +497,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
                 Ok(CommandSpec {
                     kind: CommandKind::Run,
                     path: Some(args[0].clone()),
+                    output_path: None,
                     doctor_json: false,
                     doctor_strict: false,
                     quiet: false,
@@ -498,15 +512,22 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
 }
 
 fn parse_compile_command(args: &[String]) -> Result<CommandSpec, String> {
-    // volta compile <file.vt> [-o <output>]
-    // We reuse `path` for the .vt file; output goes in a separate field not
-    // yet in CommandSpec — for now we just store the .vt path and derive the
-    // output name from it (replace .vt → .exe).
     let mut path: Option<String> = None;
+    let mut output_path: Option<String> = None;
     let mut i = 1usize;
     while i < args.len() {
         if args[i] == "-o" {
-            i += 2; // skip -o and its value for now (handled at runtime)
+            let output = args
+                .get(i + 1)
+                .ok_or_else(|| "'compile -o' requires an output path".to_string())?;
+            if output.starts_with('-') {
+                return Err("'compile -o' requires an output path".to_string());
+            }
+            if output_path.is_some() {
+                return Err("'compile' accepts '-o' at most once".to_string());
+            }
+            output_path = Some(output.clone());
+            i += 2;
             continue;
         }
         if args[i].starts_with('-') {
@@ -524,6 +545,7 @@ fn parse_compile_command(args: &[String]) -> Result<CommandSpec, String> {
     Ok(CommandSpec {
         kind: CommandKind::Compile,
         path: Some(path),
+        output_path,
         doctor_json: false,
         doctor_strict: false,
         quiet: false,
@@ -534,14 +556,28 @@ fn parse_compile_command(args: &[String]) -> Result<CommandSpec, String> {
 fn parse_compile_command_kind(kind: CommandKind, args: &[String]) -> Result<CommandSpec, String> {
     let cmd_name = &args[0];
     let mut path: Option<String> = None;
+    let mut output_path: Option<String> = None;
     let mut use_rust = false;
     let mut i = 1usize;
     while i < args.len() {
         if args[i] == "-o" {
+            let output = args
+                .get(i + 1)
+                .ok_or_else(|| format!("'{cmd_name} -o' requires an output path"))?;
+            if output.starts_with('-') {
+                return Err(format!("'{cmd_name} -o' requires an output path"));
+            }
+            if output_path.is_some() {
+                return Err(format!("'{cmd_name}' accepts '-o' at most once"));
+            }
+            output_path = Some(output.clone());
             i += 2;
             continue;
         }
         if args[i] == "--rust" {
+            if use_rust {
+                return Err(format!("'{cmd_name}' accepts '--rust' at most once"));
+            }
             use_rust = true;
             i += 1;
             continue;
@@ -561,6 +597,7 @@ fn parse_compile_command_kind(kind: CommandKind, args: &[String]) -> Result<Comm
     Ok(CommandSpec {
         kind,
         path: Some(path),
+        output_path,
         doctor_json: false,
         doctor_strict: false,
         quiet: false,
@@ -589,6 +626,7 @@ fn parse_init_command(args: &[String]) -> Result<CommandSpec, String> {
     Ok(CommandSpec {
         kind: CommandKind::Init,
         path: Some(target_dir),
+        output_path: None,
         doctor_json: false,
         doctor_strict: false,
         quiet: false,
@@ -597,12 +635,14 @@ fn parse_init_command(args: &[String]) -> Result<CommandSpec, String> {
 }
 
 fn unknown_command_message(input: &str) -> String {
+    const EXPECTED_COMMANDS: &str =
+        "run/check/info/extract/export-py/compile/compile-train/doctor/init/version/help";
     if let Some(suggestion) = best_suggestion(input, &CLI_COMMANDS) {
         return format!(
-            "Unknown command '{input}'. Did you mean '{suggestion}'? Expected run/check/info/doctor/init/version/help"
+            "Unknown command '{input}'. Did you mean '{suggestion}'? Expected {EXPECTED_COMMANDS}"
         );
     }
-    format!("Unknown command '{input}'. Expected run/check/info/doctor/init/version/help")
+    format!("Unknown command '{input}'. Expected {EXPECTED_COMMANDS}")
 }
 
 fn parse_file_command(
@@ -668,6 +708,7 @@ fn parse_file_command(
     Ok(CommandSpec {
         kind,
         path: Some(path.to_string()),
+        output_path: None,
         doctor_json: false,
         doctor_strict: false,
         quiet,
@@ -970,6 +1011,7 @@ mod tests {
         assert_eq!(command.kind, CommandKind::Run);
         assert_eq!(command.path.as_deref(), Some("example.vt"));
         assert!(!command.quiet);
+        assert!(command.output_path.is_none());
     }
 
     #[test]
@@ -1074,6 +1116,7 @@ mod tests {
         assert_eq!(command.kind, CommandKind::Run);
         assert_eq!(command.path.as_deref(), Some("examples/mnist.vt"));
         assert!(!command.quiet);
+        assert!(command.output_path.is_none());
     }
 
     #[test]
@@ -1087,6 +1130,7 @@ mod tests {
         assert_eq!(command.kind, CommandKind::Run);
         assert_eq!(command.path.as_deref(), Some("example.vt"));
         assert!(command.quiet);
+        assert!(command.output_path.is_none());
     }
 
     #[test]
@@ -1100,6 +1144,7 @@ mod tests {
         assert_eq!(command.kind, CommandKind::Check);
         assert_eq!(command.path.as_deref(), Some("example.vt"));
         assert!(command.quiet);
+        assert!(command.output_path.is_none());
     }
 
     #[test]
@@ -1179,6 +1224,7 @@ mod tests {
         let command = parse_command(&args).expect("init should parse");
         assert_eq!(command.kind, CommandKind::Init);
         assert_eq!(command.path.as_deref(), Some("."));
+        assert!(command.output_path.is_none());
     }
 
     #[test]
@@ -1187,6 +1233,7 @@ mod tests {
         let command = parse_command(&args).expect("init with custom dir should parse");
         assert_eq!(command.kind, CommandKind::Init);
         assert_eq!(command.path.as_deref(), Some("my-volta-project"));
+        assert!(command.output_path.is_none());
     }
 
     #[test]
@@ -1194,6 +1241,59 @@ mod tests {
         let args = vec!["init".to_string(), "--force".to_string()];
         let err = parse_command(&args).expect_err("init flags should fail");
         assert!(err.contains("'init' does not accept flags"));
+    }
+
+    #[test]
+    fn parse_compile_accepts_output_path() {
+        let args = vec![
+            "compile".to_string(),
+            "example.vt".to_string(),
+            "-o".to_string(),
+            "build/out.dll".to_string(),
+        ];
+        let command = parse_command(&args).expect("compile should parse");
+        assert_eq!(command.kind, CommandKind::Compile);
+        assert_eq!(command.path.as_deref(), Some("example.vt"));
+        assert_eq!(command.output_path.as_deref(), Some("build/out.dll"));
+    }
+
+    #[test]
+    fn parse_compile_rejects_missing_output_path() {
+        let args = vec![
+            "compile".to_string(),
+            "example.vt".to_string(),
+            "-o".to_string(),
+        ];
+        let err = parse_command(&args).expect_err("missing -o value must fail");
+        assert!(err.contains("requires an output path"));
+    }
+
+    #[test]
+    fn parse_compile_train_accepts_output_path_and_rust() {
+        let args = vec![
+            "compile-train".to_string(),
+            "example.vt".to_string(),
+            "-o".to_string(),
+            "build/train.dll".to_string(),
+            "--rust".to_string(),
+        ];
+        let command = parse_command(&args).expect("compile-train should parse");
+        assert_eq!(command.kind, CommandKind::CompileTrain);
+        assert_eq!(command.path.as_deref(), Some("example.vt"));
+        assert_eq!(command.output_path.as_deref(), Some("build/train.dll"));
+        assert!(command.use_rust);
+    }
+
+    #[test]
+    fn parse_compile_train_rejects_missing_output_path() {
+        let args = vec![
+            "compile-train".to_string(),
+            "example.vt".to_string(),
+            "-o".to_string(),
+            "--rust".to_string(),
+        ];
+        let err = parse_command(&args).expect_err("missing -o value must fail");
+        assert!(err.contains("requires an output path"));
     }
 
     #[test]
