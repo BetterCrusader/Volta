@@ -76,7 +76,7 @@ pub fn compile_mlp_train_rust_dll(
         "[package]\nname = \"volta_train_rust\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
         [lib]\ncrate-type = [\"cdylib\"]\n\n\
         [profile.release]\npanic = \"abort\"\nopt-level = 3\n\n\
-        [dependencies]\ngemm = {{ version = \"{gemm_version}\", features = [\"rayon\", \"x86-v4\"] }}\n"
+        [dependencies]\ngemm = {{ version = \"{gemm_version}\", features = [\"rayon\", \"x86-v4\"] }}\nrayon = \"1\"\n"
     );
     std::fs::write(crate_dir.join("Cargo.toml"), &cargo_toml).map_err(|e| {
         RustTrainCodegenError {
@@ -192,13 +192,13 @@ fn generate_rust_source(
     s.push_str("}\n\n");
     // Adam weight update: dw already computed, update m/v/w in-place with AVX2+Rayon
     // Threshold: parallelize when n >= 1<<17 (128K elements)
+    s.push_str("use rayon::prelude::*;\n");
     s.push_str("fn adam_update(w: *mut f32, mw: *mut f32, vw: *mut f32, dw: *const f32, n: usize, b1: f32, b2: f32, bc1: f32, bc2: f32, lr: f32, eps: f32, wd: f32) {\n");
+    s.push_str("    const CHUNK: usize = 1 << 13;\n");
     s.push_str("    if n >= 1 << 17 {\n");
-    s.push_str("        use rayon::prelude::*;\n");
-    s.push_str("        let chunk = 1 << 13usize;\n");
     s.push_str("        let w_s = w as usize; let mw_s = mw as usize; let vw_s = vw as usize; let dw_s = dw as usize;\n");
-    s.push_str("        (0..n).into_par_iter().step_by(chunk).for_each(|base| {\n");
-    s.push_str("            let end = (base + chunk).min(n);\n");
+    s.push_str("        (0..n).into_par_iter().step_by(CHUNK).for_each(|base: usize| {\n");
+    s.push_str("            let end: usize = (base + CHUNK).min(n);\n");
     s.push_str("            unsafe { adam_update_slice((w_s + base*4) as *mut f32, (mw_s + base*4) as *mut f32, (vw_s + base*4) as *mut f32, (dw_s + base*4) as *const f32, 0, end - base, b1, b2, bc1, bc2, lr, eps, wd); }\n");
     s.push_str("        });\n");
     s.push_str("    } else {\n");
