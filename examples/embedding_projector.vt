@@ -1,0 +1,17 @@
+// Embedding projector: maps high-dim sparse features to dense representation.
+// Common in recommendation systems and NLP pipelines.
+// Topology: 4096 (sparse) -> 512 -> 128 -> 64
+
+model embedding_projector
+    layers 4096 512 128 64
+    activation relu
+
+dataset sparse_synthetic
+    type synthetic
+    batch 32
+
+train embedding_projector on sparse_synthetic
+    epochs 50
+    optimizer adam
+    lr 0.001
+    device cpu

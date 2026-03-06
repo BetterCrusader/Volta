@@ -1,0 +1,18 @@
+// Transformer FFN block: the feed-forward sublayer used inside each Transformer layer.
+// Standard ratio: hidden_dim = 4 * model_dim
+// Here: model_dim=256, hidden_dim=1024, output=256
+// This is the compute-intensive part of GPT/BERT-style models.
+
+model transformer_ffn
+    layers 256 1024 256
+    activation gelu
+
+dataset synthetic_seq
+    type synthetic
+    batch 32
+
+train transformer_ffn on synthetic_seq
+    epochs 50
+    optimizer adam
+    lr 0.0001
+    device cpu

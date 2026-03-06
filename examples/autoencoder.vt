@@ -1,0 +1,19 @@
+// Autoencoder: encoder compresses, decoder reconstructs.
+// Symmetric topology around a bottleneck.
+// Encoder: 784 -> 256 -> 64
+// Decoder: 64 -> 256 -> 784
+// Trained end-to-end as a single MLP (input=784, output=784).
+
+model autoencoder
+    layers 784 256 64 256 784
+    activation relu
+
+dataset image_synthetic
+    type synthetic
+    batch 64
+
+train autoencoder on image_synthetic
+    epochs 50
+    optimizer adam
+    lr 0.001
+    device cpu

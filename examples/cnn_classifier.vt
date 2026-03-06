@@ -1,0 +1,17 @@
+// CNN-style classifier: convolutional feature extraction followed by MLP head.
+// Topology: 784 (28x28 flattened) -> 512 -> 256 -> 128 -> 10
+// Simulates a LeNet-style classification head on MNIST-sized inputs.
+
+model cnn_classifier
+    layers 784 512 256 128 10
+    activation relu
+
+dataset mnist_synthetic
+    type synthetic
+    batch 64
+
+train cnn_classifier on mnist_synthetic
+    epochs 50
+    optimizer sgd
+    lr 0.01
+    device cpu

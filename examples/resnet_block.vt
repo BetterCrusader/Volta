@@ -1,0 +1,17 @@
+// ResNet-style block: two linear projections with same in/out dimension.
+// The residual connection is approximated here as the linear path only.
+// Topology: 512 -> 512 -> 512 (bottleneck variant)
+
+model resnet_block
+    layers 512 512 512
+    activation relu
+
+dataset synthetic_features
+    type synthetic
+    batch 64
+
+train resnet_block on synthetic_features
+    epochs 50
+    optimizer sgd
+    lr 0.01
+    device cpu
