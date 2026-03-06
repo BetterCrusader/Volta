@@ -22,7 +22,17 @@ const USAGE: &str = "Usage:
   volta version
   volta help";
 const CLI_COMMANDS: [&str; 11] = [
-    "run", "check", "info", "extract", "export-py", "compile", "compile-train", "doctor", "init", "version", "help",
+    "run",
+    "check",
+    "info",
+    "extract",
+    "export-py",
+    "compile",
+    "compile-train",
+    "doctor",
+    "init",
+    "version",
+    "help",
 ];
 const INIT_MODEL_TEMPLATE: &str = "x 1\nprint x\n";
 const INIT_CONFIG_TEMPLATE: &str = "[project]\nname = \"volta-project\"\nentry = \"model.vt\"\n";
@@ -133,7 +143,7 @@ fn main() -> ExitCode {
                 eprintln!("❌ Surgeon error: {}", e);
                 return ExitCode::FAILURE;
             }
-            return ExitCode::SUCCESS;
+            ExitCode::SUCCESS
         }
 
         CommandKind::Compile => {
@@ -143,36 +153,50 @@ fn main() -> ExitCode {
             };
             #[cfg(feature = "llvm-codegen")]
             {
-                use volta::ir::codegen::{compile_graph_to_object, link_object_to_exe};
                 use volta::executor::Executor;
+                use volta::ir::codegen::{compile_graph_to_object, link_object_to_exe};
                 let path = _path;
                 let source = match read_source(path) {
                     Ok(s) => s,
-                    Err(e) => { eprintln!("{e}"); return ExitCode::from(2); }
+                    Err(e) => {
+                        eprintln!("{e}");
+                        return ExitCode::from(2);
+                    }
                 };
                 let mut parser = Parser::new(Lexer::new(&source).tokenize());
                 let program = match parser.parse_program() {
                     Ok(p) => p,
-                    Err(e) => { eprintln!("Parse error: {}", e.message); return ExitCode::from(1); }
+                    Err(e) => {
+                        eprintln!("Parse error: {}", e.message);
+                        return ExitCode::from(1);
+                    }
                 };
                 // Run the program to train the model (or load weights), then
                 // extract the trained graph + weights for codegen.
                 let mut executor = Executor::new();
                 match executor.execute(&program) {
                     Ok(()) => {}
-                    Err(e) => { eprintln!("Runtime error: {}", e.message); return ExitCode::from(1); }
+                    Err(e) => {
+                        eprintln!("Runtime error: {}", e.message);
+                        return ExitCode::from(1);
+                    }
                 }
                 match executor.compile_first_model_to_object(path) {
                     Ok(exe_path) => {
                         println!("Compiled: {exe_path}");
                         ExitCode::SUCCESS
                     }
-                    Err(e) => { eprintln!("Compile error: {e}"); ExitCode::from(1) }
+                    Err(e) => {
+                        eprintln!("Compile error: {e}");
+                        ExitCode::from(1)
+                    }
                 }
             }
             #[cfg(not(feature = "llvm-codegen"))]
             {
-                eprintln!("'compile' requires the 'llvm-codegen' feature. Rebuild with: cargo build --features llvm-codegen");
+                eprintln!(
+                    "'compile' requires the 'llvm-codegen' feature. Rebuild with: cargo build --features llvm-codegen"
+                );
                 ExitCode::from(1)
             }
         }
@@ -184,18 +208,27 @@ fn main() -> ExitCode {
             };
             let source = match read_source(path) {
                 Ok(s) => s,
-                Err(e) => { eprintln!("{e}"); return ExitCode::from(2); }
+                Err(e) => {
+                    eprintln!("{e}");
+                    return ExitCode::from(2);
+                }
             };
             let mut parser = Parser::new(Lexer::new(&source).tokenize());
             let program = match parser.parse_program() {
                 Ok(p) => p,
-                Err(e) => { eprintln!("Parse error: {}", e.message); return ExitCode::from(1); }
+                Err(e) => {
+                    eprintln!("Parse error: {}", e.message);
+                    return ExitCode::from(1);
+                }
             };
             let mut executor = Executor::new();
             // Run the script — this trains the model (or initializes it)
             match executor.execute(&program) {
                 Ok(()) => {}
-                Err(e) => { eprintln!("Runtime error: {}", e.message); return ExitCode::from(1); }
+                Err(e) => {
+                    eprintln!("Runtime error: {}", e.message);
+                    return ExitCode::from(1);
+                }
             }
             let result = if command.use_rust {
                 executor.compile_first_model_to_train_rust_dll(path)
@@ -207,7 +240,10 @@ fn main() -> ExitCode {
                     println!("Training DLL compiled: {dll_path}");
                     ExitCode::SUCCESS
                 }
-                Err(e) => { eprintln!("compile-train error: {e}"); ExitCode::from(1) }
+                Err(e) => {
+                    eprintln!("compile-train error: {e}");
+                    ExitCode::from(1)
+                }
             }
         }
 
@@ -286,11 +322,12 @@ fn main() -> ExitCode {
                     ExitCode::SUCCESS
                 }
                 CommandKind::ExportPy => {
-                    let python_code = volta::utils::interop::python_exporter::emit_pytorch(&program);
+                    let python_code =
+                        volta::utils::interop::python_exporter::emit_pytorch(&program);
                     println!("{}", python_code);
                     ExitCode::SUCCESS
                 }
-        CommandKind::Run => {
+                CommandKind::Run => {
                     let mut executor = Executor::new();
                     match executor.execute(&program) {
                         Ok(()) => {
@@ -374,7 +411,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
                 quiet: false,
                 use_rust: false,
             })
-        },
+        }
         "doctor" => {
             let mut doctor_json = false;
             let mut doctor_strict = false;
