@@ -1,0 +1,13 @@
+model bench_wide
+    layers 256 512 512 256 128 1
+    activation relu
+
+dataset bench_data_wide
+    type synthetic
+    batch 64
+
+train bench_wide on bench_data_wide
+    epochs 50
+    optimizer sgd
+    lr 0.01
+    device cpu

@@ -1,205 +1,153 @@
-# Volta: Deterministic-First Compiler + ML Runtime (Experimental)
+# Volta
 
-Most ML stacks optimize for velocity first and explain behavior later.
-Volta does the opposite: **same inputs, same graph, same policy, same result** is the contract.
+Volta is an experimental ML compiler and runtime written in Rust. It has its own language (`.vt` files), its own IR, its own codegen pipeline, and a CPU training backend that outperforms PyTorch eager mode on a range of MLP workloads.
 
-## Read This First (Honest Status)
+This is not a framework. It is not production-ready globally. It is a focused engineering project with a determinism-first design and a codegen path that produces verifiably fast native training code.
 
-- Volta is **experimental** and still early-stage.
-- The current hardening wave in this repo was built rapidly in about **4 days** (2026-02-20 to 2026-02-23), then locked behind strict quality gates.
-- This is **not** a full replacement for PyTorch. It is a deterministic-first engine for a narrower, governed scope.
+---
 
-If you need broad ecosystem coverage today, use PyTorch.
-If you need hard replayability and explicit failure semantics for supported paths, Volta is where we are pushing harder.
+## Why Volta exists
 
-## Why This Exists
+Most ML frameworks sacrifice two things for developer velocity: **determinism** and **raw performance**. PyTorch gives you flexibility, but "same inputs" does not guarantee "same output" across runs, seeds, or thread counts. And its CPU path is general-purpose — it was not built to be beaten on narrow, controlled workloads.
 
-When reproducibility is optional, production debugging becomes expensive guesswork.
-Volta makes reproducibility a first-class runtime property:
+Volta bets on the opposite: a compiler approach where the model is compiled into a native DLL with fixed weights, fixed topology, and deterministic execution. The result, for MLP training, is measurable.
 
-- verifier-first graph discipline
-- deterministic scheduling and allocation
-- explicit unsupported-path failures (no silent fallback)
-- policy-driven release gates
+---
 
-## Where Volta Is Better Than PyTorch (Today, Narrow Scope)
+## Current strengths / current limitations
 
-This comparison is intentionally scoped and factual.
+**Strengths (measured, reproducible):**
+- CPU training codegen outperforms PyTorch eager (6 threads, MKL) by 35–67% on MLP workloads at B≤64
+- Deterministic execution by design: same inputs → identical outputs, bit-for-bit
+- Full codegen pipeline: `.vt` file → IR → Rust/LLVM → native `.dll` → benchmark
+- AVX2 transpose kernels, fused SGD-GEMM, MKL hybrid backend for SGD weight updates
+- Working `.vt` language: lexer, parser, semantic analysis, interpreter
+- IR with graph optimizations: constant folding, DCE, CSE, algebraic simplification, autograd
 
-- **Determinism as a product contract:** replay discipline is designed into scheduler/allocation/runtime behavior, not treated as best effort.
-- **No silent fallback policy:** unsupported paths are expected to fail loudly, not quietly switch execution semantics.
-- **Governance-backed verification lanes:** Quality Fortress gates enforce determinism and contract alignment in CI.
+**Limitations (honest):**
+- CPU performance advantage disappears at B≥128 — PyTorch MKL wins on large GEMMs
+- Adam optimizer is currently 1.9× slower than PyTorch (separate dW GEMM, no fusion)
+- CUDA backend: files exist and compile behind `--features cuda`, but GPU perf is uncharted
+- No installer, no package, no Python bindings — build from source only
+- Not tested on macOS or Linux (developed on Windows 11 x86-64)
+- Many high-level layer types (`LSTM`, `MultiHeadAttention`, `LayerNorm`) exist in IR but are not exercised by the codegen path — only dense MLP is benchmarked end-to-end
 
-## Where Volta Is Not Better (Yet)
+---
 
-- PyTorch has vastly larger model/operator ecosystem and tooling.
-- Volta ONNX import is a constrained Wave 1/2 static subset, not full ONNX breadth.
-- Some paths are intentionally explicit stubs/not-implemented (for example selected backward/operator combinations), by design, to avoid fake readiness.
-
-## What Works Right Now
-
-- Parse and execute Volta DSL programs
-- Compile to strict SSA IR
-- Run deterministic CPU and CUDA validation lanes
-- Import ONNX Wave 1 and Wave 2 static contracts under governance
-- Train/infer through guarded runtime gateways with explicit policy checks
-
-## Current Limits (Explicit, No Marketing Spin)
-
-- ONNX scope is partial and static by design.
-- Some autograd and CUDA paths are explicit fail-fast non-support where implementation is incomplete.
-- This repo prioritizes correctness and determinism over broad operator count.
-
-Details are tracked in `docs/ONNX_COVERAGE.md` and governance docs.
-
-## Quick Start
+## Quickstart
 
 ```bash
-cargo run -- init quickstart
-cd quickstart
-cargo run -- run model.vt
+git clone https://github.com/BetterCrusader/Volta.git
+cd Volta
+
+# Build CLI (requires Rust stable + LLVM 21 for codegen)
+cargo build --release
+
+# Run XOR example (interpreter path, no LLVM needed)
+cargo run --release -- run examples/xor.vt
+
+# Check syntax
+cargo run --release -- check examples/xor.vt
+
+# Run tests
+cargo test --workspace
 ```
 
-Main CLI commands:
+**For the codegen/benchmark path**, see [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md#how-to-reproduce) — requires LLVM 21 and a configured Rust toolchain.
 
-```bash
-volta run <file.vt> [--quiet]
-volta check <file.vt> [--quiet]
-volta info <file.vt>
-volta doctor [--json] [--strict]
-volta init [project_dir]
-volta version
-volta help
+---
+
+## Benchmark highlights
+
+All results: Windows 11, x86-64, 6-core CPU, 30 outer runs × 7 inner × 50 steps, 90s cooldown. No trimming.
+
+| Architecture | B | Volta | PyTorch 6T | Volta faster by |
+|---|---|---|---|---|
+| MLP 256→512→512→256→1 | 64 | **0.633 ms** | 0.856 ms | **+35%** |
+| MLP 512→1024→1024→512→256→1 | 64 | **1.703 ms** | 2.440 ms | **+43%** |
+| MLP 512→2048→2048→512→1 | 64 | **5.054 ms** | 8.457 ms | **+67%** |
+| MLP 512→1024→1024→512→256→1 | 128 | 3.659 ms | 3.628 ms | **~equal** |
+
+**Honest note**: Volta wins at B≤64. At B=128 the result is statistical parity. At B≥256 PyTorch MKL is faster. Adam optimizer is slower in Volta. See full tables, caveats, and reproduce instructions in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+
+---
+
+## Architecture at a glance
+
+```
+.vt source
+    └─ Lexer → Parser → AST → SemanticAnalyzer
+                                    └─ Executor (interpreter path)
+                                    └─ IR Builder
+                                            └─ Graph Optimizations (DCE, CSE, fold, ...)
+                                            └─ Autograd (backward graph)
+                                            └─ Scheduler (deterministic topo sort)
+                                            └─ Codegen
+                                                ├─ LLVM IR → .o → .dll  (inference)
+                                                └─ Rust source → cargo  (training DLL)
+                                                        └─ gemm crate + MKL hybrid + AVX2
 ```
 
-Command intent:
+Full architecture details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 
-- `run`: parse + semantic + execute
-- `check`: parse + semantic validation (no execution)
-- `info`: structural summary (statements and topology)
-- `doctor`: environment and determinism readiness report
-- `init`: scaffold a Volta project quickly
+---
 
-## Architecture In One View
+## CLI
 
-```text
-Source / Model API
-    -> Frontend (lexer, parser, semantic)
-    -> SSA IR
-    -> Verifier + Shape Inference
-    -> Scheduler
-    -> Allocation
-    -> ExecutionPlan
-    -> Backend / Runtime Execution
+```
+volta run <file.vt>             # Interpret and execute
+volta check <file.vt>           # Syntax + semantic check, no execution
+volta info <file.vt>            # Show model topology info
+volta compile <file.vt>         # Compile inference DLL (requires LLVM)
+volta compile-train <file.vt>   # Compile training DLL
+volta compile-train <file.vt> --rust  # Rust-based training DLL (faster)
+volta doctor                    # Environment diagnostics
+volta extract <model_name>      # Reverse-engineer GGUF/SafeTensors to .vt
+volta init [dir]                # Initialize new project
 ```
 
-Training path:
+---
 
-```text
-Forward Graph
-    -> Reverse-mode autograd builds separate Backward Graph
-    -> Build ExecutionPlan for forward and backward
-    -> Execute by schedule
-    -> Apply optimizer in runtime layer (SGD/Adam)
-```
-
-## Language Snapshot
+## Language example
 
 ```vt
-lr 0.001
-
 model brain
-    layers 784 256 128 10
+    layers 512 1024 1024 512 256 1
     activation relu
-    optimizer adam lr
 
-dataset mnist
-    batch 32
-    shuffle true
+dataset bench_data
+    type synthetic
+    batch 64
 
-train brain on mnist
-    epochs 3
-    device auto
-
-print "training complete"
+train brain on bench_data
+    epochs 50
+    optimizer sgd
+    lr 0.01
+    device cpu
 ```
 
-## Build and Verification
+---
 
-```bash
-cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-targets --all-features
-cargo test --features onnx-import
-cargo check --manifest-path fuzz/Cargo.toml
-```
+## Install / platform note
 
-## Quality Fortress Gates
+- **Windows x86-64**: fully tested
+- **Linux/macOS**: not tested; should compile for the interpreter path, codegen path needs LLVM 21
+- **LLVM**: required only for `volta compile` (inference DLL). Path: set `LLVM_SYS_210_PREFIX` or put `clang.exe` next to the binary.
+- **CUDA**: build with `--features cuda`. GPU perf not benchmarked.
 
-### Quality Fortress Wave 1 checks
+---
 
-```bash
-bash scripts/ci/wave1_local_verify.sh
-python scripts/ci/detect_tiers.py --paths src/ir/tensor.rs
-python scripts/ci/policy_check.py --paths src/ir/tensor.rs --pr-body "RFC-004"
-```
+## Roadmap snapshot
 
-### Quality Fortress Wave 2/3 checks
+See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full current state and next steps.
 
-```bash
-bash scripts/ci/wave23_local_verify.sh
-bash scripts/ci/release_perf_double_pass.sh
-bash scripts/ci/nightly_perf_matrix.sh
-```
+Short version:
+- **Done**: interpreter, IR, codegen, SGD training DLL, AVX2 kernels, MKL hybrid, benchmark harness
+- **Next**: Adam fusion (close the 1.9× gap), autotune tile sizes, cross-platform build
+- **Later**: GPU (CUDA) perf measurement, broader model coverage beyond MLP
 
-### tiny-transformer CPU milestone
+---
 
-```bash
-bash scripts/ci/tiny_transformer_cpu_verify.sh
-```
+## License
 
-Includes a **deterministic replay gate** and memory planner guard.
-
-### CUDA inference MVP
-
-```bash
-bash scripts/ci/cuda_infer_verify.sh
-```
-
-This is the authoritative verify lane for **CUDA inference MVP** behavior.
-
-### CUDA training hardening
-
-```bash
-bash scripts/ci/cuda_train_verify.sh
-```
-
-### XL release discipline
-
-```bash
-bash scripts/ci/xl_verify.sh
-```
-
-## Governance and Contracts
-
-Core governance docs live in `docs/governance/`.
-
-Start here:
-
-- `docs/governance/contracts-tier-a.md`
-- `docs/governance/determinism-scope.md`
-- `docs/governance/cuda-determinism-policy.md`
-- `docs/governance/perf-governance.md`
-- `docs/governance/ci-topology.md`
-- `docs/governance/QUALITY_POLICY.md`
-
-## Contributor Onboarding
-
-- Contribution process: `CONTRIBUTING.md`
-- Windows-native release flow: `scripts/release/cut_v1.ps1`
-- Bash release flow: `scripts/release/cut_v1.sh`
-
-## Positioning
-
-Volta is not trying to win by feature count right now.
-Volta is trying to win where determinism, replayability, and explicit contracts are non-negotiable.
+Apache-2.0

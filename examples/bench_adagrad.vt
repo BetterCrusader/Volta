@@ -1,0 +1,13 @@
+model bench_adagrad
+    layers 512 1024 1024 512 256 1
+    activation relu
+
+dataset bench_data
+    type synthetic
+    batch 64
+
+train bench_adagrad on bench_data
+    epochs 50
+    optimizer adagrad
+    lr 0.01
+    device cpu

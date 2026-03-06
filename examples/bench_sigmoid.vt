@@ -1,0 +1,13 @@
+model bench_sigmoid
+    layers 512 1024 1024 512 256 1
+    activation sigmoid
+
+dataset bench_data
+    type synthetic
+    batch 64
+
+train bench_sigmoid on bench_data
+    epochs 50
+    optimizer sgd
+    lr 0.01
+    device cpu

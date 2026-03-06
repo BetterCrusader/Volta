@@ -1,0 +1,15 @@
+[package]
+name = "volta_train_rust"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+panic = "abort"
+opt-level = 3
+
+[dependencies]
+gemm = { version = "0.19", features = ["rayon", "x86-v4"] }
+rayon = "1"

@@ -1,0 +1,19 @@
+model xor
+    layers 2 4 1
+    activation sigmoid
+
+dataset xor_data
+    type xor
+    batch 4
+
+train xor on xor_data
+    epochs 5000
+    optimizer sgd
+    lr 0.5
+    device cpu
+
+infer xor
+    input 0 0
+    input 0 1
+    input 1 0
+    input 1 1

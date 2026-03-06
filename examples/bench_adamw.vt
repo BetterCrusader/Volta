@@ -1,0 +1,13 @@
+model bench_adamw
+    layers 512 1024 1024 512 256 1
+    activation relu
+
+dataset bench_data
+    type synthetic
+    batch 64
+
+train bench_adamw on bench_data
+    epochs 50
+    optimizer adamw
+    lr 0.001
+    device cpu

@@ -1,14 +1,3 @@
-#![allow(
-    clippy::missing_errors_doc,
-    clippy::must_use_candidate,
-    clippy::unused_self,
-    clippy::uninlined_format_args,
-    clippy::too_many_lines,
-    clippy::match_same_arms,
-    clippy::manual_let_else,
-    clippy::needless_pass_by_value
-)]
-
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -21,8 +10,20 @@ use volta::lexer::Lexer;
 use volta::parser::Parser;
 use volta::semantic::SemanticAnalyzer;
 
-const USAGE: &str = "Usage:\n  volta run <file.vt> [--quiet]\n  volta check <file.vt> [--quiet]\n  volta info <file.vt>\n  volta doctor [--json] [--strict]\n  volta init [project_dir]\n  volta version\n  volta help";
-const CLI_COMMANDS: [&str; 7] = ["run", "check", "info", "doctor", "init", "version", "help"];
+const USAGE: &str = "Usage:
+  volta run <file.vt> [--quiet]
+  volta check <file.vt> [--quiet]
+  volta info <file.vt>
+  volta extract <model_name>
+  volta compile <file.vt> [-o <output>]
+  volta compile-train <file.vt> [-o <output.dll>]
+  volta doctor [--json] [--strict]
+  volta init [project_dir]
+  volta version
+  volta help";
+const CLI_COMMANDS: [&str; 11] = [
+    "run", "check", "info", "extract", "export-py", "compile", "compile-train", "doctor", "init", "version", "help",
+];
 const INIT_MODEL_TEMPLATE: &str = "x 1\nprint x\n";
 const INIT_CONFIG_TEMPLATE: &str = "[project]\nname = \"volta-project\"\nentry = \"model.vt\"\n";
 
@@ -35,6 +36,10 @@ enum CommandKind {
     Init,
     Version,
     Help,
+    ExportPy,
+    Surgeon,
+    Compile,
+    CompileTrain,
     LegacyBenchInfer,
     LegacyTuneMatmul,
 }
@@ -46,6 +51,7 @@ struct CommandSpec {
     doctor_json: bool,
     doctor_strict: bool,
     quiet: bool,
+    use_rust: bool,
 }
 
 #[derive(Debug, Default)]
@@ -118,7 +124,94 @@ fn main() -> ExitCode {
             println!("Legacy '--tune-matmul' mode is deprecated and currently a no-op.");
             ExitCode::SUCCESS
         }
-        CommandKind::Run | CommandKind::Check | CommandKind::Info => {
+        CommandKind::Surgeon => {
+            let Some(path) = command.path.as_deref() else {
+                eprintln!("Internal CLI error: missing file path for surgeon");
+                return ExitCode::from(2);
+            };
+            if let Err(e) = volta::utils::surgeon::hunt_and_extract(path) {
+                eprintln!("❌ Surgeon error: {}", e);
+                return ExitCode::FAILURE;
+            }
+            return ExitCode::SUCCESS;
+        }
+
+        CommandKind::Compile => {
+            let Some(_path) = command.path.as_deref() else {
+                eprintln!("Internal CLI error: missing file path for compile");
+                return ExitCode::from(2);
+            };
+            #[cfg(feature = "llvm-codegen")]
+            {
+                use volta::ir::codegen::{compile_graph_to_object, link_object_to_exe};
+                use volta::executor::Executor;
+                let path = _path;
+                let source = match read_source(path) {
+                    Ok(s) => s,
+                    Err(e) => { eprintln!("{e}"); return ExitCode::from(2); }
+                };
+                let mut parser = Parser::new(Lexer::new(&source).tokenize());
+                let program = match parser.parse_program() {
+                    Ok(p) => p,
+                    Err(e) => { eprintln!("Parse error: {}", e.message); return ExitCode::from(1); }
+                };
+                // Run the program to train the model (or load weights), then
+                // extract the trained graph + weights for codegen.
+                let mut executor = Executor::new();
+                match executor.execute(&program) {
+                    Ok(()) => {}
+                    Err(e) => { eprintln!("Runtime error: {}", e.message); return ExitCode::from(1); }
+                }
+                match executor.compile_first_model_to_object(path) {
+                    Ok(exe_path) => {
+                        println!("Compiled: {exe_path}");
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => { eprintln!("Compile error: {e}"); ExitCode::from(1) }
+                }
+            }
+            #[cfg(not(feature = "llvm-codegen"))]
+            {
+                eprintln!("'compile' requires the 'llvm-codegen' feature. Rebuild with: cargo build --features llvm-codegen");
+                ExitCode::from(1)
+            }
+        }
+
+        CommandKind::CompileTrain => {
+            let Some(path) = command.path.as_deref() else {
+                eprintln!("Internal CLI error: missing file path for compile-train");
+                return ExitCode::from(2);
+            };
+            let source = match read_source(path) {
+                Ok(s) => s,
+                Err(e) => { eprintln!("{e}"); return ExitCode::from(2); }
+            };
+            let mut parser = Parser::new(Lexer::new(&source).tokenize());
+            let program = match parser.parse_program() {
+                Ok(p) => p,
+                Err(e) => { eprintln!("Parse error: {}", e.message); return ExitCode::from(1); }
+            };
+            let mut executor = Executor::new();
+            // Run the script — this trains the model (or initializes it)
+            match executor.execute(&program) {
+                Ok(()) => {}
+                Err(e) => { eprintln!("Runtime error: {}", e.message); return ExitCode::from(1); }
+            }
+            let result = if command.use_rust {
+                executor.compile_first_model_to_train_rust_dll(path)
+            } else {
+                executor.compile_first_model_to_train_dll(path)
+            };
+            match result {
+                Ok(dll_path) => {
+                    println!("Training DLL compiled: {dll_path}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => { eprintln!("compile-train error: {e}"); ExitCode::from(1) }
+            }
+        }
+
+        CommandKind::Run | CommandKind::Check | CommandKind::Info | CommandKind::ExportPy => {
             let Some(path) = command.path.as_deref() else {
                 eprintln!("Internal CLI error: missing file path for file command");
                 return ExitCode::from(2);
@@ -192,7 +285,12 @@ fn main() -> ExitCode {
                     print_info(path, &program, analyzer.warnings().len());
                     ExitCode::SUCCESS
                 }
-                CommandKind::Run => {
+                CommandKind::ExportPy => {
+                    let python_code = volta::utils::interop::python_exporter::emit_pytorch(&program);
+                    println!("{}", python_code);
+                    ExitCode::SUCCESS
+                }
+        CommandKind::Run => {
                     let mut executor = Executor::new();
                     match executor.execute(&program) {
                         Ok(()) => {
@@ -231,6 +329,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
             doctor_json: false,
             doctor_strict: false,
             quiet: false,
+            use_rust: false,
         });
     }
 
@@ -242,6 +341,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
             doctor_json: false,
             doctor_strict: false,
             quiet: false,
+            use_rust: false,
         });
     }
     if cmd == "--tune-matmul" {
@@ -251,6 +351,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
             doctor_json: false,
             doctor_strict: false,
             quiet: false,
+            use_rust: false,
         });
     }
 
@@ -258,6 +359,22 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
         "run" => parse_file_command(CommandKind::Run, args, true),
         "check" => parse_file_command(CommandKind::Check, args, true),
         "info" => parse_file_command(CommandKind::Info, args, false),
+        "export-py" => parse_file_command(CommandKind::ExportPy, args, false),
+        "compile" => parse_compile_command(args),
+        "compile-train" => parse_compile_command_kind(CommandKind::CompileTrain, args),
+        "extract" => {
+            if args.len() < 2 {
+                return Err("'extract' requires a model name or path".to_string());
+            }
+            Ok(CommandSpec {
+                kind: CommandKind::Surgeon,
+                path: Some(args[1].clone()),
+                doctor_json: false,
+                doctor_strict: false,
+                quiet: false,
+                use_rust: false,
+            })
+        },
         "doctor" => {
             let mut doctor_json = false;
             let mut doctor_strict = false;
@@ -288,6 +405,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
                 doctor_json,
                 doctor_strict,
                 quiet: false,
+                use_rust: false,
             })
         }
         "init" => parse_init_command(args),
@@ -301,6 +419,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
                 doctor_json: false,
                 doctor_strict: false,
                 quiet: false,
+                use_rust: false,
             })
         }
         "help" | "-h" | "--help" => {
@@ -313,6 +432,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
                 doctor_json: false,
                 doctor_strict: false,
                 quiet: false,
+                use_rust: false,
             })
         }
         _ if args.len() == 1 && !cmd.starts_with('-') => {
@@ -330,6 +450,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
                     doctor_json: false,
                     doctor_strict: false,
                     quiet: false,
+                    use_rust: false,
                 })
             } else {
                 Err(unknown_command_message(&args[0]))
@@ -337,6 +458,77 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
         }
         _ => Err(unknown_command_message(&args[0])),
     }
+}
+
+fn parse_compile_command(args: &[String]) -> Result<CommandSpec, String> {
+    // volta compile <file.vt> [-o <output>]
+    // We reuse `path` for the .vt file; output goes in a separate field not
+    // yet in CommandSpec — for now we just store the .vt path and derive the
+    // output name from it (replace .vt → .exe).
+    let mut path: Option<String> = None;
+    let mut i = 1usize;
+    while i < args.len() {
+        if args[i] == "-o" {
+            i += 2; // skip -o and its value for now (handled at runtime)
+            continue;
+        }
+        if args[i].starts_with('-') {
+            return Err(format!("'compile' does not accept flag '{}'", args[i]));
+        }
+        if path.is_some() {
+            return Err("'compile' expects exactly one .vt file".to_string());
+        }
+        path = Some(args[i].clone());
+        i += 1;
+    }
+    let Some(path) = path else {
+        return Err("'compile' expects a .vt file path".to_string());
+    };
+    Ok(CommandSpec {
+        kind: CommandKind::Compile,
+        path: Some(path),
+        doctor_json: false,
+        doctor_strict: false,
+        quiet: false,
+        use_rust: false,
+    })
+}
+
+fn parse_compile_command_kind(kind: CommandKind, args: &[String]) -> Result<CommandSpec, String> {
+    let cmd_name = &args[0];
+    let mut path: Option<String> = None;
+    let mut use_rust = false;
+    let mut i = 1usize;
+    while i < args.len() {
+        if args[i] == "-o" {
+            i += 2;
+            continue;
+        }
+        if args[i] == "--rust" {
+            use_rust = true;
+            i += 1;
+            continue;
+        }
+        if args[i].starts_with('-') {
+            return Err(format!("'{cmd_name}' does not accept flag '{}'", args[i]));
+        }
+        if path.is_some() {
+            return Err(format!("'{cmd_name}' expects exactly one .vt file"));
+        }
+        path = Some(args[i].clone());
+        i += 1;
+    }
+    let Some(path) = path else {
+        return Err(format!("'{cmd_name}' expects a .vt file path"));
+    };
+    Ok(CommandSpec {
+        kind,
+        path: Some(path),
+        doctor_json: false,
+        doctor_strict: false,
+        quiet: false,
+        use_rust,
+    })
 }
 
 fn parse_init_command(args: &[String]) -> Result<CommandSpec, String> {
@@ -363,6 +555,7 @@ fn parse_init_command(args: &[String]) -> Result<CommandSpec, String> {
         doctor_json: false,
         doctor_strict: false,
         quiet: false,
+        use_rust: false,
     })
 }
 
@@ -441,6 +634,7 @@ fn parse_file_command(
         doctor_json: false,
         doctor_strict: false,
         quiet,
+        use_rust: false,
     })
 }
 
@@ -680,6 +874,7 @@ fn collect_stats(stmt: &Stmt, stats: &mut ProgramStats) {
         Stmt::Train { .. } => stats.train += 1,
         Stmt::Save { .. } => stats.save += 1,
         Stmt::Load { .. } => stats.load += 1,
+        Stmt::Infer { .. } => {}
         Stmt::Print { .. } => stats.print += 1,
         Stmt::Return { .. } => stats.return_stmt += 1,
         Stmt::Function { body, .. } => {
@@ -689,6 +884,12 @@ fn collect_stats(stmt: &Stmt, stats: &mut ProgramStats) {
             }
         }
         Stmt::Loop { body, .. } => {
+            stats.loop_stmt += 1;
+            for inner in body {
+                collect_stats(inner, stats);
+            }
+        }
+        Stmt::For { body, .. } => {
             stats.loop_stmt += 1;
             for inner in body {
                 collect_stats(inner, stats);
@@ -714,6 +915,9 @@ fn collect_stats(stmt: &Stmt, stats: &mut ProgramStats) {
                     collect_stats(inner, stats);
                 }
             }
+        }
+        Stmt::Struct { .. } => {
+            // Struct stats could be added if needed
         }
     }
 }
