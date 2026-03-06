@@ -1681,7 +1681,11 @@ impl Executor {
     /// Build a native object + exe from the first trained model in this executor.
     /// Requires the `llvm-codegen` feature. Returns the path to the compiled exe.
     #[cfg(feature = "llvm-codegen")]
-    pub fn compile_first_model_to_object(&self, source_path: &str) -> Result<String, String> {
+    pub fn compile_first_model_to_object(
+        &self,
+        source_path: &str,
+        output_path: Option<&str>,
+    ) -> Result<String, String> {
         use crate::ir::Op;
         use crate::ir::codegen::{compile_graph_to_object, link_object_to_exe};
         use crate::ir::lowering::LoweringContext;
@@ -1726,14 +1730,16 @@ impl Executor {
             .map(|(k, t)| (k.clone(), t.data.as_ref().clone()))
             .collect();
 
-        let obj = std::path::Path::new(source_path).with_extension("o");
         // Shared library: .dll on Windows, .so on Linux/Mac
         let lib_ext = if cfg!(target_os = "windows") {
             "dll"
         } else {
             "so"
         };
-        let exe = std::path::Path::new(source_path).with_extension(lib_ext);
+        let exe = output_path
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::Path::new(source_path).with_extension(lib_ext));
+        let obj = exe.with_extension("o");
 
         compile_graph_to_object(&graph, &params, &obj).map_err(|e| e.to_string())?;
         link_object_to_exe(&obj, &exe).map_err(|e| e.to_string())?;
@@ -1744,7 +1750,11 @@ impl Executor {
     /// Compile the first trained model into a training DLL using MLP training codegen.
     /// Generates C source for a training step (forward + backward + SGD update),
     /// compiles with clang -O3 -march=native, links with gemm_shim.c.
-    pub fn compile_first_model_to_train_dll(&self, source_path: &str) -> Result<String, String> {
+    pub fn compile_first_model_to_train_dll(
+        &self,
+        source_path: &str,
+        output_path: Option<&str>,
+    ) -> Result<String, String> {
         use crate::ir::codegen::{MlpTopology, compile_mlp_train_dll};
 
         let (model_name, model_state) = self
@@ -1777,7 +1787,9 @@ impl Executor {
         } else {
             "train.so"
         };
-        let dll_path = std::path::Path::new(source_path).with_extension(lib_ext);
+        let dll_path = output_path
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::Path::new(source_path).with_extension(lib_ext));
 
         compile_mlp_train_dll(&topology, init_weights.as_ref(), &dll_path)
             .map_err(|e| e.to_string())?;
@@ -1788,6 +1800,7 @@ impl Executor {
     pub fn compile_first_model_to_train_rust_dll(
         &self,
         source_path: &str,
+        output_path: Option<&str>,
     ) -> Result<String, String> {
         use crate::ir::codegen::compile_mlp_train_rust_dll;
         use crate::ir::codegen::mlp_train_rust_codegen::MlpTopology as RustMlpTopology;
@@ -1829,7 +1842,9 @@ impl Executor {
         } else {
             "train_rust.so"
         };
-        let dll_path = std::path::Path::new(source_path).with_extension(lib_ext);
+        let dll_path = output_path
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::Path::new(source_path).with_extension(lib_ext));
 
         compile_mlp_train_rust_dll(&topology, init_weights.as_ref(), &dll_path)
             .map_err(|e| e.to_string())?;
