@@ -62,6 +62,8 @@ progress:
 | Adam без fused GEMM | Поки не реалізовано — ⚠️ 1.9× повільніше |
 | CUDA за feature flag | Уникнути обов'язкової CUDA залежності |
 | gemm features = ["rayon"] без x86-v4 | AVX-512 обирається автоматично через RUSTFLAGS target-cpu=native — явна фіча небезпечна (SIGILL) |
+| Adam correctness test: 1e-5 tolerance | f32 arithmetic rounding; 1e-6 too tight, 1e-3 too loose — 1e-5 correct for CORR-01 |
+| CORR-01: test-only, no code change | apply_adam implementation already correct; test formalizes guarantee |
 
 ### Відомі блокери
 
@@ -87,7 +89,7 @@ progress:
 
 **Наступний крок:** Продовжити Фазу 1 — Adam fused-GEMM path (наступний план)
 
-**Остання сесія:** 2026-03-07T05:22:30Z — Completed 01-adam-01-PLAN.md (remove x86-v4)
+**Остання сесія:** 2026-03-07T05:25:00Z — Completed 01-adam-02-PLAN.md (CORR-01 test)
 
 ---
 

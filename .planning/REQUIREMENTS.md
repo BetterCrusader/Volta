@@ -13,7 +13,7 @@
 
 ### Correctness
 
-- [ ] **CORR-01**: Adam gradient updates числово коректні (перевірка проти reference implementation)
+- [x] **CORR-01**: Adam gradient updates числово коректні (перевірка проти reference implementation)
 - [ ] **CORR-02**: Backend capabilities явно задокументовані — рання відмова для unsupported combinations замість silent fallback
 - [ ] **CORR-03**: MHA backward обчислює коректні градієнти для Q, K, V та projection weights
 
@@ -67,7 +67,7 @@
 |-------------|-------|--------|
 | PERF-01 | Phase 1 | Complete |
 | PERF-02 | Phase 1 | Complete |
-| CORR-01 | Phase 1 | Pending |
+| CORR-01 | Phase 1 | Complete |
 | PERF-03 | Phase 2 | Pending |
 | CORR-02 | Phase 2 | Pending |
 | INFRA-01 | Phase 2 | Pending |
