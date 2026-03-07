@@ -671,13 +671,19 @@ fn format_op(op: &Op) -> String {
         }
         Op::MultiHeadAttentionBackward {
             q_input,
+            bias_q,
+            bias_k,
+            bias_v,
             num_heads,
             output_idx,
             ..
         } => {
             format!(
-                "mha_bwd q={} heads={} out={}",
+                "mha_bwd q={} bq={} bk={} bv={} heads={} out={}",
                 fmt_value(q_input),
+                fmt_value(bias_q),
+                fmt_value(bias_k),
+                fmt_value(bias_v),
                 num_heads,
                 output_idx
             )

@@ -745,6 +745,9 @@ pub fn build_reverse_graph(
                 w_k,
                 w_v,
                 w_o,
+                bias_q,
+                bias_k,
+                bias_v,
                 num_heads,
                 output_idx,
                 ..
@@ -757,17 +760,8 @@ pub fn build_reverse_graph(
                 }
 
                 // Find the sibling forward nodes for attn_weights (output_idx=1) and context (output_idx=5).
-                // They share the same q_input.
-                let attn_weights_fwd = forward.nodes.iter()
-                    .find(|n| matches!(&n.op, Op::MultiHeadAttention { q_input: qi, output_idx: 1, .. } if *qi == *q_input))
-                    .ok_or_else(|| AutogradError {
-                        message: "MHA backward: cannot find attn_weights sibling (output_idx=1)".to_string(),
-                    })?;
-                let context_fwd = forward.nodes.iter()
-                    .find(|n| matches!(&n.op, Op::MultiHeadAttention { q_input: qi, output_idx: 5, .. } if *qi == *q_input))
-                    .ok_or_else(|| AutogradError {
-                        message: "MHA backward: cannot find context sibling (output_idx=5)".to_string(),
-                    })?;
+                let attn_weights_output = find_mha_sibling_output(forward, &node.op, 1)?;
+                let context_output = find_mha_sibling_output(forward, &node.op, 5)?;
 
                 // Map all forward ValueIds to backward graph.
                 let q_m = mapped(&forward_to_backward, *q_input)?;
@@ -777,26 +771,32 @@ pub fn build_reverse_graph(
                 let wk_m = mapped(&forward_to_backward, *w_k)?;
                 let wv_m = mapped(&forward_to_backward, *w_v)?;
                 let wo_m = mapped(&forward_to_backward, *w_o)?;
-                let aw_m = mapped(&forward_to_backward, attn_weights_fwd.output)?;
-                let ctx_m = mapped(&forward_to_backward, context_fwd.output)?;
+                let aw_m = mapped(&forward_to_backward, attn_weights_output)?;
+                let ctx_m = mapped(&forward_to_backward, context_output)?;
 
                 // Emit 7 MultiHeadAttentionBackward nodes, one per gradient target.
                 for grad_output_idx in 0..7_usize {
                     let (_, grad_value) = backward
-                        .add_op(block, Op::MultiHeadAttentionBackward {
-                            q_input: q_m,
-                            k_input: k_m,
-                            v_input: v_m,
-                            w_q: wq_m,
-                            w_k: wk_m,
-                            w_v: wv_m,
-                            w_o: wo_m,
-                            attn_weights: aw_m,
-                            context: ctx_m,
-                            upstream,
-                            num_heads: *num_heads,
-                            output_idx: grad_output_idx,
-                        })
+                        .add_op(
+                            block,
+                            Op::MultiHeadAttentionBackward {
+                                q_input: q_m,
+                                k_input: k_m,
+                                v_input: v_m,
+                                w_q: wq_m,
+                                w_k: wk_m,
+                                w_v: wv_m,
+                                w_o: wo_m,
+                                bias_q: mapped(&forward_to_backward, *bias_q)?,
+                                bias_k: mapped(&forward_to_backward, *bias_k)?,
+                                bias_v: mapped(&forward_to_backward, *bias_v)?,
+                                attn_weights: aw_m,
+                                context: ctx_m,
+                                upstream,
+                                num_heads: *num_heads,
+                                output_idx: grad_output_idx,
+                            },
+                        )
                         .map_err(|e| AutogradError {
                             message: format!("MHA backward op: {}", e.message),
                         })?;
@@ -1817,7 +1817,9 @@ pub fn build_reverse_graph(
         loss_grad_input: seed_grad,
     };
 
-    verify_graph(&result.backward).expect("backward graph verification failed");
+    verify_graph(&result.backward).map_err(|err| AutogradError {
+        message: format!("Backward graph verification failed: {}", err.message),
+    })?;
     Ok(result)
 }
 
@@ -1831,6 +1833,76 @@ fn mapped(
         .ok_or_else(|| AutogradError {
             message: format!("Missing mapped ValueId for forward value {source:?}"),
         })
+}
+
+fn find_mha_sibling_output(
+    forward: &Graph,
+    family_op: &Op,
+    sibling_output_idx: usize,
+) -> Result<ValueId, AutogradError> {
+    forward
+        .nodes
+        .iter()
+        .find(|node| is_same_mha_family(&node.op, family_op, sibling_output_idx))
+        .map(|node| node.output)
+        .ok_or_else(|| AutogradError {
+            message: format!(
+                "MHA backward: cannot find sibling with output_idx={sibling_output_idx}"
+            ),
+        })
+}
+
+fn is_same_mha_family(node_op: &Op, family_op: &Op, sibling_output_idx: usize) -> bool {
+    matches!(
+        (node_op, family_op),
+        (
+            Op::MultiHeadAttention {
+                q_input: qi,
+                k_input: ki,
+                v_input: vi,
+                w_q: wqi,
+                w_k: wki,
+                w_v: wvi,
+                w_o: woi,
+                bias_q: bqi,
+                bias_k: bki,
+                bias_v: bvi,
+                bias_o: boi,
+                num_heads: nh,
+                causal: c,
+                output_idx: oi,
+            },
+            Op::MultiHeadAttention {
+                q_input,
+                k_input,
+                v_input,
+                w_q,
+                w_k,
+                w_v,
+                w_o,
+                bias_q,
+                bias_k,
+                bias_v,
+                bias_o,
+                num_heads,
+                causal,
+                ..
+            }
+        ) if *qi == *q_input
+            && *ki == *k_input
+            && *vi == *v_input
+            && *wqi == *w_q
+            && *wki == *w_k
+            && *wvi == *w_v
+            && *woi == *w_o
+            && *bqi == *bias_q
+            && *bki == *bias_k
+            && *bvi == *bias_v
+            && *boi == *bias_o
+            && *nh == *num_heads
+            && *c == *causal
+            && *oi == sibling_output_idx
+    )
 }
 
 fn tensor_shape_for(
@@ -2033,6 +2105,65 @@ mod tests {
     use crate::ir::{
         ExecutionContext, Graph, Op, RuntimeValue, build_reverse_graph, execute_value_with_context,
     };
+    use std::sync::Arc;
+
+    fn tensor(shape: Vec<usize>, data: Vec<f32>) -> RuntimeValue {
+        RuntimeValue::Tensor(Arc::new(
+            crate::ir::tensor::Tensor::new(shape, data).unwrap(),
+        ))
+    }
+
+    fn reduce_sum_output(graph: &Graph) -> crate::ir::ValueId {
+        graph
+            .nodes
+            .iter()
+            .rev()
+            .find(|node| matches!(&node.op, Op::ReduceSum { .. }))
+            .map(|node| node.output)
+            .expect("expected ReduceSum node")
+    }
+
+    fn make_mha_execution_context(
+        batch: usize,
+        seq: usize,
+        d_model: usize,
+        q_data: &[f32],
+        wq_data: &[f32],
+    ) -> ExecutionContext {
+        let mut context = ExecutionContext::default();
+        context.inputs.insert(
+            "q_input".to_string(),
+            tensor(vec![batch, seq, d_model], q_data.to_vec()),
+        );
+        context.inputs.insert(
+            "k_input".to_string(),
+            tensor(vec![batch, seq, d_model], q_data.to_vec()),
+        );
+        context.inputs.insert(
+            "v_input".to_string(),
+            tensor(vec![batch, seq, d_model], q_data.to_vec()),
+        );
+        context
+            .inputs
+            .insert("__loss_grad".to_string(), tensor(vec![1], vec![1.0]));
+        context.parameters.insert(
+            "w_q".to_string(),
+            tensor(vec![d_model, d_model], wq_data.to_vec()),
+        );
+        context.parameters.insert(
+            "w_k".to_string(),
+            tensor(vec![d_model, d_model], eye(d_model)),
+        );
+        context.parameters.insert(
+            "w_v".to_string(),
+            tensor(vec![d_model, d_model], eye(d_model)),
+        );
+        context.parameters.insert(
+            "w_o".to_string(),
+            tensor(vec![d_model, d_model], eye(d_model)),
+        );
+        context
+    }
 
     #[test]
     fn builds_separate_backward_graph_without_mutating_forward() {
@@ -2676,7 +2807,11 @@ mod tests {
         g.add_op(block, Op::Output(loss)).unwrap();
 
         let result = build_reverse_graph(&g, loss, &[x]);
-        assert!(result.is_ok(), "build_reverse_graph panicked or errored on shared-output graph: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "build_reverse_graph panicked or errored on shared-output graph: {:?}",
+            result.err()
+        );
     }
 
     /// Helper: build a forward graph with 6 MHA output nodes plus a ReduceSum scalar loss.
@@ -2715,26 +2850,73 @@ mod tests {
         let (_, wo) = g.add_op(block, Op::Parameter("w_o".to_string())).unwrap();
 
         // Zero biases as constants
-        let (_, bq) = g.add_op(block, Op::ConstTensor { shape: vec![d_model], data: vec![0.0; d_model] }).unwrap();
-        let (_, bk) = g.add_op(block, Op::ConstTensor { shape: vec![d_model], data: vec![0.0; d_model] }).unwrap();
-        let (_, bv) = g.add_op(block, Op::ConstTensor { shape: vec![d_model], data: vec![0.0; d_model] }).unwrap();
-        let (_, bo) = g.add_op(block, Op::ConstTensor { shape: vec![d_model], data: vec![0.0; d_model] }).unwrap();
+        let (_, bq) = g
+            .add_op(
+                block,
+                Op::ConstTensor {
+                    shape: vec![d_model],
+                    data: vec![0.0; d_model],
+                },
+            )
+            .unwrap();
+        let (_, bk) = g
+            .add_op(
+                block,
+                Op::ConstTensor {
+                    shape: vec![d_model],
+                    data: vec![0.0; d_model],
+                },
+            )
+            .unwrap();
+        let (_, bv) = g
+            .add_op(
+                block,
+                Op::ConstTensor {
+                    shape: vec![d_model],
+                    data: vec![0.0; d_model],
+                },
+            )
+            .unwrap();
+        let (_, bo) = g
+            .add_op(
+                block,
+                Op::ConstTensor {
+                    shape: vec![d_model],
+                    data: vec![0.0; d_model],
+                },
+            )
+            .unwrap();
 
         let make_mha = |g: &mut Graph, idx: usize| {
-            g.add_op(block, Op::MultiHeadAttention {
-                q_input: q_in, k_input: k_in, v_input: v_in,
-                w_q: wq, w_k: wk, w_v: wv, w_o: wo,
-                bias_q: bq, bias_k: bk, bias_v: bv, bias_o: bo,
-                num_heads, causal, output_idx: idx,
-            }).unwrap().1
+            g.add_op(
+                block,
+                Op::MultiHeadAttention {
+                    q_input: q_in,
+                    k_input: k_in,
+                    v_input: v_in,
+                    w_q: wq,
+                    w_k: wk,
+                    w_v: wv,
+                    w_o: wo,
+                    bias_q: bq,
+                    bias_k: bk,
+                    bias_v: bv,
+                    bias_o: bo,
+                    num_heads,
+                    causal,
+                    output_idx: idx,
+                },
+            )
+            .unwrap()
+            .1
         };
 
         // output_idx=0 is the primary output; 1..5 are saved activations
         let mha_out = make_mha(&mut g, 0);
-        let _mha_aw  = make_mha(&mut g, 1);
-        let _mha_qp  = make_mha(&mut g, 2);
-        let _mha_kp  = make_mha(&mut g, 3);
-        let _mha_vp  = make_mha(&mut g, 4);
+        let _mha_aw = make_mha(&mut g, 1);
+        let _mha_qp = make_mha(&mut g, 2);
+        let _mha_kp = make_mha(&mut g, 3);
+        let _mha_vp = make_mha(&mut g, 4);
         let _mha_ctx = make_mha(&mut g, 5);
 
         // Bind input shapes for shape inference
@@ -2742,7 +2924,16 @@ mod tests {
         g.bind_input_shape("k_input", vec![batch, seq_k, d_model]);
         g.bind_input_shape("v_input", vec![batch, seq_k, d_model]);
 
-        let (_, loss) = g.add_op(block, Op::ReduceSum { input: mha_out, axis: None, keepdims: false }).unwrap();
+        let (_, loss) = g
+            .add_op(
+                block,
+                Op::ReduceSum {
+                    input: mha_out,
+                    axis: None,
+                    keepdims: false,
+                },
+            )
+            .unwrap();
 
         (g, block, q_in, k_in, v_in, wq, wk, wv, wo, mha_out, loss)
     }
@@ -2757,13 +2948,27 @@ mod tests {
         let seq = 2_usize;
         let lr = 0.01_f32;
 
-        let (forward, _, q_in_id, _k_in_id, _v_in_id, wq_id, _wk_id, _wv_id, _wo_id, _mha_out_id, loss_id) =
-            build_mha_graph(d_model, num_heads, batch, seq, seq, false);
+        let (
+            forward,
+            _,
+            _q_in_id,
+            _k_in_id,
+            _v_in_id,
+            wq_id,
+            _wk_id,
+            _wv_id,
+            _wo_id,
+            _mha_out_id,
+            loss_id,
+        ) = build_mha_graph(d_model, num_heads, batch, seq, seq, false);
 
         let grad_graph = build_reverse_graph(&forward, loss_id, &[wq_id])
             .expect("build_reverse_graph should succeed");
 
-        let wq_grad_value = *grad_graph.gradients.get(&wq_id).expect("w_q gradient must exist");
+        let wq_grad_value = *grad_graph
+            .gradients
+            .get(&wq_id)
+            .expect("w_q gradient must exist");
 
         // Initial w_q: small random-like values via a deterministic pattern
         let mut wq_data: Vec<f32> = (0..d_model * d_model)
@@ -2771,57 +2976,43 @@ mod tests {
             .collect();
 
         // Inputs: fixed throughout training
-        let q_data: Vec<f32> = (0..batch * seq * d_model).map(|i| (i as f32 + 1.0) * 0.1).collect();
+        let q_data: Vec<f32> = (0..batch * seq * d_model)
+            .map(|i| (i as f32 + 1.0) * 0.1)
+            .collect();
 
-        let make_tensor = |data: Vec<f32>, shape: Vec<usize>| {
-            RuntimeValue::Tensor(std::sync::Arc::new(
-                crate::ir::tensor::Tensor::new(shape, data).unwrap(),
-            ))
-        };
-
-        // Execute forward to get initial loss
-        let mut context = ExecutionContext::default();
-        context.inputs.insert("q_input".to_string(), make_tensor(q_data.clone(), vec![batch, seq, d_model]));
-        context.inputs.insert("k_input".to_string(), make_tensor(q_data.clone(), vec![batch, seq, d_model]));
-        context.inputs.insert("v_input".to_string(), make_tensor(q_data.clone(), vec![batch, seq, d_model]));
-        context.inputs.insert("__loss_grad".to_string(), make_tensor(vec![1.0], vec![1]));
-        context.parameters.insert("w_q".to_string(), make_tensor(wq_data.clone(), vec![d_model, d_model]));
-        context.parameters.insert("w_k".to_string(), make_tensor(eye(d_model), vec![d_model, d_model]));
-        context.parameters.insert("w_v".to_string(), make_tensor(eye(d_model), vec![d_model, d_model]));
-        context.parameters.insert("w_o".to_string(), make_tensor(eye(d_model), vec![d_model, d_model]));
+        let context = make_mha_execution_context(batch, seq, d_model, &q_data, &wq_data);
 
         let initial_loss = {
-            let rv = execute_value_with_context(&grad_graph.backward, {
-                // Get the loss value id mapped in backward graph
-                let mapped_loss = *forward.nodes.iter()
-                    .find(|n| n.output == loss_id)
-                    .map(|_| grad_graph.backward.nodes.iter()
-                        .rev()
-                        .find(|n| matches!(&n.op, Op::ReduceSum { .. }))
-                        .map(|n| &n.output)
-                        .unwrap())
-                    .unwrap();
-                mapped_loss
-            }, &context).expect("execute initial loss");
-            if let RuntimeValue::Tensor(t) = rv { t.data[0] } else { panic!("expected tensor") }
+            let rv = execute_value_with_context(
+                &grad_graph.backward,
+                {
+                    let _ = forward
+                        .nodes
+                        .iter()
+                        .find(|node| node.output == loss_id)
+                        .expect("loss should remain mapped into backward graph");
+                    reduce_sum_output(&grad_graph.backward)
+                },
+                &context,
+            )
+            .expect("execute initial loss");
+            if let RuntimeValue::Tensor(t) = rv {
+                t.data[0]
+            } else {
+                panic!("expected tensor")
+            }
         };
 
         // SGD loop
         for _ in 0..100 {
-            let mut ctx = ExecutionContext::default();
-            ctx.inputs.insert("q_input".to_string(), make_tensor(q_data.clone(), vec![batch, seq, d_model]));
-            ctx.inputs.insert("k_input".to_string(), make_tensor(q_data.clone(), vec![batch, seq, d_model]));
-            ctx.inputs.insert("v_input".to_string(), make_tensor(q_data.clone(), vec![batch, seq, d_model]));
-            ctx.inputs.insert("__loss_grad".to_string(), make_tensor(vec![1.0], vec![1]));
-            ctx.parameters.insert("w_q".to_string(), make_tensor(wq_data.clone(), vec![d_model, d_model]));
-            ctx.parameters.insert("w_k".to_string(), make_tensor(eye(d_model), vec![d_model, d_model]));
-            ctx.parameters.insert("w_v".to_string(), make_tensor(eye(d_model), vec![d_model, d_model]));
-            ctx.parameters.insert("w_o".to_string(), make_tensor(eye(d_model), vec![d_model, d_model]));
+            let ctx = make_mha_execution_context(batch, seq, d_model, &q_data, &wq_data);
 
             // Get gradient for w_q
             let grad_rv = execute_value_with_context(&grad_graph.backward, wq_grad_value, &ctx)
                 .expect("execute grad");
-            let RuntimeValue::Tensor(grad_t) = grad_rv else { panic!("expected tensor grad") };
+            let RuntimeValue::Tensor(grad_t) = grad_rv else {
+                panic!("expected tensor grad")
+            };
 
             // SGD update: w_q -= lr * grad
             let grad_c = grad_t.make_contiguous().unwrap();
@@ -2831,25 +3022,20 @@ mod tests {
         }
 
         // Compute final loss
-        let mut ctx = ExecutionContext::default();
-        ctx.inputs.insert("q_input".to_string(), make_tensor(q_data.clone(), vec![batch, seq, d_model]));
-        ctx.inputs.insert("k_input".to_string(), make_tensor(q_data.clone(), vec![batch, seq, d_model]));
-        ctx.inputs.insert("v_input".to_string(), make_tensor(q_data.clone(), vec![batch, seq, d_model]));
-        ctx.inputs.insert("__loss_grad".to_string(), make_tensor(vec![1.0], vec![1]));
-        ctx.parameters.insert("w_q".to_string(), make_tensor(wq_data.clone(), vec![d_model, d_model]));
-        ctx.parameters.insert("w_k".to_string(), make_tensor(eye(d_model), vec![d_model, d_model]));
-        ctx.parameters.insert("w_v".to_string(), make_tensor(eye(d_model), vec![d_model, d_model]));
-        ctx.parameters.insert("w_o".to_string(), make_tensor(eye(d_model), vec![d_model, d_model]));
+        let ctx = make_mha_execution_context(batch, seq, d_model, &q_data, &wq_data);
 
         let final_loss = {
-            let rv = execute_value_with_context(&grad_graph.backward, {
-                grad_graph.backward.nodes.iter()
-                    .rev()
-                    .find(|n| matches!(&n.op, Op::ReduceSum { .. }))
-                    .map(|n| n.output)
-                    .unwrap()
-            }, &ctx).expect("execute final loss");
-            if let RuntimeValue::Tensor(t) = rv { t.data[0] } else { panic!("expected tensor") }
+            let rv = execute_value_with_context(
+                &grad_graph.backward,
+                reduce_sum_output(&grad_graph.backward),
+                &ctx,
+            )
+            .expect("execute final loss");
+            if let RuntimeValue::Tensor(t) = rv {
+                t.data[0]
+            } else {
+                panic!("expected tensor")
+            }
         };
 
         assert!(
@@ -2860,8 +3046,316 @@ mod tests {
 
     fn eye(n: usize) -> Vec<f32> {
         let mut data = vec![0.0_f32; n * n];
-        for i in 0..n { data[i * n + i] = 1.0; }
+        for i in 0..n {
+            data[i * n + i] = 1.0;
+        }
         data
+    }
+
+    #[test]
+    fn mha_backward_uses_matching_saved_siblings_when_q_input_is_shared() {
+        let d_model = 4_usize;
+        let num_heads = 2_usize;
+
+        let mut g = Graph::new();
+        let block = g.create_block();
+
+        let (_, q_in) = g.add_op(block, Op::Input("q_input".to_string())).unwrap();
+        let (_, k_in_a) = g.add_op(block, Op::Input("k_input_a".to_string())).unwrap();
+        let (_, v_in_a) = g.add_op(block, Op::Input("v_input_a".to_string())).unwrap();
+        let (_, k_in_b) = g.add_op(block, Op::Input("k_input_b".to_string())).unwrap();
+        let (_, v_in_b) = g.add_op(block, Op::Input("v_input_b".to_string())).unwrap();
+
+        let (_, wq_a) = g.add_op(block, Op::Parameter("w_q_a".to_string())).unwrap();
+        let (_, wk_a) = g.add_op(block, Op::Parameter("w_k_a".to_string())).unwrap();
+        let (_, wv_a) = g.add_op(block, Op::Parameter("w_v_a".to_string())).unwrap();
+        let (_, wo_a) = g.add_op(block, Op::Parameter("w_o_a".to_string())).unwrap();
+        let (_, wq_b) = g.add_op(block, Op::Parameter("w_q_b".to_string())).unwrap();
+        let (_, wk_b) = g.add_op(block, Op::Parameter("w_k_b".to_string())).unwrap();
+        let (_, wv_b) = g.add_op(block, Op::Parameter("w_v_b".to_string())).unwrap();
+        let (_, wo_b) = g.add_op(block, Op::Parameter("w_o_b".to_string())).unwrap();
+
+        let (_, bq_a) = g
+            .add_op(
+                block,
+                Op::ConstTensor {
+                    shape: vec![d_model],
+                    data: vec![0.0; d_model],
+                },
+            )
+            .unwrap();
+        let (_, bk_a) = g
+            .add_op(
+                block,
+                Op::ConstTensor {
+                    shape: vec![d_model],
+                    data: vec![0.0; d_model],
+                },
+            )
+            .unwrap();
+        let (_, bv_a) = g
+            .add_op(
+                block,
+                Op::ConstTensor {
+                    shape: vec![d_model],
+                    data: vec![0.0; d_model],
+                },
+            )
+            .unwrap();
+        let (_, bo_a) = g
+            .add_op(
+                block,
+                Op::ConstTensor {
+                    shape: vec![d_model],
+                    data: vec![0.0; d_model],
+                },
+            )
+            .unwrap();
+        let (_, bq_b) = g
+            .add_op(
+                block,
+                Op::ConstTensor {
+                    shape: vec![d_model],
+                    data: vec![1.0; d_model],
+                },
+            )
+            .unwrap();
+        let (_, bk_b) = g
+            .add_op(
+                block,
+                Op::ConstTensor {
+                    shape: vec![d_model],
+                    data: vec![1.0; d_model],
+                },
+            )
+            .unwrap();
+        let (_, bv_b) = g
+            .add_op(
+                block,
+                Op::ConstTensor {
+                    shape: vec![d_model],
+                    data: vec![1.0; d_model],
+                },
+            )
+            .unwrap();
+        let (_, bo_b) = g
+            .add_op(
+                block,
+                Op::ConstTensor {
+                    shape: vec![d_model],
+                    data: vec![1.0; d_model],
+                },
+            )
+            .unwrap();
+
+        let make_mha = |g: &mut Graph,
+                        q_input: crate::ir::ValueId,
+                        k_input: crate::ir::ValueId,
+                        v_input: crate::ir::ValueId,
+                        w_q: crate::ir::ValueId,
+                        w_k: crate::ir::ValueId,
+                        w_v: crate::ir::ValueId,
+                        w_o: crate::ir::ValueId,
+                        bias_q: crate::ir::ValueId,
+                        bias_k: crate::ir::ValueId,
+                        bias_v: crate::ir::ValueId,
+                        bias_o: crate::ir::ValueId,
+                        output_idx: usize| {
+            g.add_op(
+                block,
+                Op::MultiHeadAttention {
+                    q_input,
+                    k_input,
+                    v_input,
+                    w_q,
+                    w_k,
+                    w_v,
+                    w_o,
+                    bias_q,
+                    bias_k,
+                    bias_v,
+                    bias_o,
+                    num_heads,
+                    causal: false,
+                    output_idx,
+                },
+            )
+            .unwrap()
+            .1
+        };
+
+        let _a_out = make_mha(
+            &mut g, q_in, k_in_a, v_in_a, wq_a, wk_a, wv_a, wo_a, bq_a, bk_a, bv_a, bo_a, 0,
+        );
+        let _a_aw = make_mha(
+            &mut g, q_in, k_in_a, v_in_a, wq_a, wk_a, wv_a, wo_a, bq_a, bk_a, bv_a, bo_a, 1,
+        );
+        let _a_qp = make_mha(
+            &mut g, q_in, k_in_a, v_in_a, wq_a, wk_a, wv_a, wo_a, bq_a, bk_a, bv_a, bo_a, 2,
+        );
+        let _a_kp = make_mha(
+            &mut g, q_in, k_in_a, v_in_a, wq_a, wk_a, wv_a, wo_a, bq_a, bk_a, bv_a, bo_a, 3,
+        );
+        let _a_vp = make_mha(
+            &mut g, q_in, k_in_a, v_in_a, wq_a, wk_a, wv_a, wo_a, bq_a, bk_a, bv_a, bo_a, 4,
+        );
+        let _a_ctx = make_mha(
+            &mut g, q_in, k_in_a, v_in_a, wq_a, wk_a, wv_a, wo_a, bq_a, bk_a, bv_a, bo_a, 5,
+        );
+
+        let b_out = make_mha(
+            &mut g, q_in, k_in_b, v_in_b, wq_b, wk_b, wv_b, wo_b, bq_b, bk_b, bv_b, bo_b, 0,
+        );
+        let _b_aw = make_mha(
+            &mut g, q_in, k_in_b, v_in_b, wq_b, wk_b, wv_b, wo_b, bq_b, bk_b, bv_b, bo_b, 1,
+        );
+        let _b_qp = make_mha(
+            &mut g, q_in, k_in_b, v_in_b, wq_b, wk_b, wv_b, wo_b, bq_b, bk_b, bv_b, bo_b, 2,
+        );
+        let _b_kp = make_mha(
+            &mut g, q_in, k_in_b, v_in_b, wq_b, wk_b, wv_b, wo_b, bq_b, bk_b, bv_b, bo_b, 3,
+        );
+        let _b_vp = make_mha(
+            &mut g, q_in, k_in_b, v_in_b, wq_b, wk_b, wv_b, wo_b, bq_b, bk_b, bv_b, bo_b, 4,
+        );
+        let _b_ctx = make_mha(
+            &mut g, q_in, k_in_b, v_in_b, wq_b, wk_b, wv_b, wo_b, bq_b, bk_b, bv_b, bo_b, 5,
+        );
+
+        g.bind_input_shape("q_input", vec![1, 2, d_model]);
+        g.bind_input_shape("k_input_a", vec![1, 2, d_model]);
+        g.bind_input_shape("v_input_a", vec![1, 2, d_model]);
+        g.bind_input_shape("k_input_b", vec![1, 2, d_model]);
+        g.bind_input_shape("v_input_b", vec![1, 2, d_model]);
+
+        let (_, loss) = g
+            .add_op(
+                block,
+                Op::ReduceSum {
+                    input: b_out,
+                    axis: None,
+                    keepdims: false,
+                },
+            )
+            .unwrap();
+
+        let grad_graph =
+            build_reverse_graph(&g, loss, &[wq_b]).expect("build_reverse_graph should succeed");
+
+        let expected_attn_weights = grad_graph
+            .backward
+            .nodes
+            .iter()
+            .find_map(|node| match &node.op {
+                Op::MultiHeadAttention {
+                    q_input,
+                    k_input,
+                    v_input,
+                    w_q,
+                    w_k,
+                    w_v,
+                    w_o,
+                    bias_q,
+                    bias_k,
+                    bias_v,
+                    bias_o,
+                    num_heads: nh,
+                    causal,
+                    output_idx: 1,
+                } if *q_input == q_in
+                    && *k_input == k_in_b
+                    && *v_input == v_in_b
+                    && *w_q == wq_b
+                    && *w_k == wk_b
+                    && *w_v == wv_b
+                    && *w_o == wo_b
+                    && *bias_q == bq_b
+                    && *bias_k == bk_b
+                    && *bias_v == bv_b
+                    && *bias_o == bo_b
+                    && *nh == num_heads
+                    && !*causal =>
+                {
+                    Some(node.output)
+                }
+                _ => None,
+            })
+            .expect("expected mapped attention-weights sibling in backward graph");
+        let expected_context = grad_graph
+            .backward
+            .nodes
+            .iter()
+            .find_map(|node| match &node.op {
+                Op::MultiHeadAttention {
+                    q_input,
+                    k_input,
+                    v_input,
+                    w_q,
+                    w_k,
+                    w_v,
+                    w_o,
+                    bias_q,
+                    bias_k,
+                    bias_v,
+                    bias_o,
+                    num_heads: nh,
+                    causal,
+                    output_idx: 5,
+                } if *q_input == q_in
+                    && *k_input == k_in_b
+                    && *v_input == v_in_b
+                    && *w_q == wq_b
+                    && *w_k == wk_b
+                    && *w_v == wv_b
+                    && *w_o == wo_b
+                    && *bias_q == bq_b
+                    && *bias_k == bk_b
+                    && *bias_v == bv_b
+                    && *bias_o == bo_b
+                    && *nh == num_heads
+                    && !*causal =>
+                {
+                    Some(node.output)
+                }
+                _ => None,
+            })
+            .expect("expected mapped context sibling in backward graph");
+
+        let mha_backward = grad_graph
+            .backward
+            .nodes
+            .iter()
+            .find_map(|node| match &node.op {
+                Op::MultiHeadAttentionBackward {
+                    q_input,
+                    k_input,
+                    v_input,
+                    w_q,
+                    w_k,
+                    w_v,
+                    w_o,
+                    attn_weights,
+                    context,
+                    num_heads: nh,
+                    output_idx: 0,
+                    ..
+                } if *q_input == q_in
+                    && *k_input == k_in_b
+                    && *v_input == v_in_b
+                    && *w_q == wq_b
+                    && *w_k == wk_b
+                    && *w_v == wv_b
+                    && *w_o == wo_b
+                    && *nh == num_heads =>
+                {
+                    Some((*attn_weights, *context))
+                }
+                _ => None,
+            })
+            .expect("expected MHA backward node for the second attention family");
+
+        assert_eq!(mha_backward.0, expected_attn_weights);
+        assert_eq!(mha_backward.1, expected_context);
     }
 
     #[test]
@@ -2876,17 +3370,31 @@ mod tests {
         let seq = 2_usize;
 
         // Build graph differentiating w.r.t. v_input
-        let (forward, _, _q_in_id, _k_in_id, v_in_id, _wq_id, _wk_id, _wv_id, _wo_id, _mha_out_id, loss_id) =
-            build_mha_graph(d_model, num_heads, batch, seq, seq, false);
+        let (
+            forward,
+            _,
+            _q_in_id,
+            _k_in_id,
+            v_in_id,
+            _wq_id,
+            _wk_id,
+            _wv_id,
+            _wo_id,
+            _mha_out_id,
+            loss_id,
+        ) = build_mha_graph(d_model, num_heads, batch, seq, seq, false);
 
         let grad_graph = build_reverse_graph(&forward, loss_id, &[v_in_id])
             .expect("build_reverse_graph should succeed");
 
-        let dv_grad_value = *grad_graph.gradients.get(&v_in_id).expect("v_input gradient must exist");
+        let dv_grad_value = *grad_graph
+            .gradients
+            .get(&v_in_id)
+            .expect("v_input gradient must exist");
 
         // Use specific non-trivial inputs
-        let q_data: Vec<f32> = vec![1.0, 0.5, 0.0, 0.0,  0.0, 1.0, 0.5, 0.0]; // [1,2,4]
-        let v_data: Vec<f32> = vec![0.5, 1.0, 0.0, 0.0,  0.0, 0.5, 1.0, 0.0]; // [1,2,4]
+        let q_data: Vec<f32> = vec![1.0, 0.5, 0.0, 0.0, 0.0, 1.0, 0.5, 0.0]; // [1,2,4]
+        let v_data: Vec<f32> = vec![0.5, 1.0, 0.0, 0.0, 0.0, 0.5, 1.0, 0.0]; // [1,2,4]
 
         let make_tensor = |data: Vec<f32>, shape: Vec<usize>| {
             RuntimeValue::Tensor(std::sync::Arc::new(
@@ -2895,18 +3403,42 @@ mod tests {
         };
 
         let mut ctx = ExecutionContext::default();
-        ctx.inputs.insert("q_input".to_string(), make_tensor(q_data.clone(), vec![batch, seq, d_model]));
-        ctx.inputs.insert("k_input".to_string(), make_tensor(q_data.clone(), vec![batch, seq, d_model]));
-        ctx.inputs.insert("v_input".to_string(), make_tensor(v_data.clone(), vec![batch, seq, d_model]));
-        ctx.inputs.insert("__loss_grad".to_string(), make_tensor(vec![1.0], vec![1]));
-        ctx.parameters.insert("w_q".to_string(), make_tensor(eye(d_model), vec![d_model, d_model]));
-        ctx.parameters.insert("w_k".to_string(), make_tensor(eye(d_model), vec![d_model, d_model]));
-        ctx.parameters.insert("w_v".to_string(), make_tensor(eye(d_model), vec![d_model, d_model]));
-        ctx.parameters.insert("w_o".to_string(), make_tensor(eye(d_model), vec![d_model, d_model]));
+        ctx.inputs.insert(
+            "q_input".to_string(),
+            make_tensor(q_data.clone(), vec![batch, seq, d_model]),
+        );
+        ctx.inputs.insert(
+            "k_input".to_string(),
+            make_tensor(q_data.clone(), vec![batch, seq, d_model]),
+        );
+        ctx.inputs.insert(
+            "v_input".to_string(),
+            make_tensor(v_data.clone(), vec![batch, seq, d_model]),
+        );
+        ctx.inputs
+            .insert("__loss_grad".to_string(), make_tensor(vec![1.0], vec![1]));
+        ctx.parameters.insert(
+            "w_q".to_string(),
+            make_tensor(eye(d_model), vec![d_model, d_model]),
+        );
+        ctx.parameters.insert(
+            "w_k".to_string(),
+            make_tensor(eye(d_model), vec![d_model, d_model]),
+        );
+        ctx.parameters.insert(
+            "w_v".to_string(),
+            make_tensor(eye(d_model), vec![d_model, d_model]),
+        );
+        ctx.parameters.insert(
+            "w_o".to_string(),
+            make_tensor(eye(d_model), vec![d_model, d_model]),
+        );
 
         let dv_rv = execute_value_with_context(&grad_graph.backward, dv_grad_value, &ctx)
             .expect("execute dv_input gradient");
-        let RuntimeValue::Tensor(dv_t) = dv_rv else { panic!("expected tensor") };
+        let RuntimeValue::Tensor(dv_t) = dv_rv else {
+            panic!("expected tensor")
+        };
         let dv_c = dv_t.make_contiguous().unwrap();
         let dv_actual: Vec<f32> = dv_c.data.to_vec();
         // eprintln!("dv_actual shape={:?} values={:?}", dv_t.shape, &dv_actual);
@@ -2915,12 +3447,15 @@ mod tests {
         let eps = 1e-3_f32;
         let loss_fn_v = |v: Vec<f32>| -> f32 {
             use crate::engine::ir::kernels::attention::multi_head_attention;
-            let qk = crate::ir::tensor::Tensor::new(vec![batch, seq, d_model], q_data.clone()).unwrap();
+            let qk =
+                crate::ir::tensor::Tensor::new(vec![batch, seq, d_model], q_data.clone()).unwrap();
             let vt = crate::ir::tensor::Tensor::new(vec![batch, seq, d_model], v).unwrap();
             let w = crate::ir::tensor::Tensor::new(vec![d_model, d_model], eye(d_model)).unwrap();
             let b = crate::ir::tensor::Tensor::new(vec![d_model], vec![0.0; d_model]).unwrap();
-            let out = multi_head_attention(&qk, &qk, &vt, &w, &w, &w, &w, &b, &b, &b, &b, num_heads, false)
-                .expect("mha forward");
+            let out = multi_head_attention(
+                &qk, &qk, &vt, &w, &w, &w, &w, &b, &b, &b, &b, num_heads, false,
+            )
+            .expect("mha forward");
             let oc = out.output.make_contiguous().unwrap();
             oc.data.iter().sum()
         };
@@ -2935,8 +3470,13 @@ mod tests {
         }
 
         // Verify the gradient is non-trivially non-zero (test is meaningful)
-        let max_numerical = dv_numerical.iter().fold(0.0_f32, |acc, &x| acc.max(x.abs()));
-        assert!(max_numerical > 0.01, "numerical gradient should be non-zero, max={max_numerical}");
+        let max_numerical = dv_numerical
+            .iter()
+            .fold(0.0_f32, |acc, &x| acc.max(x.abs()));
+        assert!(
+            max_numerical > 0.01,
+            "numerical gradient should be non-zero, max={max_numerical}"
+        );
 
         // Check that analytical gradient matches numerical within tolerance 5e-3
         for (i, (actual, expected)) in dv_actual.iter().zip(dv_numerical.iter()).enumerate() {

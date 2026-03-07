@@ -574,6 +574,9 @@ fn hash_op(op: &Op, hasher: &mut SipHasher13) {
             w_k,
             w_v,
             w_o,
+            bias_q,
+            bias_k,
+            bias_v,
             attn_weights,
             context,
             upstream,
@@ -587,6 +590,9 @@ fn hash_op(op: &Op, hasher: &mut SipHasher13) {
             w_k.0.hash(hasher);
             w_v.0.hash(hasher);
             w_o.0.hash(hasher);
+            bias_q.0.hash(hasher);
+            bias_k.0.hash(hasher);
+            bias_v.0.hash(hasher);
             attn_weights.0.hash(hasher);
             context.0.hash(hasher);
             upstream.0.hash(hasher);
