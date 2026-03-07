@@ -51,38 +51,52 @@ fn merged_rustflags(existing: Option<&str>) -> String {
 }
 
 /// Resolve MKL library path from environment variables.
-/// Priority: MKL_LIB_DIR > MKLROOT/lib > CONDA_PREFIX/Library/lib (only if mkl_rt exists) > hardcoded fallback.
-fn resolve_mkl_lib_path() -> String {
+/// Priority: MKL_LIB_DIR > MKLROOT/lib > CONDA_PREFIX/Library/lib (only if mkl_rt exists).
+/// Returns Err with actionable instructions if MKL is not found.
+fn resolve_mkl_lib_path() -> Result<String, RustTrainCodegenError> {
+    resolve_mkl_lib_path_from(
+        std::env::var("MKL_LIB_DIR").ok().as_deref(),
+        std::env::var("MKLROOT").ok().as_deref(),
+        std::env::var("CONDA_PREFIX").ok().as_deref(),
+    )
+}
+
+/// Inner implementation that accepts explicit env var values for testability.
+fn resolve_mkl_lib_path_from(
+    mkl_lib_dir: Option<&str>,
+    mklroot: Option<&str>,
+    conda_prefix: Option<&str>,
+) -> Result<String, RustTrainCodegenError> {
     // Helper: check if mkl_rt exists in a lib dir
     let has_mkl = |p: &str| -> bool {
         let lib = if cfg!(windows) { "mkl_rt.lib" } else { "libmkl_rt.so" };
         std::path::Path::new(p).join(lib).exists()
     };
 
-    if let Ok(p) = std::env::var("MKL_LIB_DIR") {
+    if let Some(p) = mkl_lib_dir {
         let p = p.replace('\\', "/");
         if has_mkl(&p) {
-            return p;
+            return Ok(p);
         }
+        return Err(RustTrainCodegenError {
+            message: format!("MKL_LIB_DIR set to '{}' but mkl_rt.lib not found there.", p),
+        });
     }
-    if let Ok(root) = std::env::var("MKLROOT") {
+    if let Some(root) = mklroot {
         let p = format!("{}/lib", root.replace('\\', "/"));
         if has_mkl(&p) {
-            return p;
+            return Ok(p);
         }
     }
-    if let Ok(conda) = std::env::var("CONDA_PREFIX") {
+    if let Some(conda) = conda_prefix {
         let p = format!("{}/Library/lib", conda.replace('\\', "/"));
         if has_mkl(&p) {
-            return p;
+            return Ok(p);
         }
     }
-    // Fallback: check common conda env name "mkl"
-    if cfg!(windows) {
-        "C:/Users/User/miniforge3/envs/mkl/Library/lib".to_string()
-    } else {
-        "/usr/lib/x86_64-linux-gnu".to_string()
-    }
+    Err(RustTrainCodegenError {
+        message: "MKL not found for Adam codegen.\nFix: conda install -c conda-forge mkl\n     or set MKL_LIB_DIR=/path/to/mkl/lib".into(),
+    })
 }
 
 /// Compile a Rust-based training DLL using gemm crate.
@@ -123,7 +137,7 @@ pub fn compile_mlp_train_rust_dll(
     let opt_lower = topology.optimizer.to_lowercase();
     let use_mkl = opt_lower == "adam" || opt_lower == "adamw";
     if use_mkl {
-        let mkl_lib_path = resolve_mkl_lib_path();
+        let mkl_lib_path = resolve_mkl_lib_path()?;
         let build_rs = format!(
             "fn main() {{\n    println!(\"cargo:rustc-link-search=native={mkl_lib_path}\");\n    println!(\"cargo:rustc-link-lib=dylib=mkl_rt\");\n}}\n"
         );
@@ -925,8 +939,9 @@ fn generate_rust_source(
 }
 
 #[cfg(test)]
+#[allow(unsafe_code)]
 mod tests {
-    use super::merged_rustflags;
+    use super::{merged_rustflags, resolve_mkl_lib_path};
 
     #[test]
     fn merged_rustflags_defaults_to_target_cpu_native() {
@@ -948,5 +963,96 @@ mod tests {
             merged_rustflags(Some("-C target-cpu=x86-64-v3 -C debuginfo=1")),
             "-C target-cpu=x86-64-v3 -C debuginfo=1"
         );
+    }
+
+    #[test]
+    fn mkl_not_found_returns_err_with_instructions() {
+        // Remove all MKL-related env vars so the function has no path to find MKL.
+        // We set them to known-nonexistent paths to ensure has_mkl returns false.
+        // SAFETY: test-only env mutation, not running concurrently with other env tests.
+        unsafe {
+            std::env::remove_var("MKL_LIB_DIR");
+            std::env::remove_var("MKLROOT");
+            std::env::remove_var("CONDA_PREFIX");
+        }
+
+        let result = resolve_mkl_lib_path();
+        let err = result.expect_err("should return Err when MKL is not found");
+        assert!(
+            err.message.contains("MKL not found for Adam codegen"),
+            "expected 'MKL not found for Adam codegen' in error, got: {}",
+            err.message
+        );
+        assert!(
+            err.message.contains("conda install"),
+            "expected 'conda install' in error, got: {}",
+            err.message
+        );
+        assert!(
+            err.message.contains("MKL_LIB_DIR"),
+            "expected 'MKL_LIB_DIR' in error, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn mkl_lib_dir_bad_path_returns_specific_err() {
+        // Set MKL_LIB_DIR to a real temp dir that does NOT contain mkl_rt.lib
+        let tmp = std::env::temp_dir();
+        let bad_path = tmp.to_string_lossy().replace('\\', "/");
+        // SAFETY: test-only env mutation, not running concurrently with other env tests.
+        unsafe {
+            std::env::set_var("MKL_LIB_DIR", &bad_path);
+            // Ensure other vars don't interfere
+            std::env::remove_var("MKLROOT");
+            std::env::remove_var("CONDA_PREFIX");
+        }
+
+        let result = resolve_mkl_lib_path();
+        // SAFETY: cleanup.
+        unsafe { std::env::remove_var("MKL_LIB_DIR"); }
+
+        let err = result.expect_err("should return Err when MKL_LIB_DIR has no mkl_rt");
+        assert!(
+            err.message.contains("MKL_LIB_DIR set to"),
+            "expected 'MKL_LIB_DIR set to' in error, got: {}",
+            err.message
+        );
+        assert!(
+            err.message.contains(&bad_path),
+            "expected bad path '{}' in error, got: {}",
+            bad_path,
+            err.message
+        );
+    }
+
+    #[test]
+    fn merged_rustflags_injects_native_when_empty() {
+        assert_eq!(merged_rustflags(None), "-C target-cpu=native");
+    }
+
+    #[test]
+    fn merged_rustflags_injects_native_when_blank() {
+        assert_eq!(merged_rustflags(Some("  ")), "-C target-cpu=native");
+    }
+
+    #[test]
+    fn merged_rustflags_no_duplicate_when_already_set() {
+        let result = merged_rustflags(Some("-C target-cpu=native"));
+        assert_eq!(result, "-C target-cpu=native");
+    }
+
+    #[test]
+    fn merged_rustflags_no_duplicate_when_different_cpu() {
+        let result = merged_rustflags(Some("-C target-cpu=haswell"));
+        assert_eq!(result, "-C target-cpu=haswell");
+        assert!(!result.contains("target-cpu=native"));
+    }
+
+    #[test]
+    fn merged_rustflags_appends_when_other_flags_present() {
+        let result = merged_rustflags(Some("-C opt-level=3"));
+        assert!(result.contains("-C opt-level=3"), "must keep existing flag");
+        assert!(result.contains("-C target-cpu=native"), "must inject native");
     }
 }
