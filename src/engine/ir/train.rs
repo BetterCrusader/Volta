@@ -935,13 +935,17 @@ fn set_optimizer_lr(config: OptimizerConfig, new_lr: f32) -> OptimizerConfig {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
 
     use crate::ir::optimizer::LrSchedule;
     use crate::ir::{
         Backend, BackendCapabilities, BackendError, BackendKind, BackendMaturity, BackendVendor,
-        CompiledProgram, DeterminismLevel, DeviceClass, EarlyStoppingConfig, ExecutionContext,
-        ExecutionPlan, Graph, NodeId, Op, OptimizerConfig, Tensor, TrainConfig, TrainResult,
-        TrainSample, ValueId, train_graph, train_graph_with_backend,
+        CompiledProgram, CpuBackend, DeterminismLevel, DeviceClass, EarlyStoppingConfig,
+        ExecutionContext, ExecutionPlan, Graph, NodeId, Op, OptimizerConfig, Tensor,
+        TrainConfig, TrainResult, TrainSample, ValueId, train_graph, train_graph_with_backend,
     };
 
     #[test]
@@ -1231,6 +1235,59 @@ mod tests {
         });
     }
 
+    #[derive(Debug, Clone, Default)]
+    struct CountingCompileBackend {
+        compile_count: Arc<AtomicUsize>,
+    }
+
+    impl CountingCompileBackend {
+        fn compile_count(&self) -> usize {
+            self.compile_count.load(Ordering::SeqCst)
+        }
+    }
+
+    impl Backend for CountingCompileBackend {
+        fn capabilities(&self) -> BackendCapabilities {
+            CpuBackend.capabilities()
+        }
+
+        fn compile(&self, plan: &ExecutionPlan) -> Result<CompiledProgram, BackendError> {
+            self.compile_count.fetch_add(1, Ordering::SeqCst);
+            CpuBackend.compile(plan)
+        }
+    }
+
+    #[test]
+    fn compile_reuse_training_loop_reuses_forward_and_backward_compilation() {
+        crate::ir::clear_plan_cache();
+
+        let (graph, loss) = build_compile_reuse_graph();
+        let dataset = vec![
+            named_sample("compile_reuse_x", 1.0, "compile_reuse_y", 2.0),
+            named_sample("compile_reuse_x", 2.0, "compile_reuse_y", 4.0),
+            named_sample("compile_reuse_x", 3.0, "compile_reuse_y", 6.0),
+        ];
+        let val_dataset = vec![named_sample("compile_reuse_x", 4.0, "compile_reuse_y", 8.0)];
+        let backend = CountingCompileBackend::default();
+
+        let result = train_graph_with_backend(
+            &graph,
+            loss,
+            None,
+            single_named_weight_params("compile_reuse_w", 0.0),
+            &dataset,
+            &val_dataset,
+            &TrainConfig::new(4, OptimizerConfig::Sgd { lr: 0.01 }),
+            &backend,
+        )
+        .expect("training should succeed");
+
+        assert!(result.final_loss.is_finite());
+        assert_eq!(backend.compile_count(), 2);
+
+        crate::ir::clear_plan_cache();
+    }
+
     fn build_linear_mse_graph() -> (Graph, crate::ir::ValueId) {
         let mut graph = Graph::new();
         let block = graph.create_block();
@@ -1258,23 +1315,58 @@ mod tests {
         (graph, loss)
     }
 
+    fn build_compile_reuse_graph() -> (Graph, crate::ir::ValueId) {
+        let mut graph = Graph::new();
+        let block = graph.create_block();
+        let (_, x) = graph
+            .add_op(block, Op::Input("compile_reuse_x".to_string()))
+            .expect("add op should succeed");
+        let (_, w) = graph
+            .add_op(block, Op::Parameter("compile_reuse_w".to_string()))
+            .expect("add op should succeed");
+        let (_, y) = graph
+            .add_op(block, Op::Input("compile_reuse_y".to_string()))
+            .expect("add op should succeed");
+        let (_, pred) = graph
+            .add_op(block, Op::MatMul(x, w))
+            .expect("add op should succeed");
+        let (_, diff) = graph
+            .add_op(block, Op::Sub(pred, y))
+            .expect("add op should succeed");
+        let (_, sq) = graph
+            .add_op(block, Op::Mul(diff, diff))
+            .expect("add op should succeed");
+        let (_, loss) = graph
+            .add_op(block, Op::Output(sq))
+            .expect("add op should succeed");
+        (graph, loss)
+    }
+
     fn sample(x: f32, y: f32) -> TrainSample {
+        named_sample("x", x, "y", y)
+    }
+
+    fn named_sample(input_name: &str, x: f32, target_name: &str, y: f32) -> TrainSample {
         let mut inputs = HashMap::new();
         inputs.insert(
-            "x".to_string(),
+            input_name.to_string(),
             Tensor::new(vec![1, 1], vec![x]).expect("valid tensor"),
         );
         inputs.insert(
-            "y".to_string(),
+            target_name.to_string(),
             Tensor::new(vec![1, 1], vec![y]).expect("valid tensor"),
         );
         TrainSample { inputs }
     }
 
     fn single_weight_params(weight: f32) -> HashMap<String, Tensor> {
+        single_named_weight_params("w", weight)
+    }
+
+    fn single_named_weight_params(name: &str, weight: f32) -> HashMap<String, Tensor> {
         let mut params = HashMap::new();
         params.insert(
-            "w".to_string(),
+            name.to_string(),
             Tensor::new(vec![1, 1], vec![weight]).expect("valid tensor"),
         );
         params
