@@ -1,13 +1,14 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use crate::ir::autograd::build_reverse_graph;
 use crate::ir::interpreter::{ExecutionContext, RuntimeValue};
+use crate::ir::optimizer::apply_gradients_to_handles;
 use crate::ir::optimizer::{OptimizerConfig, OptimizerState};
 use crate::ir::tensor::Tensor;
 use crate::ir::{
-    Backend, CompilerFlags, CpuBackend, ExecutionPhase, Graph, Op, ValueId, build_execution_plan,
-    execute_backward_with_saved_activations, execute_forward_and_save,
+    Backend, BackendKind, CompilerFlags, CpuBackend, ExecutionPhase, Graph, Op, ValueId,
+    build_execution_plan, execute_backward_with_saved_activations, execute_forward_and_save,
     execute_terminal_with_backend_buffered, execute_value_with_backend, verify_graph,
 };
 
@@ -83,6 +84,8 @@ struct BestSnapshot {
     train_loss: f32,
     val_loss: Option<f32>,
 }
+
+type ParameterHandle = Arc<RwLock<Tensor>>;
 
 impl From<crate::ir::tensor::TensorError> for TrainError {
     fn from(err: crate::ir::tensor::TensorError) -> Self {
@@ -162,17 +165,12 @@ pub fn train_graph_with_backend(
 
     let parameter_values = collect_parameter_values(forward_graph);
 
-    // raw_params: owned tensors for optimizer updates
-    // arc_params: Arc-wrapped for zero-copy context building
-    let mut raw_params: HashMap<ValueId, Tensor> = HashMap::new();
-    let mut arc_params: HashMap<ValueId, Arc<Tensor>> = HashMap::new();
+    let mut parameter_handles: HashMap<ValueId, ParameterHandle> = HashMap::new();
     let mut tracked_params = Vec::new();
 
     for (name, initial_tensor) in initial_parameters {
         if let Some(value_id) = parameter_values.get(&name).copied() {
-            let arc = Arc::new(initial_tensor.clone());
-            arc_params.insert(value_id, arc);
-            raw_params.insert(value_id, initial_tensor);
+            parameter_handles.insert(value_id, Arc::new(RwLock::new(initial_tensor)));
             tracked_params.push((name, value_id));
         }
     }
@@ -252,7 +250,7 @@ pub fn train_graph_with_backend(
         let mut accum_count = 0usize;
 
         for sample in dataset {
-            let mut context = build_context_with_ids(sample, &arc_params, &tracked_params);
+            let mut context = build_context_with_ids(sample, &parameter_handles, &tracked_params)?;
             // Forward pass: execute AND save all intermediate activations.
             // fwd_buf will contain every computed value — the backward pass
             // pre-fills its buffer with these to skip re-running forward ops.
@@ -381,31 +379,16 @@ pub fn train_graph_with_backend(
                 &tracked_param_names,
             )?;
 
-            backend
-                .apply_gradients(
-                    &mut raw_params,
-                    &gradients_by_id,
-                    &epoch_optimizer,
-                    &mut optimizer_state,
-                    determinism,
-                )
-                .map_err(|e| TrainError {
-                    message: format!("Optimizer step failed: {}", e.message),
-                })?;
-            ensure_finite_named_tensors(
-                "optimizer",
-                "parameter",
-                &raw_params,
-                &tracked_param_names,
+            apply_training_gradients(
+                backend,
+                &parameter_handles,
+                &gradients_by_id,
+                &epoch_optimizer,
+                &mut optimizer_state,
+                determinism,
             )?;
+            ensure_finite_parameter_handles("optimizer", &parameter_handles, &tracked_param_names)?;
             ensure_finite_optimizer_state("optimizer", &optimizer_state, &tracked_param_names)?;
-
-            // Sync arc_params with updated raw_params (one Arc::new per updated param)
-            for (value_id, tensor) in &raw_params {
-                if gradients_by_id.contains_key(value_id) {
-                    arc_params.insert(*value_id, Arc::new(tensor.clone()));
-                }
-            }
         }
 
         // Flush remaining accumulated gradients (when dataset size < accum_steps,
@@ -457,30 +440,16 @@ pub fn train_graph_with_backend(
                 &tracked_param_names,
             )?;
 
-            backend
-                .apply_gradients(
-                    &mut raw_params,
-                    &gradients_by_id,
-                    &epoch_optimizer,
-                    &mut optimizer_state,
-                    determinism,
-                )
-                .map_err(|e| TrainError {
-                    message: format!("Optimizer step (flush) failed: {}", e.message),
-                })?;
-            ensure_finite_named_tensors(
-                "optimizer",
-                "parameter",
-                &raw_params,
-                &tracked_param_names,
+            apply_training_gradients(
+                backend,
+                &parameter_handles,
+                &gradients_by_id,
+                &epoch_optimizer,
+                &mut optimizer_state,
+                determinism,
             )?;
+            ensure_finite_parameter_handles("optimizer", &parameter_handles, &tracked_param_names)?;
             ensure_finite_optimizer_state("optimizer", &optimizer_state, &tracked_param_names)?;
-
-            for (value_id, tensor) in &raw_params {
-                if gradients_by_id.contains_key(value_id) {
-                    arc_params.insert(*value_id, Arc::new(tensor.clone()));
-                }
-            }
         }
 
         let epoch_train_loss = if train_batches > 0 {
@@ -496,7 +465,7 @@ pub fn train_graph_with_backend(
             let mut val_total = 0;
 
             for sample in val_dataset {
-                let context = build_context_with_ids(sample, &arc_params, &tracked_params);
+                let context = build_context_with_ids(sample, &parameter_handles, &tracked_params)?;
                 let loss_value_runtime = execute_terminal_with_backend_buffered(
                     forward_graph,
                     &forward_plan,
@@ -594,7 +563,7 @@ pub fn train_graph_with_backend(
                 es_best_loss = monitored;
                 es_patience_counter = 0;
                 es_best_snapshot = Some(BestSnapshot {
-                    parameters: raw_params.clone(),
+                    parameters: snapshot_parameter_handles(&parameter_handles)?,
                     optimizer_state: optimizer_state.clone(),
                     monitored_loss: monitored,
                     train_loss: epoch_train_loss,
@@ -636,18 +605,13 @@ pub fn train_graph_with_backend(
                         best_val_loss,
                     )?;
                 }
-                raw_params = best_snapshot.parameters;
+                restore_parameter_handles(&parameter_handles, &best_snapshot.parameters)?;
                 optimizer_state = best_snapshot.optimizer_state;
                 restored_snapshot_metrics =
                     Some((best_snapshot.train_loss, best_snapshot.val_loss));
-                // Sync arc_params
-                for (value_id, tensor) in &raw_params {
-                    arc_params.insert(*value_id, Arc::new(tensor.clone()));
-                }
-                ensure_finite_named_tensors(
+                ensure_finite_parameter_handles(
                     "early_stopping_restore",
-                    "parameter",
-                    &raw_params,
+                    &parameter_handles,
                     &tracked_param_names,
                 )?;
                 ensure_finite_optimizer_state(
@@ -664,7 +628,7 @@ pub fn train_graph_with_backend(
             final_val_loss_out = restored_val_loss;
             restored_train_loss
         } else if let Some(sample) = dataset.last() {
-            let context = build_context_with_ids(sample, &arc_params, &tracked_params);
+            let context = build_context_with_ids(sample, &parameter_handles, &tracked_params)?;
             let loss_runtime = execute_terminal_with_backend_buffered(
                 forward_graph,
                 &forward_plan,
@@ -690,8 +654,8 @@ pub fn train_graph_with_backend(
 
     let mut final_parameters = HashMap::new();
     for (name, value_id) in tracked_params {
-        if let Some(tensor) = raw_params.remove(&value_id) {
-            final_parameters.insert(name, tensor);
+        if let Some(handle) = parameter_handles.get(&value_id) {
+            final_parameters.insert(name, read_parameter_handle(handle, value_id)?);
         }
     }
 
@@ -744,6 +708,22 @@ fn ensure_finite_named_tensors(
             .map(|name| format!("{tensor_kind} '{name}' ({value_id})"))
             .unwrap_or_else(|| format!("{tensor_kind} {value_id}"));
         ensure_finite_tensor(stage, &label, tensor)?;
+    }
+    Ok(())
+}
+
+fn ensure_finite_parameter_handles(
+    stage: &str,
+    parameter_handles: &HashMap<ValueId, ParameterHandle>,
+    tracked_param_names: &HashMap<ValueId, String>,
+) -> Result<(), TrainError> {
+    for (value_id, handle) in parameter_handles {
+        let label = tracked_param_names
+            .get(value_id)
+            .map(|name| format!("parameter '{name}' ({value_id})"))
+            .unwrap_or_else(|| format!("parameter {value_id}"));
+        let tensor = read_parameter_handle(handle, *value_id)?;
+        ensure_finite_tensor(stage, &label, &tensor)?;
     }
     Ok(())
 }
@@ -804,9 +784,9 @@ fn collect_parameter_values(graph: &Graph) -> HashMap<String, ValueId> {
 
 fn build_context_with_ids(
     sample: &TrainSample,
-    parameter_tensors: &HashMap<ValueId, Arc<Tensor>>,
+    parameter_handles: &HashMap<ValueId, ParameterHandle>,
     tracked_params: &[(String, ValueId)],
-) -> ExecutionContext {
+) -> Result<ExecutionContext, TrainError> {
     let mut context = ExecutionContext::default();
     for (name, tensor) in &sample.inputs {
         context
@@ -814,13 +794,91 @@ fn build_context_with_ids(
             .insert(name.clone(), RuntimeValue::Tensor(Arc::new(tensor.clone())));
     }
     for (name, value_id) in tracked_params {
-        if let Some(arc_tensor) = parameter_tensors.get(value_id) {
+        if let Some(handle) = parameter_handles.get(value_id) {
+            let snapshot = read_parameter_handle(handle, *value_id)?;
             context
                 .parameters
-                .insert(name.clone(), RuntimeValue::Tensor(Arc::clone(arc_tensor)));
+                .insert(name.clone(), RuntimeValue::Tensor(Arc::new(snapshot)));
         }
     }
-    context
+    Ok(context)
+}
+
+fn apply_training_gradients(
+    backend: &dyn Backend,
+    parameter_handles: &HashMap<ValueId, ParameterHandle>,
+    gradients: &HashMap<ValueId, Tensor>,
+    optimizer: &OptimizerConfig,
+    optimizer_state: &mut OptimizerState,
+    determinism: crate::ir::DeterminismLevel,
+) -> Result<(), TrainError> {
+    match backend.capabilities().backend {
+        BackendKind::Cpu => {
+            apply_gradients_to_handles(parameter_handles, gradients, optimizer, optimizer_state)
+                .map_err(|e| TrainError {
+                    message: format!("Optimizer step failed: {}", e.message),
+                })
+        }
+        _ => {
+            let mut raw_params = snapshot_parameter_handles(parameter_handles)?;
+            backend
+                .apply_gradients(
+                    &mut raw_params,
+                    gradients,
+                    optimizer,
+                    optimizer_state,
+                    determinism,
+                )
+                .map_err(|e| TrainError {
+                    message: format!("Optimizer step failed: {}", e.message),
+                })?;
+            restore_parameter_handles(parameter_handles, &raw_params)
+        }
+    }
+}
+
+fn snapshot_parameter_handles(
+    parameter_handles: &HashMap<ValueId, ParameterHandle>,
+) -> Result<HashMap<ValueId, Tensor>, TrainError> {
+    let mut snapshots = HashMap::with_capacity(parameter_handles.len());
+    for (value_id, handle) in parameter_handles {
+        snapshots.insert(*value_id, read_parameter_handle(handle, *value_id)?);
+    }
+    Ok(snapshots)
+}
+
+fn restore_parameter_handles(
+    parameter_handles: &HashMap<ValueId, ParameterHandle>,
+    snapshots: &HashMap<ValueId, Tensor>,
+) -> Result<(), TrainError> {
+    for (value_id, tensor) in snapshots {
+        if let Some(handle) = parameter_handles.get(value_id) {
+            write_parameter_handle(handle, *value_id, tensor.clone())?;
+        }
+    }
+    Ok(())
+}
+
+fn read_parameter_handle(
+    handle: &ParameterHandle,
+    value_id: ValueId,
+) -> Result<Tensor, TrainError> {
+    let guard = handle.read().map_err(|_| TrainError {
+        message: format!("Parameter handle lock poisoned for {value_id}"),
+    })?;
+    Ok(guard.clone())
+}
+
+fn write_parameter_handle(
+    handle: &ParameterHandle,
+    value_id: ValueId,
+    tensor: Tensor,
+) -> Result<(), TrainError> {
+    let mut guard = handle.write().map_err(|_| TrainError {
+        message: format!("Parameter handle lock poisoned for {value_id}"),
+    })?;
+    *guard = tensor;
+    Ok(())
 }
 
 fn runtime_to_tensor(value: RuntimeValue) -> Result<Tensor, String> {
@@ -944,8 +1002,8 @@ mod tests {
     use crate::ir::{
         Backend, BackendCapabilities, BackendError, BackendKind, BackendMaturity, BackendVendor,
         CompiledProgram, CpuBackend, DeterminismLevel, DeviceClass, EarlyStoppingConfig,
-        ExecutionContext, ExecutionPlan, Graph, NodeId, Op, OptimizerConfig, Tensor,
-        TrainConfig, TrainResult, TrainSample, ValueId, train_graph, train_graph_with_backend,
+        ExecutionContext, ExecutionPlan, Graph, NodeId, Op, OptimizerConfig, Tensor, TrainConfig,
+        TrainResult, TrainSample, ValueId, train_graph, train_graph_with_backend,
     };
 
     #[test]

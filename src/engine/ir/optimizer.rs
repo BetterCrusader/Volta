@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 use crate::ir::tensor::Tensor;
 
@@ -176,7 +177,37 @@ pub fn apply_gradients(
     }
 }
 
-use std::sync::Arc;
+pub fn apply_gradients_to_handles(
+    parameters: &HashMap<crate::ir::node::ValueId, Arc<RwLock<Tensor>>>,
+    gradients: &HashMap<crate::ir::node::ValueId, Tensor>,
+    config: &OptimizerConfig,
+    state: &mut OptimizerState,
+) -> Result<(), OptimizerError> {
+    let mut updated_parameters = HashMap::with_capacity(gradients.len());
+    for value_id in gradients.keys() {
+        let Some(handle) = parameters.get(value_id) else {
+            continue;
+        };
+        let tensor = handle.read().map_err(|_| OptimizerError {
+            message: format!("Parameter handle lock poisoned for ValueId {}", value_id.0),
+        })?;
+        updated_parameters.insert(*value_id, tensor.clone());
+    }
+
+    apply_gradients(&mut updated_parameters, gradients, config, state)?;
+
+    for (value_id, tensor) in updated_parameters {
+        let Some(handle) = parameters.get(&value_id) else {
+            continue;
+        };
+        let mut guard = handle.write().map_err(|_| OptimizerError {
+            message: format!("Parameter handle lock poisoned for ValueId {}", value_id.0),
+        })?;
+        *guard = tensor;
+    }
+
+    Ok(())
+}
 
 fn apply_sgd(
     parameters: &mut HashMap<crate::ir::node::ValueId, Tensor>,
@@ -630,9 +661,12 @@ fn apply_lars(
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::sync::{Arc, RwLock};
 
     use crate::ir::node::ValueId;
-    use crate::ir::optimizer::{OptimizerConfig, OptimizerState, apply_gradients};
+    use crate::ir::optimizer::{
+        OptimizerConfig, OptimizerState, apply_gradients, apply_gradients_to_handles,
+    };
     use crate::ir::tensor::Tensor;
 
     fn vid(n: usize) -> ValueId {
@@ -971,5 +1005,38 @@ mod tests {
         )
         .expect_err("negative weight_decay must be rejected for Adagrad");
         assert!(err.message.contains("weight_decay"));
+    }
+
+    #[test]
+    fn stable_parameter_handle_identity_survives_optimizer_steps() {
+        let handle = Arc::new(RwLock::new(
+            Tensor::new(vec![1], vec![1.0]).expect("valid tensor"),
+        ));
+        let original_handle = Arc::clone(&handle);
+        let mut params = HashMap::new();
+        params.insert(vid(0), Arc::clone(&handle));
+
+        let mut grads = HashMap::new();
+        grads.insert(
+            vid(0),
+            Tensor::new(vec![1], vec![0.5]).expect("valid tensor"),
+        );
+
+        let mut state = OptimizerState::default();
+        for _ in 0..3 {
+            apply_gradients_to_handles(
+                &params,
+                &grads,
+                &OptimizerConfig::Sgd { lr: 0.1 },
+                &mut state,
+            )
+            .expect("handle updates should succeed");
+        }
+
+        assert!(Arc::ptr_eq(params.get(&vid(0)).expect("parameter exists"), &original_handle));
+        assert_eq!(state.step, 3);
+
+        let updated = handle.read().expect("handle should not be poisoned");
+        assert!((updated.data[0] - 0.85).abs() < 1e-6);
     }
 }
