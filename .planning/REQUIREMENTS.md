@@ -19,9 +19,9 @@
 
 ### Infrastructure
 
-- [ ] **INFRA-01**: Hardcoded dev MKL path (`C:/Users/User/miniforge3/...`) прибрано — повертає Err з інструкцією встановити MKL_LIB_DIR
+- [x] **INFRA-01**: Hardcoded dev MKL path (`C:/Users/User/miniforge3/...`) прибрано — повертає Err з інструкцією встановити MKL_LIB_DIR
 - [ ] **INFRA-02**: `CARGO_MANIFEST_DIR` не embedded в shipped binary — gemm_shim.c шукається відносно `std::env::current_exe()`
-- [ ] **INFRA-03**: Graph fingerprinting використовує SipHasher (стабільний між Rust versions) замість DefaultHasher
+- [x] **INFRA-03**: Graph fingerprinting використовує SipHasher (стабільний між Rust versions) замість DefaultHasher
 
 ### Reliability
 
@@ -70,9 +70,9 @@
 | CORR-01 | Phase 1 | Complete |
 | PERF-03 | Phase 2 | Pending |
 | CORR-02 | Phase 2 | Pending |
-| INFRA-01 | Phase 2 | Pending |
+| INFRA-01 | Phase 2 | Complete |
 | INFRA-02 | Phase 2 | Pending |
-| INFRA-03 | Phase 2 | Pending |
+| INFRA-03 | Phase 2 | Complete |
 | CORR-03 | Phase 3 | Pending |
 | RELY-01 | Phase 3 | Pending |
 | RELY-02 | Phase 3 | Pending |
