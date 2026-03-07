@@ -109,7 +109,7 @@ progress:
 
 # State: Volta
 
-**Останнє оновлення:** 2026-03-07T08:40:00Z
+**Останнє оновлення:** 2026-03-07T12:21:15Z
 
 ---
 
@@ -189,6 +189,12 @@ progress:
 - ~~`CARGO_MANIFEST_DIR` embedded в shipped binary — codegen paths broken після install~~ — FIXED in 02-02
 - bench_mlp2048 and bench_b128 examples fail to link MKL — pre-existing issue
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 2 | add multi-step PyTorch training parity through real train_graph | 2026-03-07 | e9bafb6 | [2-add-multi-step-pytorch-training-parity-t](./quick/2-add-multi-step-pytorch-training-parity-t/) |
+
 ### Важливі числа
 
 - Benchmark gate: B=64 MLP-512 median < 2.10 ms — SGD Case 2 primary = 1.703 ms (PASS, confirmed 2026-03-07)
@@ -204,9 +210,9 @@ progress:
 2. Читай `.planning/REQUIREMENTS.md` — повний список v1 вимог
 3. Читай `.planning/codebase/CONCERNS.md` — known bugs і tech debt
 
-**Наступний крок:** Продовжити Фазу 3 — Надійність і коректність (03-03 if exists, else Phase 3 sign-off)
+**Наступний крок:** Розширити parity з multi-step MLP на transformer training loop або mini encoder stack
 
-**Остання сесія:** 2026-03-07T08:40:00Z — Completed 03-02-PLAN.md (MHA full backward: 7 gradients, sibling-scan, 2 TDD tests green, CORR-03 closed)
+**Остання сесія:** 2026-03-07T12:21:15Z — Completed quick task 2 (PyTorch parity harness + multi-step `train_graph` SGD check, commit `e9bafb6`)
 
 ---
 
