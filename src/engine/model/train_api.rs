@@ -182,53 +182,51 @@ pub fn train_with_backend<D: Dataset>(
 mod tests {
     use std::collections::HashMap;
 
-    use crate::ir::{Graph, NodeId, OptimizerConfig, Tensor, ValueId, build_execution_plan};
+    use crate::ir::{Graph, NodeId, Op, OptimizerConfig, Tensor, ValueId, build_execution_plan};
     use crate::model::{
         CompiledModel, Dataset, Example, ReproducibilityMode, TensorShape, TrainApiConfig,
         build_tiny_transformer_fixture_for_tests, infer, train,
     };
 
-    struct TinyDataset {
-        rows: Vec<(f32, f32)>,
+    #[derive(Debug, Clone)]
+    struct TensorDataset {
+        examples: Vec<Example>,
     }
 
-    impl Dataset for TinyDataset {
+    impl Dataset for TensorDataset {
         fn len(&self) -> usize {
-            self.rows.len()
+            self.examples.len()
         }
 
         fn example(&self, index: usize) -> Result<Example, crate::model::TrainApiError> {
-            let (x, y) = self.rows[index];
-            let mut inputs = HashMap::new();
-            inputs.insert(
-                "x".to_string(),
-                Tensor::new(vec![1, 1], vec![x]).expect("valid tensor"),
-            );
-            inputs.insert(
-                "y".to_string(),
-                Tensor::new(vec![1, 1], vec![y]).expect("valid tensor"),
-            );
-            Ok(Example { inputs })
+            Ok(self.examples[index].clone())
         }
     }
 
     #[test]
-    fn deterministic_mode_produces_stable_result() {
-        let (model, dataset) = fixture();
-        let config = TrainApiConfig {
-            epochs: 20,
-            batch_size: 2,
-            shuffle: true,
-            shuffle_seed: 7,
-            optimizer: OptimizerConfig::Sgd { lr: 0.01 },
-            gradient_checkpointing: None,
-            reproducibility: ReproducibilityMode::Deterministic,
-            checkpoint_path: None,
-        };
+    fn mlp_long_loop_sgd_is_deterministic() {
+        assert_mlp_long_loop_is_deterministic(OptimizerConfig::Sgd { lr: 0.05 });
+    }
 
-        let a = train(&model, &dataset, &config).expect("train should pass");
-        let b = train(&model, &dataset, &config).expect("train should pass");
-        assert!((a.final_loss - b.final_loss).abs() < 1e-9);
+    #[test]
+    fn mlp_long_loop_adam_is_deterministic() {
+        assert_mlp_long_loop_is_deterministic(OptimizerConfig::Adam {
+            lr: 0.01,
+            beta1: 0.9,
+            beta2: 0.999,
+            epsilon: 1e-8,
+        });
+    }
+
+    #[test]
+    fn mlp_long_loop_adamw_is_deterministic() {
+        assert_mlp_long_loop_is_deterministic(OptimizerConfig::AdamW {
+            lr: 0.01,
+            beta1: 0.9,
+            beta2: 0.999,
+            epsilon: 1e-8,
+            weight_decay: 0.01,
+        });
     }
 
     #[test]
@@ -267,38 +265,111 @@ mod tests {
         assert_eq!(trained.final_loss, loss_before);
     }
 
-    fn fixture() -> (CompiledModel, TinyDataset) {
+    fn build_mlp_long_loop_fixture_for_tests() -> (CompiledModel, TensorDataset) {
         let mut graph = crate::ir::Graph::new();
         let block = graph.create_block();
+
         let (_, x) = graph
-            .add_op(block, crate::ir::Op::Input("x".to_string()))
+            .add_op(block, Op::Input("x".to_string()))
             .expect("add op should succeed");
-        let (_, w) = graph
-            .add_op(block, crate::ir::Op::Parameter("w".to_string()))
+        let (_, target) = graph
+            .add_op(block, Op::Input("target".to_string()))
             .expect("add op should succeed");
-        let (_, y) = graph
-            .add_op(block, crate::ir::Op::Input("y".to_string()))
+        let (_, w1) = graph
+            .add_op(block, Op::Parameter("w1".to_string()))
             .expect("add op should succeed");
-        let (_, pred) = graph
-            .add_op(block, crate::ir::Op::MatMul(x, w))
+        let (_, b1) = graph
+            .add_op(block, Op::Parameter("b1".to_string()))
             .expect("add op should succeed");
-        let (_, diff) = graph
-            .add_op(block, crate::ir::Op::Sub(pred, y))
+        let (_, w2) = graph
+            .add_op(block, Op::Parameter("w2".to_string()))
             .expect("add op should succeed");
-        let (_, sq) = graph
-            .add_op(block, crate::ir::Op::Mul(diff, diff))
-            .expect("add op should succeed");
-        let (_, loss) = graph
-            .add_op(block, crate::ir::Op::Output(sq))
+        let (_, b2) = graph
+            .add_op(block, Op::Parameter("b2".to_string()))
             .expect("add op should succeed");
 
-        let mut params = HashMap::new();
-        params.insert(
-            "w".to_string(),
-            Tensor::new(vec![1, 1], vec![0.0]).expect("valid tensor"),
-        );
-        let mut param_values = HashMap::new();
-        param_values.insert("w".to_string(), w);
+        let (_, hidden) = graph
+            .add_op(
+                block,
+                Op::Gemm {
+                    lhs: x,
+                    rhs: w1,
+                    bias: Some(b1),
+                    alpha: 1.0,
+                    beta: 1.0,
+                },
+            )
+            .expect("add op should succeed");
+        let (_, hidden_relu) = graph
+            .add_op(block, Op::Relu(hidden))
+            .expect("add op should succeed");
+        let (_, pred) = graph
+            .add_op(
+                block,
+                Op::Gemm {
+                    lhs: hidden_relu,
+                    rhs: w2,
+                    bias: Some(b2),
+                    alpha: 1.0,
+                    beta: 1.0,
+                },
+            )
+            .expect("add op should succeed");
+        let (_, diff) = graph
+            .add_op(block, Op::Sub(pred, target))
+            .expect("add op should succeed");
+        let (_, sq) = graph
+            .add_op(block, Op::Mul(diff, diff))
+            .expect("add op should succeed");
+        let (_, loss) = graph
+            .add_op(
+                block,
+                Op::ReduceMean {
+                    input: sq,
+                    axis: None,
+                    keepdims: false,
+                },
+            )
+            .expect("add op should succeed");
+
+        graph.bind_input_shape("x", vec![2, 3]);
+        graph.bind_input_shape("target", vec![2, 2]);
+        graph.bind_parameter_shape("w1", vec![3, 4]);
+        graph.bind_parameter_shape("b1", vec![4]);
+        graph.bind_parameter_shape("w2", vec![4, 2]);
+        graph.bind_parameter_shape("b2", vec![2]);
+
+        let parameters = HashMap::from([
+            (
+                "w1".to_string(),
+                Tensor::new(
+                    vec![3, 4],
+                    vec![
+                        0.1, -0.2, 0.3, 0.4, 0.5, 0.6, -0.7, 0.8, -0.9, 1.0, 0.2, -0.3,
+                    ],
+                )
+                .expect("valid tensor"),
+            ),
+            (
+                "b1".to_string(),
+                Tensor::new(vec![4], vec![0.05, -0.1, 0.15, 0.2]).expect("valid tensor"),
+            ),
+            (
+                "w2".to_string(),
+                Tensor::new(vec![4, 2], vec![0.2, -0.4, 0.1, 0.3, -0.5, 0.7, 0.6, -0.2])
+                    .expect("valid tensor"),
+            ),
+            (
+                "b2".to_string(),
+                Tensor::new(vec![2], vec![0.25, -0.35]).expect("valid tensor"),
+            ),
+        ]);
+        let parameter_values = HashMap::from([
+            ("w1".to_string(), w1),
+            ("b1".to_string(), b1),
+            ("w2".to_string(), w2),
+            ("b2".to_string(), b2),
+        ]);
 
         let inference_plan = build_execution_plan(&graph, &std::collections::HashSet::new())
             .expect("infer plan should build");
@@ -309,19 +380,141 @@ mod tests {
         let model = CompiledModel {
             graph,
             output: pred,
-            output_shape: TensorShape(vec![1, 1]),
+            output_shape: TensorShape(vec![2, 2]),
             loss: Some(loss),
-            parameters: params,
-            parameter_values: param_values,
+            parameters,
+            parameter_values,
             inference_plan,
             inference_ordered_nodes,
         };
 
-        let dataset = TinyDataset {
-            rows: vec![(1.0, 2.0), (2.0, 4.0), (3.0, 6.0), (4.0, 8.0)],
+        let dataset = TensorDataset {
+            examples: vec![
+                Example {
+                    inputs: HashMap::from([
+                        (
+                            "x".to_string(),
+                            Tensor::new(vec![2, 3], vec![0.2, -0.1, 0.3, 0.7, 0.5, -0.4])
+                                .expect("valid tensor"),
+                        ),
+                        (
+                            "target".to_string(),
+                            Tensor::new(vec![2, 2], vec![0.1, -0.2, 0.3, 0.4])
+                                .expect("valid tensor"),
+                        ),
+                    ]),
+                },
+                Example {
+                    inputs: HashMap::from([
+                        (
+                            "x".to_string(),
+                            Tensor::new(vec![2, 3], vec![0.4, 0.2, -0.5, -0.3, 0.6, 0.8])
+                                .expect("valid tensor"),
+                        ),
+                        (
+                            "target".to_string(),
+                            Tensor::new(vec![2, 2], vec![0.2, 0.05, -0.1, 0.6])
+                                .expect("valid tensor"),
+                        ),
+                    ]),
+                },
+            ],
         };
 
         (model, dataset)
+    }
+
+    fn build_mlp_long_loop_config(optimizer: OptimizerConfig) -> TrainApiConfig {
+        TrainApiConfig {
+            epochs: 24,
+            batch_size: 1,
+            shuffle: true,
+            shuffle_seed: 0x5EED,
+            optimizer,
+            gradient_checkpointing: None,
+            reproducibility: ReproducibilityMode::Deterministic,
+            checkpoint_path: None,
+        }
+    }
+
+    fn assert_mlp_long_loop_is_deterministic(optimizer: OptimizerConfig) {
+        let (model, dataset) = build_mlp_long_loop_fixture_for_tests();
+        let config = build_mlp_long_loop_config(optimizer);
+        let initial_loss = average_mlp_dataset_loss(&model, &model.parameters, &dataset);
+
+        let first = train(&model, &dataset, &config).expect("first long-loop train should pass");
+        let second = train(&model, &dataset, &config).expect("second long-loop train should pass");
+
+        assert!(first.final_loss.is_finite());
+        assert!(second.final_loss.is_finite());
+        assert_eq!(first.final_loss.to_bits(), second.final_loss.to_bits());
+        assert_eq!(first.final_parameters, second.final_parameters);
+        assert_all_tensors_are_finite(&first.final_parameters);
+
+        let final_loss = average_mlp_dataset_loss(&model, &first.final_parameters, &dataset);
+        assert!(
+            final_loss < initial_loss,
+            "long-loop fixture should reduce average MLP loss: before={initial_loss}, after={final_loss}"
+        );
+    }
+
+    fn average_mlp_dataset_loss(
+        model: &CompiledModel,
+        parameters: &HashMap<String, Tensor>,
+        dataset: &TensorDataset,
+    ) -> f32 {
+        let mut total = 0.0;
+        for example in &dataset.examples {
+            let predicted = infer(
+                model,
+                parameters,
+                &HashMap::from([(
+                    "x".to_string(),
+                    example
+                        .inputs
+                        .get("x")
+                        .expect("MLP example should contain x")
+                        .clone(),
+                )]),
+            )
+            .expect("infer should pass on MLP long-loop fixture");
+            let target = example
+                .inputs
+                .get("target")
+                .expect("MLP example should contain target");
+            total += mean_squared_error(&predicted, target);
+        }
+        total / dataset.len() as f32
+    }
+
+    fn mean_squared_error(lhs: &Tensor, rhs: &Tensor) -> f32 {
+        assert_eq!(
+            lhs.shape, rhs.shape,
+            "MSE tensors must share the same shape"
+        );
+        let element_count = lhs.logical_len();
+        let squared_error_sum: f32 = lhs
+            .data
+            .iter()
+            .zip(rhs.data.iter())
+            .take(element_count)
+            .map(|(actual, expected)| {
+                let delta = actual - expected;
+                delta * delta
+            })
+            .sum();
+        squared_error_sum / element_count as f32
+    }
+
+    fn assert_all_tensors_are_finite(parameters: &HashMap<String, Tensor>) {
+        for (name, tensor) in parameters {
+            for (index, value) in tensor.data.iter().take(tensor.logical_len()).enumerate() {
+                assert!(
+                    value.is_finite(),
+                    "parameter '{name}' contains non-finite value at element {index}: {value}"
+                );
+            }
+        }
     }
 
     fn infer_nodes_for_target(
