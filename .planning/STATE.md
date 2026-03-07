@@ -109,7 +109,7 @@ progress:
 
 # State: Volta
 
-**Останнє оновлення:** 2026-03-07T12:21:15Z
+**Останнє оновлення:** 2026-03-07T16:39:59Z
 
 ---
 
@@ -194,6 +194,7 @@ progress:
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 2 | add multi-step PyTorch training parity through real train_graph | 2026-03-07 | e9bafb6 | [2-add-multi-step-pytorch-training-parity-t](./quick/2-add-multi-step-pytorch-training-parity-t/) |
+| 3 | add MHA bias gradients and transformer training parity | 2026-03-07 | 50979c8 | [3-add-mha-bias-gradients-and-transformer-t](./quick/3-add-mha-bias-gradients-and-transformer-t/) |
 
 ### Важливі числа
 
@@ -210,9 +211,9 @@ progress:
 2. Читай `.planning/REQUIREMENTS.md` — повний список v1 вимог
 3. Читай `.planning/codebase/CONCERNS.md` — known bugs і tech debt
 
-**Наступний крок:** Розширити parity з multi-step MLP на transformer training loop або mini encoder stack
+**Наступний крок:** Розширити parity на optimizer variants (Adam/AdamW) або на stacked transformer/encoder training loop
 
-**Остання сесія:** 2026-03-07T12:21:15Z — Completed quick task 2 (PyTorch parity harness + multi-step `train_graph` SGD check, commit `e9bafb6`)
+**Остання сесія:** 2026-03-07T16:39:59Z — Completed quick task 3 (MHA bias gradients + transformer training parity, commit `50979c8`)
 
 ---
 
