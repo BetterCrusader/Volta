@@ -1,11 +1,11 @@
-use std::collections::hash_map::DefaultHasher;
+use siphasher::sip::SipHasher13;
 use std::hash::{Hash, Hasher};
 
 use crate::ir::{Graph, Op};
 
 #[must_use]
 pub fn graph_fingerprint(graph: &Graph) -> u64 {
-    let mut hasher = DefaultHasher::new();
+    let mut hasher = SipHasher13::new_with_keys(0, 0);
     graph.nodes.len().hash(&mut hasher);
     graph.blocks.len().hash(&mut hasher);
     graph.shape_signature.inputs.hash(&mut hasher);
@@ -20,7 +20,7 @@ pub fn graph_fingerprint(graph: &Graph) -> u64 {
     hasher.finish()
 }
 
-fn hash_op(op: &Op, hasher: &mut DefaultHasher) {
+fn hash_op(op: &Op, hasher: &mut SipHasher13) {
     std::mem::discriminant(op).hash(hasher);
     match op {
         Op::ConstInt(value) => value.hash(hasher),
@@ -592,5 +592,26 @@ mod tests {
             .expect("add op should succeed");
 
         assert_eq!(graph_fingerprint(&g1), graph_fingerprint(&g2));
+    }
+
+    #[test]
+    fn fingerprint_different_graphs_differ() {
+        let mut g1 = Graph::new();
+        let b1 = g1.create_block();
+        let (_, a1) = g1
+            .add_op(b1, Op::ConstInt(1))
+            .expect("add op should succeed");
+        g1.add_op(b1, Op::Output(a1))
+            .expect("add op should succeed");
+
+        let mut g2 = Graph::new();
+        let b2 = g2.create_block();
+        let (_, a2) = g2
+            .add_op(b2, Op::ConstInt(2))
+            .expect("add op should succeed");
+        g2.add_op(b2, Op::Output(a2))
+            .expect("add op should succeed");
+
+        assert_ne!(graph_fingerprint(&g1), graph_fingerprint(&g2));
     }
 }
