@@ -6,7 +6,7 @@ use crate::ir::interpreter::{ExecutionContext, RuntimeValue};
 use crate::ir::optimizer::{OptimizerConfig, OptimizerState};
 use crate::ir::tensor::Tensor;
 use crate::ir::{
-    Backend, CompilerFlags, CpuBackend, Graph, Op, ValueId, build_execution_plan,
+    Backend, CompilerFlags, CpuBackend, ExecutionPhase, Graph, Op, ValueId, build_execution_plan,
     execute_backward_with_saved_activations, execute_forward_and_save,
     execute_terminal_with_backend_buffered, execute_value_with_backend, verify_graph,
 };
@@ -127,11 +127,29 @@ pub fn train_graph_with_backend(
     verify_graph(forward_graph).map_err(|err| TrainError {
         message: format!("Forward graph failed verification: {}", err.message),
     })?;
+    let determinism = CompilerFlags::from_env().determinism;
+    backend
+        .capabilities()
+        .validate(ExecutionPhase::Training, determinism)
+        .map_err(|err| TrainError {
+            message: format!("Backend capability check failed: {}", err.message),
+        })?;
+    let optimizer_name = match &config.optimizer {
+        crate::ir::optimizer::OptimizerConfig::Adam { .. } => "adam",
+        crate::ir::optimizer::OptimizerConfig::AdamW { .. } => "adamw",
+        _ => "sgd",
+    };
+    backend
+        .capabilities()
+        .validate_optimizer(optimizer_name)
+        .map_err(|err| TrainError {
+            message: format!("Backend optimizer check failed: {}", err.message),
+        })?;
+
     let forward_plan = build_execution_plan(forward_graph, &std::collections::HashSet::new())
         .map_err(|err| TrainError {
             message: format!("Failed to build forward execution plan: {}", err.message),
         })?;
-    let determinism = CompilerFlags::from_env().determinism;
 
     let parameter_values = collect_parameter_values(forward_graph);
 
@@ -724,7 +742,12 @@ fn set_optimizer_lr(config: OptimizerConfig, new_lr: f32) -> OptimizerConfig {
 mod tests {
     use std::collections::HashMap;
 
-    use crate::ir::{Graph, Op, OptimizerConfig, Tensor, TrainConfig, TrainSample, train_graph};
+    use crate::ir::{
+        Backend, BackendCapabilities, BackendError, BackendKind, BackendMaturity, BackendVendor,
+        CompiledProgram, DeterminismLevel, DeviceClass, ExecutionContext, ExecutionPlan, Graph,
+        NodeId, Op, OptimizerConfig, Tensor, TrainConfig, TrainSample, ValueId, train_graph,
+        train_graph_with_backend,
+    };
 
     #[test]
     fn end_to_end_train_with_sgd_reduces_loss() {
@@ -790,6 +813,91 @@ mod tests {
         .expect("training should succeed");
 
         assert!(result.final_loss < 0.05);
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct InferenceOnlyBackend;
+
+    impl Backend for InferenceOnlyBackend {
+        fn capabilities(&self) -> BackendCapabilities {
+            BackendCapabilities {
+                backend: BackendKind::Cpu,
+                device_class: DeviceClass::Cpu,
+                vendor: BackendVendor::GenericCpu,
+                maturity: BackendMaturity::Experimental,
+                supports_inference: true,
+                supports_training: false,
+                supports_runtime_execution: true,
+                supports_gradient_updates: false,
+                supports_adam: false,
+                supports_strict_determinism: true,
+                supports_balanced_determinism: true,
+                supports_fast_determinism: true,
+                default_determinism: DeterminismLevel::Strict,
+            }
+        }
+
+        fn compile(&self, plan: &ExecutionPlan) -> Result<CompiledProgram, BackendError> {
+            Ok(CompiledProgram {
+                schedule_len: plan.schedule.ordered_nodes.len(),
+                peak_bytes: plan.allocation.peak_bytes,
+                fingerprint: 1,
+            })
+        }
+
+        fn execute_terminal(
+            &self,
+            _graph: &Graph,
+            _plan: &ExecutionPlan,
+            _ordered_nodes: &[NodeId],
+            _context: &ExecutionContext,
+            _determinism: DeterminismLevel,
+        ) -> Result<Option<crate::ir::RuntimeValue>, BackendError> {
+            Err(BackendError {
+                message: "should not execute".to_string(),
+            })
+        }
+
+        fn execute_value(
+            &self,
+            _graph: &Graph,
+            _plan: &ExecutionPlan,
+            _target: ValueId,
+            _ordered_nodes: &[NodeId],
+            _context: &ExecutionContext,
+            _determinism: DeterminismLevel,
+        ) -> Result<crate::ir::RuntimeValue, BackendError> {
+            Err(BackendError {
+                message: "should not execute".to_string(),
+            })
+        }
+    }
+
+    #[test]
+    fn training_rejects_backend_without_training_support() {
+        let (graph, loss) = build_linear_mse_graph();
+        let mut params = HashMap::new();
+        params.insert(
+            "w".to_string(),
+            Tensor::new(vec![1, 1], vec![0.0]).expect("valid tensor"),
+        );
+        let dataset = vec![sample(1.0, 2.0)];
+        let backend = InferenceOnlyBackend;
+
+        let err = train_graph_with_backend(
+            &graph,
+            loss,
+            None,
+            params,
+            &dataset,
+            &[],
+            &TrainConfig::new(1, OptimizerConfig::Sgd { lr: 0.01 }),
+            &backend,
+        )
+        .expect_err("backend without training support must fail");
+
+        assert!(err.message.contains("capability check failed"));
+        assert!(err.message.contains("Training"));
     }
 
     fn build_linear_mse_graph() -> (Graph, crate::ir::ValueId) {
