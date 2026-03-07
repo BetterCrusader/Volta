@@ -428,11 +428,43 @@ fn apply_rmsprop(
             message: format!("RMSprop learning rate must be a finite positive number, got {lr}"),
         });
     }
+    if !(0.0..1.0).contains(&alpha) || !alpha.is_finite() {
+        return Err(OptimizerError {
+            message: format!("RMSprop alpha must be in [0, 1), got {alpha}"),
+        });
+    }
+    if !epsilon.is_finite() || epsilon <= 0.0 {
+        return Err(OptimizerError {
+            message: format!("RMSprop epsilon must be a finite positive number, got {epsilon}"),
+        });
+    }
+    if !weight_decay.is_finite() || weight_decay < 0.0 {
+        return Err(OptimizerError {
+            message: format!(
+                "RMSprop weight_decay must be a finite non-negative number, got {weight_decay}"
+            ),
+        });
+    }
+    if !momentum.is_finite() || momentum < 0.0 {
+        return Err(OptimizerError {
+            message: format!(
+                "RMSprop momentum must be a finite non-negative number, got {momentum}"
+            ),
+        });
+    }
 
     for (value_id, parameter) in parameters {
         let Some(gradient) = gradients.get(value_id) else {
             continue;
         };
+        if parameter.shape != gradient.shape {
+            return Err(OptimizerError {
+                message: format!(
+                    "Shape mismatch in RMSprop for ValueId {}: {:?} vs {:?}",
+                    value_id.0, parameter.shape, gradient.shape
+                ),
+            });
+        }
 
         let v = state.rms_v.entry(*value_id).or_insert(
             Tensor::zeros(parameter.shape.clone()).map_err(|e| OptimizerError {
@@ -490,11 +522,31 @@ fn apply_adagrad(
             message: format!("Adagrad learning rate must be a finite positive number, got {lr}"),
         });
     }
+    if !epsilon.is_finite() || epsilon <= 0.0 {
+        return Err(OptimizerError {
+            message: format!("Adagrad epsilon must be a finite positive number, got {epsilon}"),
+        });
+    }
+    if !weight_decay.is_finite() || weight_decay < 0.0 {
+        return Err(OptimizerError {
+            message: format!(
+                "Adagrad weight_decay must be a finite non-negative number, got {weight_decay}"
+            ),
+        });
+    }
 
     for (value_id, parameter) in parameters {
         let Some(gradient) = gradients.get(value_id) else {
             continue;
         };
+        if parameter.shape != gradient.shape {
+            return Err(OptimizerError {
+                message: format!(
+                    "Shape mismatch in Adagrad for ValueId {}: {:?} vs {:?}",
+                    value_id.0, parameter.shape, gradient.shape
+                ),
+            });
+        }
 
         let acc = state.adagrad_acc.entry(*value_id).or_insert(
             Tensor::zeros(parameter.shape.clone()).map_err(|e| OptimizerError {
@@ -832,6 +884,92 @@ mod tests {
             &mut state,
         )
         .expect_err("negative weight_decay must be rejected for AdamW");
+        assert!(err.message.contains("weight_decay"));
+    }
+
+    #[test]
+    fn rmsprop_rejects_invalid_hyperparameters() {
+        let mut params = HashMap::new();
+        params.insert(
+            vid(0),
+            Tensor::new(vec![1], vec![1.0]).expect("valid tensor"),
+        );
+        let mut grads = HashMap::new();
+        grads.insert(
+            vid(0),
+            Tensor::new(vec![1], vec![1.0]).expect("valid tensor"),
+        );
+        let mut state = OptimizerState::default();
+
+        let err = apply_gradients(
+            &mut params,
+            &grads,
+            &OptimizerConfig::RmsProp {
+                lr: 0.01,
+                alpha: 1.0,
+                epsilon: 1e-8,
+                weight_decay: 0.0,
+                momentum: 0.0,
+            },
+            &mut state,
+        )
+        .expect_err("alpha=1.0 must be rejected for RMSprop");
+        assert!(err.message.contains("alpha"));
+
+        let err = apply_gradients(
+            &mut params,
+            &grads,
+            &OptimizerConfig::RmsProp {
+                lr: 0.01,
+                alpha: 0.99,
+                epsilon: 0.0,
+                weight_decay: 0.0,
+                momentum: 0.0,
+            },
+            &mut state,
+        )
+        .expect_err("epsilon=0 must be rejected for RMSprop");
+        assert!(err.message.contains("epsilon"));
+    }
+
+    #[test]
+    fn adagrad_rejects_invalid_hyperparameters() {
+        let mut params = HashMap::new();
+        params.insert(
+            vid(0),
+            Tensor::new(vec![1], vec![1.0]).expect("valid tensor"),
+        );
+        let mut grads = HashMap::new();
+        grads.insert(
+            vid(0),
+            Tensor::new(vec![1], vec![1.0]).expect("valid tensor"),
+        );
+        let mut state = OptimizerState::default();
+
+        let err = apply_gradients(
+            &mut params,
+            &grads,
+            &OptimizerConfig::Adagrad {
+                lr: 0.1,
+                epsilon: 0.0,
+                weight_decay: 0.0,
+            },
+            &mut state,
+        )
+        .expect_err("epsilon=0 must be rejected for Adagrad");
+        assert!(err.message.contains("epsilon"));
+
+        let err = apply_gradients(
+            &mut params,
+            &grads,
+            &OptimizerConfig::Adagrad {
+                lr: 0.1,
+                epsilon: 1e-8,
+                weight_decay: -0.01,
+            },
+            &mut state,
+        )
+        .expect_err("negative weight_decay must be rejected for Adagrad");
         assert!(err.message.contains("weight_decay"));
     }
 }
