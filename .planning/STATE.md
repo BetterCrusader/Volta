@@ -3,9 +3,23 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: completed
-last_updated: "2026-03-07T06:44:05.494Z"
+last_updated: "2026-03-07T06:47:55.310Z"
 progress:
   total_phases: 3
+  completed_phases: 2
+  total_plans: 7
+  completed_plans: 7
+  percent: 100
+---
+
+---
+gsd_state_version: 1.0
+milestone: v1.0
+milestone_name: milestone
+status: completed
+last_updated: "2026-03-07T06:44:05.494Z"
+progress:
+  [██████████] 100%
   completed_phases: 1
   total_plans: 7
   completed_plans: 6
@@ -69,9 +83,9 @@ progress:
 ## Current Position
 
 **Фаза:** 2 — Інфраструктура і backend (In Progress)
-**План:** 02-02 complete
-**Статус:** Phase 2 in progress — 02-01 done, 02-02 done (portable gemm_shim + merged_rustflags tests)
-**Прогрес:** [█████████░] 86%
+**План:** 02-03 complete
+**Статус:** Phase 2 in progress — 02-01 done, 02-02 done, 02-03 done (supports_adam + validate_optimizer / CORR-02)
+**Прогрес:** [██████████] 100%
 
 ```
 [x] Фаза 1 / 01-01: Remove x86-v4 from gemm features (DONE)
@@ -80,7 +94,7 @@ progress:
 [x] Фаза 1 / 01-04: Gap closure — PERF-01/PERF-02 confirmed with measured values (DONE)
 [x] Фаза 2 / 02-01: Stable fingerprints (SipHasher13) + MKL error reporting (DONE)
 [x] Фаза 2 / 02-02: Portable gemm_shim (include_bytes!) + merged_rustflags tests (DONE)
-[ ] Фаза 2: Решта планів
+[x] Фаза 2 / 02-03: Adam optimizer capability tracking — supports_adam + validate_optimizer / CORR-02 (DONE)
 [ ] Фаза 3: Надійність і коректність
 ```
 
@@ -99,6 +113,7 @@ progress:
 | Phase 01-adam P04 | - | 1 task | 2 files |
 | Phase 02-backend P01 | 6min | 2 tasks | 3 files |
 | Phase 02-backend P02-02 | 6min | 2 tasks | 3 files |
+| Phase 02-backend P03 | 2 | 1 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -119,6 +134,7 @@ progress:
 | resolve_mkl_lib_path_from() testable inner function | Project deny(unsafe_code) prevents unsafe env mutation in tests; inner function takes explicit params |
 | include_bytes! for gemm_shim.c | Embed at compile time, write to per-compile dir at runtime; eliminates CARGO_MANIFEST_DIR dev path from shipped binary |
 | merged_rustflags tests: 5 named tests | Locks in target-cpu=native injection behavior; no duplicate if already set |
+| CpuBackend supports_adam: true; CudaBackend supports_adam: false | validate_optimizer() makes Adam/backend contract explicit before compile; CUDA Adam not implemented in v1 |
 
 ### Відомі блокери
 
@@ -142,9 +158,9 @@ progress:
 2. Читай `.planning/REQUIREMENTS.md` — повний список v1 вимог
 3. Читай `.planning/codebase/CONCERNS.md` — known bugs і tech debt
 
-**Наступний крок:** Продовжити Фазу 2 — наступний план 02-03
+**Наступний крок:** Продовжити Фазу 3 — Надійність і коректність
 
-**Остання сесія:** 2026-03-07T06:43:06Z — Completed 02-02-PLAN.md (include_bytes! gemm_shim portability, merged_rustflags tests, INFRA-02/PERF-03 closed)
+**Остання сесія:** 2026-03-07T06:47:11Z — Completed 02-03-PLAN.md (supports_adam field, validate_optimizer() method, call site in train.rs, CORR-02 closed)
 
 ---
 
