@@ -3,6 +3,9 @@
 // No backward pass, no weight copy, no SGD — pure forward throughput
 // Run: cargo run --release --example bench_inference
 #![allow(non_snake_case)]
+#[path = "common/mod.rs"]
+mod common;
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
@@ -175,7 +178,7 @@ fn run_inf(b: usize, runs: usize, steps: usize) -> (f64, f64) {
         }
         times[r] = t0.elapsed().as_nanos() as f64 / 1000.0 / steps as f64 / 1000.0;
     }
-    times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    common::sort_f64_samples(&mut times);
     let p25 = times[runs / 4];
     let p50 = times[runs / 2];
     (p25, p50)
@@ -227,7 +230,7 @@ fn run_inf_pipelined(b: usize, runs: usize, steps: usize) -> (f64, f64) {
         }
         times[r] = t0.elapsed().as_nanos() as f64 / 1000.0 / steps as f64 / 1000.0;
     }
-    times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    common::sort_f64_samples(&mut times);
     (times[runs / 4], times[runs / 2])
 }
 

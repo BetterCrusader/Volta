@@ -1,6 +1,9 @@
 // bench_official_v4.rs — faer forward+SGD, gemm-crate stride bwd for r>c layers
 // Run: cargo run --release --example bench_official_v4
 #![allow(non_snake_case, dead_code)]
+#[path = "common/mod.rs"]
+mod common;
+
 use faer::linalg::matmul::matmul;
 use faer::Accum;
 use std::time::Instant;
@@ -489,7 +492,7 @@ fn main() {
         results[r] = t0.elapsed().as_nanos() as f64 / 1000.0 / STEPS as f64 / 1000.0;
         checksum += s.last_loss;
     }
-    results.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    common::sort_f64_samples(&mut results);
     println!(
         "[TRAIN][VOLTA-RUST-V4] median={:.3} ms/step  all7={:?}",
         results[RUNS / 2],

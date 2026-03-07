@@ -1,6 +1,8 @@
 // bench_final.rs — final comparison: v3 sequential vs pipeline3-way
 // 15 runs × 50 steps, p50 reported
-#![allow(non_snake_case, dead_code)]
+#[path = "common/mod.rs"]
+mod common;
+
 use std::time::Instant;
 
 static PAR_T: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(6);
@@ -503,9 +505,8 @@ fn main() {
         let (t, _) = run_pipeline(&x, &y, lr, STEPS);
         rp[r] = t;
     }
-    rv.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    rp.sort_by(|a, b| a.partial_cmp(b).unwrap());
-
+    common::sort_f64_samples(&mut rv);
+    common::sort_f64_samples(&mut rp);
     let pytorch = 2.440f64;
     println!("\n┌─────────────────────────────────────────────────────┐");
     println!("│  Method           │  p25    │  p50    │  vs PyTorch  │");

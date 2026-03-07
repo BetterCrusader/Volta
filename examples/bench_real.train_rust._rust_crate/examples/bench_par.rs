@@ -1,5 +1,7 @@
 // bench_par.rs — test different Rayon parallelism thresholds
-#![allow(non_snake_case)]
+#[path = "common/mod.rs"]
+mod common;
+
 use std::time::Instant;
 
 fn par_current(m: usize, k: usize, n: usize) -> gemm::Parallelism {
@@ -223,7 +225,7 @@ fn bench<F: Fn(usize, usize, usize) -> gemm::Parallelism>(label: &str, par: F) {
         }
         results[run] = t0.elapsed().as_nanos() as f64 / 1000.0 / 50.0 / 1000.0;
     }
-    results.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    common::sort_f64_samples(&mut results);
     println!(
         "[{}] median={:.3} ms  all={:?}",
         label,

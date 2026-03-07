@@ -1,6 +1,9 @@
 // bench_mlp256.rs — MLP 256→512→512→256→1, B=64, same protocol
 // Build: cargo build --release --example bench_mlp256
 #![allow(non_snake_case, unused)]
+#[path = "common/mod.rs"]
+mod common;
+
 use std::time::Instant;
 
 #[cfg(target_arch = "x86_64")]
@@ -356,8 +359,7 @@ fn main() {
         results[r] = t0.elapsed().as_nanos() as f64 / 1e6 / STEPS as f64;
         checksum += s.last_loss;
     }
-    results.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let med = results[RUNS / 2];
+    let med = common::median_f64_samples(&mut results);
     eprintln!(
         "[TRAIN][VOLTA-MLP256] median={:.3} ms/step  all7={:?}",
         med,

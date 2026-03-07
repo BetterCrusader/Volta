@@ -8,7 +8,9 @@
 // This avoids BLIS packing overhead and exploits the fixed M=64 structure.
 //
 // Run: cargo run --release --example bench_microkernel
-#![allow(non_snake_case)]
+#[path = "common/mod.rs"]
+mod common;
+
 use std::time::Instant;
 
 const B: usize = 64; // batch size = M dimension
@@ -301,7 +303,7 @@ fn bench_fn(label: &str, iters: usize, mut f: impl FnMut()) -> f64 {
         }
         results[run] = t0.elapsed().as_nanos() as f64 / iters as f64 / 1000.0;
     }
-    results.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    common::sort_f64_samples(&mut results);
     let med = results[3];
     println!("  [{:<42}] p50={:.1} us", label, med);
     med

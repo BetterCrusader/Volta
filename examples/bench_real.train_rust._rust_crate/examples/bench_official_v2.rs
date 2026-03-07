@@ -2,6 +2,9 @@
 // Uses same params: B=64, steps=50, runs=7, warmup=10, deterministic input
 // Exits cleanly via ExitProcess to avoid Rayon DLL abort issue
 #![allow(non_snake_case)]
+#[path = "common/mod.rs"]
+mod common;
+
 use std::time::Instant;
 
 #[cfg(target_arch = "x86_64")]
@@ -337,8 +340,7 @@ fn main() {
         results[r] = t0.elapsed().as_nanos() as f64 / 1000.0 / STEPS as f64 / 1000.0;
         checksum += s.last_loss;
     }
-    results.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let med = results[RUNS / 2];
+    let med = common::median_f64_samples(&mut results);
     println!(
         "[TRAIN][VOLTA-RUST-V2] median={:.3} ms/step  all7={:?}",
         med,

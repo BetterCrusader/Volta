@@ -1,7 +1,9 @@
 // bench_pipeline.rs — double-buffered pipeline: fwd(step N+1) || bwd+sgd(step N)
 // Stale-W by 1 step — mathematically different but converges, checksum drifts slightly
 // Run: cargo run --release --example bench_pipeline
-#![allow(non_snake_case)]
+#[path = "common/mod.rs"]
+mod common;
+
 use std::time::Instant;
 
 fn par(m: usize, k: usize, n: usize) -> gemm::Parallelism {
@@ -509,7 +511,7 @@ fn main() {
         let (t, _) = bench_baseline(&x, &y, lr, 50);
         results_b[r] = t;
     }
-    results_b.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    common::sort_f64_samples(&mut results_b);
     println!(
         "[baseline] median={:.3} ms  all={:?}",
         results_b[3],
@@ -524,7 +526,7 @@ fn main() {
         results_p[r] = t;
         cs += loss;
     }
-    results_p.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    common::sort_f64_samples(&mut results_p);
     println!(
         "[pipeline] median={:.3} ms  all={:?}",
         results_p[3],

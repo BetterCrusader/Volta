@@ -1,7 +1,9 @@
 // bench_final2.rs — layer-pipelined backward+SGD
 // For each layer i (N→0): sgd(i) runs PARALLEL with bwd_delta(i-1)
 // This hides SGD cost behind backward compute.
-#![allow(non_snake_case, dead_code)]
+#[path = "common/mod.rs"]
+mod common;
+
 use std::time::Instant;
 
 fn par(m: usize, k: usize, n: usize) -> gemm::Parallelism {
@@ -606,8 +608,7 @@ fn main() {
         let (t, _) = run_pipeline_layerpipe(&x, &y, lr, STEPS);
         rp[r] = t;
     }
-    rp.sort_by(|a, b| a.partial_cmp(b).unwrap());
-
+    common::sort_f64_samples(&mut rp);
     let pytorch = 2.440f64;
     let p25 = rp[3];
     let p50 = rp[7];

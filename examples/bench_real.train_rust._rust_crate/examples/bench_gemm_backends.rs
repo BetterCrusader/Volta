@@ -1,6 +1,9 @@
 // bench_gemm_backends.rs — gemm crate vs faer for our specific matrix sizes
 // Run: cargo run --release --example bench_gemm_backends
 #![allow(non_snake_case)]
+#[path = "common/mod.rs"]
+mod common;
+
 use faer::Mat;
 use std::time::Instant;
 
@@ -37,8 +40,7 @@ fn bench_fn(label: &str, mut f: impl FnMut()) -> f64 {
         }
         *slot = t0.elapsed().as_nanos() as f64 / 200.0 / 1000.0;
     }
-    results.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let med = results[3];
+    let med = common::median_f64_samples(&mut results);
     println!("  [{:<40}] median={:.1} us", label, med);
     med
 }

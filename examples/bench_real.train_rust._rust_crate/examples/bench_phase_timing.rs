@@ -1,5 +1,7 @@
 // bench_phase_timing.rs — measure individual phase costs to find bottleneck
-#![allow(non_snake_case)]
+#[path = "common/mod.rs"]
+mod common;
+
 use std::time::Instant;
 
 fn par(m: usize, k: usize, n: usize) -> gemm::Parallelism {
@@ -347,7 +349,7 @@ fn bench_us(label: &str, mut f: impl FnMut()) -> f64 {
         }
         *slot = t0.elapsed().as_nanos() as f64 / 100.0 / 1000.0;
     }
-    res.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    common::sort_f64_samples(&mut res);
     println!("  [{:<30}] p50={:.1} us", label, res[3]);
     res[3]
 }

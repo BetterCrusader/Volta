@@ -2,7 +2,9 @@
 //   Thread A: fwd(N+1)
 //   Thread B: rayon::join(copy_ws, compute_grads(N))  →  apply_sgd(N)
 // copy_ws is hidden behind compute_grads compute time.
-#![allow(non_snake_case, dead_code)]
+#[path = "common/mod.rs"]
+mod common;
+
 use std::time::Instant;
 
 static PAR_THREADS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(3);
@@ -484,7 +486,7 @@ fn main() {
             let (v, _) = run_pipeline(&x, &y, lr, 50);
             rp[r] = v;
         }
-        rp.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        common::sort_f64_samples(&mut rp);
         let label = if t == 0 {
             "all".to_string()
         } else {
@@ -503,7 +505,7 @@ fn main() {
         let (t, _) = run_sequential(&x, &y, lr, 50);
         rb[r] = t;
     }
-    rb.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    common::sort_f64_samples(&mut rb);
     println!("\n[sequential Rayon(0)] median={:.3} ms", rb[3]);
 
     // Full benchmark with best par setting
@@ -514,8 +516,7 @@ fn main() {
         let (t, _) = run_sequential(&x, &y, lr, 50);
         rb2[r] = t;
     }
-    rb2.sort_by(|a, b| a.partial_cmp(b).unwrap());
-
+    common::sort_f64_samples(&mut rb2);
     for best_t in [5usize] {
         PAR_THREADS.store(best_t, std::sync::atomic::Ordering::Relaxed);
         let mut rp2 = [0f64; 7];
@@ -523,7 +524,7 @@ fn main() {
             let (t, _) = run_pipeline(&x, &y, lr, 50);
             rp2[r] = t;
         }
-        rp2.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        common::sort_f64_samples(&mut rp2);
         println!(
             "[sequential] median={:.3} ms  all={:?}",
             rb2[3],

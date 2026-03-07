@@ -5,7 +5,9 @@
 //
 // Build: cargo build --release --example bench_b128
 // Run: (with MKL in PATH)
-#![allow(non_snake_case, unused)]
+#[path = "common/mod.rs"]
+mod common;
+
 use std::time::Instant;
 
 #[cfg(target_arch = "x86_64")]
@@ -355,7 +357,7 @@ fn bench(label: &str, steps: usize, runs: usize, mut f: impl FnMut()) -> f64 {
         }
         results[r] = t0.elapsed().as_nanos() as f64 / 1e6 / steps as f64;
     }
-    results.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    common::sort_f64_samples(&mut results);
     let med = results[runs / 2];
     println!(
         "  {label:40} median={med:.3} ms/step  all={}",

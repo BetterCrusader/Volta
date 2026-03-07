@@ -1,6 +1,9 @@
 // bench_fused.rs — 3-in-1 fused GEMM: forward + backward + SGD in one W pass
 // Run: cargo run --release --example bench_fused
 #![allow(non_snake_case)]
+#[path = "common/mod.rs"]
+mod common;
+
 use std::time::Instant;
 
 fn par(m: usize, k: usize, n: usize) -> gemm::Parallelism {
@@ -332,8 +335,7 @@ fn bench(label: &str, mut f: impl FnMut()) -> f64 {
         }
         results[run] = t0.elapsed().as_nanos() as f64 / 200.0 / 1000.0;
     }
-    results.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let med = results[3];
+    let med = common::median_f64_samples(&mut results);
     println!(
         "[{}] median={:.1} us  all={:?}",
         label,

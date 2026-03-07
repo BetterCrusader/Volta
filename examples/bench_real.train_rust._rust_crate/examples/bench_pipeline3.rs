@@ -3,7 +3,9 @@
 // Forward uses faer (15-27% faster for large layers).
 // Backward r>c uses gemm stride trick (no transpose, 37-49% faster).
 // par_threads=4 empirically best for pipeline balance.
-#![allow(non_snake_case, dead_code)]
+#[path = "common/mod.rs"]
+mod common;
+
 use faer::linalg::matmul::matmul;
 use faer::mat::{MatMut, MatRef};
 use faer::Accum;
@@ -472,8 +474,8 @@ fn main() {
         let (t, _) = run_pipeline(&x, &y, lr, 50);
         rp[r] = t;
     }
-    rb.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    rp.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    common::sort_f64_samples(&mut rb);
+    common::sort_f64_samples(&mut rp);
     println!(
         "[sequential] median={:.3} ms  all={:?}",
         rb[3],

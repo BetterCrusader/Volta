@@ -3,7 +3,9 @@
 //   compute delta_i, then spawn SGD(i), continue to delta_{i-1}
 // SGD tasks run async on rayon threadpool while backward continues.
 // No nested rayon::join — uses rayon::scope with spawned tasks.
-#![allow(non_snake_case, dead_code)]
+#[path = "common/mod.rs"]
+mod common;
+
 use std::time::Instant;
 
 fn par(m: usize, k: usize, n: usize) -> gemm::Parallelism {
@@ -485,8 +487,7 @@ fn main() {
         let (t, _) = run_pipeline(&x, &y, lr, STEPS);
         rp[r] = t;
     }
-    rp.sort_by(|a, b| a.partial_cmp(b).unwrap());
-
+    common::sort_f64_samples(&mut rp);
     let pytorch = 2.440f64;
     println!(
         "[final3 pipeline] p25={:.3} p50={:.3}  vs PyTorch {:+.1}%",

@@ -1,6 +1,8 @@
 // bench_affinity.rs — pin rayon threads to cores, then benchmark pipeline
 // Uses Windows SetThreadAffinityMask to reduce scheduler jitter
-#![allow(non_snake_case, dead_code)]
+#[path = "common/mod.rs"]
+mod common;
+
 use std::time::Instant;
 
 #[cfg(windows)]
@@ -490,9 +492,8 @@ fn main() {
         let (t, _) = run_pipeline(&x, &y, lr, STEPS);
         rp[r] = t;
     }
-    rv.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    rp.sort_by(|a, b| a.partial_cmp(b).unwrap());
-
+    common::sort_f64_samples(&mut rv);
+    common::sort_f64_samples(&mut rp);
     let pytorch = 2.440f64;
     println!(
         "[sequential] p25={:.3} p50={:.3}  vs PyTorch {:+.1}%",
