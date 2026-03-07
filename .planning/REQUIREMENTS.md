@@ -25,8 +25,8 @@
 
 ### Reliability
 
-- [ ] **RELY-01**: `autograd.rs` panic sites замінені на `Result<_, AutogradError>` для незвичних graph structures
-- [ ] **RELY-02**: `Tensor::PartialEq` не панікує на невалідних stride/offset — повертає false
+- [x] **RELY-01**: `autograd.rs` panic sites замінені на `Result<_, AutogradError>` для незвичних graph structures
+- [x] **RELY-02**: `Tensor::PartialEq` не панікує на невалідних stride/offset — повертає false
 
 ## v2 Requirements
 
@@ -74,8 +74,8 @@
 | INFRA-02 | Phase 2 | Complete |
 | INFRA-03 | Phase 2 | Complete |
 | CORR-03 | Phase 3 | Pending |
-| RELY-01 | Phase 3 | Pending |
-| RELY-02 | Phase 3 | Pending |
+| RELY-01 | Phase 3 | Complete |
+| RELY-02 | Phase 3 | Complete |
 
 **Coverage:**
 - v1 requirements: 11 total

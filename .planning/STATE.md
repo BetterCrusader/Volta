@@ -3,6 +3,19 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: completed
+last_updated: "2026-03-07T06:53:06.347Z"
+progress:
+  total_phases: 3
+  completed_phases: 2
+  total_plans: 7
+  completed_plans: 7
+---
+
+---
+gsd_state_version: 1.0
+milestone: v1.0
+milestone_name: milestone
+status: completed
 last_updated: "2026-03-07T06:47:55.310Z"
 progress:
   total_phases: 3
@@ -69,23 +82,23 @@ progress:
 
 # State: Volta
 
-**Останнє оновлення:** 2026-03-07
+**Останнє оновлення:** 2026-03-07T07:42:00Z
 
 ---
 
 ## Project Reference
 
 **Ядро цінності:** CPU training швидший за PyTorch eager — виміряно, відтворювано, з числовою коректністю
-**Поточний фокус:** Фаза 2 — Інфраструктура і backend (02-01, 02-02 DONE)
+**Поточний фокус:** Фаза 3 — Надійність і коректність (03-01 DONE)
 
 ---
 
 ## Current Position
 
-**Фаза:** 2 — Інфраструктура і backend (In Progress)
-**План:** 02-03 complete
-**Статус:** Phase 2 in progress — 02-01 done, 02-02 done, 02-03 done (supports_adam + validate_optimizer / CORR-02)
-**Прогрес:** [██████████] 100%
+**Фаза:** 3 — Надійність і коректність (In Progress)
+**План:** 03-01 complete
+**Статус:** Phase 3 in progress — 03-01 done (Tensor::PartialEq + build_reverse_graph panic fixes / RELY-01, RELY-02)
+**Прогрес:** [█░░░░░░░░░] in progress
 
 ```
 [x] Фаза 1 / 01-01: Remove x86-v4 from gemm features (DONE)
@@ -95,7 +108,7 @@ progress:
 [x] Фаза 2 / 02-01: Stable fingerprints (SipHasher13) + MKL error reporting (DONE)
 [x] Фаза 2 / 02-02: Portable gemm_shim (include_bytes!) + merged_rustflags tests (DONE)
 [x] Фаза 2 / 02-03: Adam optimizer capability tracking — supports_adam + validate_optimizer / CORR-02 (DONE)
-[ ] Фаза 3: Надійність і коректність
+[x] Фаза 3 / 03-01: Tensor::PartialEq panic-free + build_reverse_graph 3 unwraps fixed / RELY-01, RELY-02 (DONE)
 ```
 
 ---
@@ -135,6 +148,8 @@ progress:
 | include_bytes! for gemm_shim.c | Embed at compile time, write to per-compile dir at runtime; eliminates CARGO_MANIFEST_DIR dev path from shipped binary |
 | merged_rustflags tests: 5 named tests | Locks in target-cpu=native injection behavior; no duplicate if already set |
 | CpuBackend supports_adam: true; CudaBackend supports_adam: false | validate_optimizer() makes Adam/backend contract explicit before compile; CUDA Adam not implemented in v1 |
+| make_contiguous bounds-check before copy_to_slice | copy_to_slice panics on invalid offset; returning Err from make_contiguous enables let-else pattern in PartialEq — no API surface change |
+| MultiHeadAttentionBackward arms: no-op in autograd backward | backward of backward not needed for v1; Err in interpreter is correct since MHABackward is a codegen-only op |
 
 ### Відомі блокери
 
@@ -160,7 +175,7 @@ progress:
 
 **Наступний крок:** Продовжити Фазу 3 — Надійність і коректність
 
-**Остання сесія:** 2026-03-07T06:47:11Z — Completed 02-03-PLAN.md (supports_adam field, validate_optimizer() method, call site in train.rs, CORR-02 closed)
+**Остання сесія:** 2026-03-07T07:42:00Z — Completed 03-01-PLAN.md (Tensor::PartialEq let-else, make_contiguous bounds check, 3 autograd unwraps → ok_or_else, RELY-01 + RELY-02 closed)
 
 ---
 
