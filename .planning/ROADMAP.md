@@ -43,7 +43,7 @@ Plans:
   3. Shipped binary `volta compile-train` не містить `C:/Users/User/...` шляху — `gemm_shim.c` знаходиться відносно `current_exe()`
   4. Graph fingerprint стабільний між Rust compiler versions — один і той же граф дає один і той же hash при різних `rustc`
   5. `CpuBackend::capabilities()` повертає явну матрицю; спроба Adam на unsupported backend повертає `Err` замість silent fallback
-**Plans:** 1/3 plans executed
+**Plans:** 2/3 plans executed
 
 Plans:
 - [ ] 02-01-PLAN.md — SipHasher swap (fingerprint.rs + backend.rs) + MKL error handling (resolve_mkl_lib_path → Result)
@@ -67,7 +67,7 @@ Plans:
 | Фаза | Планів виконано | Статус | Завершено |
 |------|-----------------|--------|-----------|
 | 1. Продуктивність Adam | 4/4 | Complete   | 2026-03-07 |
-| 2. Інфраструктура і backend | 1/3 | In Progress|  |
+| 2. Інфраструктура і backend | 2/3 | In Progress|  |
 | 3. Надійність і коректність | 0/? | Not started | - |
 
 ---
