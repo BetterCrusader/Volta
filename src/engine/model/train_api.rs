@@ -184,7 +184,8 @@ mod tests {
 
     use crate::ir::{Graph, NodeId, Op, OptimizerConfig, Tensor, ValueId, build_execution_plan};
     use crate::model::{
-        CompiledModel, Dataset, Example, ReproducibilityMode, TensorShape, TrainApiConfig,
+        CompiledModel, Conv2DLayer, Dataset, Example, LinearLayer, ModelBuilder, Parameter,
+        ReLULayer, ReproducibilityMode, Sequential, TensorShape, TrainApiConfig,
         build_tiny_transformer_fixture_for_tests, infer, train,
     };
 
@@ -458,6 +459,28 @@ mod tests {
         );
     }
 
+    #[test]
+    fn convnet_train_api_is_deterministic_and_reduces_loss() {
+        let (model, dataset, config) = build_convnet_fixture_for_tests();
+        assert_model_contains_conv2d(&model);
+
+        let initial_loss = average_convnet_dataset_loss(&model, &model.parameters, &dataset);
+        let first = train(&model, &dataset, &config).expect("first ConvNet train should pass");
+        let second = train(&model, &dataset, &config).expect("second ConvNet train should pass");
+
+        assert!(first.final_loss.is_finite());
+        assert!(second.final_loss.is_finite());
+        assert_eq!(first.final_loss.to_bits(), second.final_loss.to_bits());
+        assert_eq!(first.final_parameters, second.final_parameters);
+        assert_all_tensors_are_finite(&first.final_parameters);
+
+        let final_loss = average_convnet_dataset_loss(&model, &first.final_parameters, &dataset);
+        assert!(
+            final_loss < initial_loss,
+            "ConvNet fixture should reduce average dataset loss: before={initial_loss}, after={final_loss}"
+        );
+    }
+
     fn average_mlp_dataset_loss(
         model: &CompiledModel,
         parameters: &HashMap<String, Tensor>,
@@ -504,6 +527,164 @@ mod tests {
             })
             .sum();
         squared_error_sum / element_count as f32
+    }
+
+    fn build_convnet_fixture_for_tests() -> (CompiledModel, TensorDataset, TrainApiConfig) {
+        let mut builder = ModelBuilder::new();
+        let x = builder
+            .input_with_shape("x", vec![3, 3])
+            .expect("ConvNet input should build");
+        let target = builder
+            .input_with_shape("target", vec![2, 1])
+            .expect("ConvNet target should build");
+
+        let mut seq = Sequential::new();
+        seq.push(Conv2DLayer {
+            name: "conv".to_string(),
+            kernel: Tensor::new(vec![2, 2], vec![0.35, -0.05, 0.1, 0.2]).expect("valid kernel"),
+        });
+        seq.push(ReLULayer);
+        seq.push(LinearLayer {
+            name: "proj".to_string(),
+            weight: Tensor::new(vec![2, 1], vec![0.15, -0.05]).expect("valid projection"),
+        });
+
+        let (pred, pred_shape) = seq
+            .build(&mut builder, x, TensorShape(vec![3, 3]))
+            .expect("ConvNet body should build");
+        let proj_bias = builder
+            .add_parameter(Parameter::new(
+                "proj.bias",
+                Tensor::new(vec![1], vec![0.02]).expect("valid bias"),
+                true,
+            ))
+            .expect("ConvNet bias should build");
+        let pred = builder
+            .add_op(Op::Add(pred, proj_bias))
+            .expect("ConvNet bias add should build");
+
+        let diff = builder
+            .add_op(Op::Sub(pred, target))
+            .expect("ConvNet diff should build");
+        let sq = builder
+            .add_op(Op::Mul(diff, diff))
+            .expect("ConvNet square should build");
+        let loss = builder
+            .add_op(Op::ReduceMean {
+                input: sq,
+                axis: None,
+                keepdims: false,
+            })
+            .expect("ConvNet loss should build");
+
+        let model = builder
+            .finalize(pred, pred_shape, Some(loss))
+            .expect("ConvNet model should finalize");
+
+        let dataset = TensorDataset {
+            examples: vec![
+                Example {
+                    inputs: HashMap::from([
+                        (
+                            "x".to_string(),
+                            Tensor::new(
+                                vec![3, 3],
+                                vec![1.0, 0.0, 2.0, 0.0, 1.0, 1.0, 2.0, 1.0, 0.0],
+                            )
+                            .expect("valid tensor"),
+                        ),
+                        (
+                            "target".to_string(),
+                            Tensor::new(vec![2, 1], vec![0.87, 0.14]).expect("valid tensor"),
+                        ),
+                    ]),
+                },
+                Example {
+                    inputs: HashMap::from([
+                        (
+                            "x".to_string(),
+                            Tensor::new(
+                                vec![3, 3],
+                                vec![0.0, 1.0, 0.0, 2.0, 1.0, 1.0, 1.0, 0.0, 2.0],
+                            )
+                            .expect("valid tensor"),
+                        ),
+                        (
+                            "target".to_string(),
+                            Tensor::new(vec![2, 1], vec![-0.18, 0.45]).expect("valid tensor"),
+                        ),
+                    ]),
+                },
+                Example {
+                    inputs: HashMap::from([
+                        (
+                            "x".to_string(),
+                            Tensor::new(
+                                vec![3, 3],
+                                vec![1.0, 2.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+                            )
+                            .expect("valid tensor"),
+                        ),
+                        (
+                            "target".to_string(),
+                            Tensor::new(vec![2, 1], vec![-0.11, -0.52]).expect("valid tensor"),
+                        ),
+                    ]),
+                },
+            ],
+        };
+
+        let config = TrainApiConfig {
+            epochs: 24,
+            batch_size: 1,
+            shuffle: true,
+            shuffle_seed: 0xC0DE_0017,
+            optimizer: OptimizerConfig::Sgd { lr: 0.02 },
+            gradient_checkpointing: None,
+            reproducibility: ReproducibilityMode::Deterministic,
+            checkpoint_path: None,
+        };
+
+        (model, dataset, config)
+    }
+
+    fn assert_model_contains_conv2d(model: &CompiledModel) {
+        let conv_count = model
+            .graph
+            .nodes
+            .iter()
+            .filter(|node| matches!(node.op, Op::Conv2D(_, _)))
+            .count();
+        assert_eq!(conv_count, 1, "ConvNet fixture must include one Conv2D op");
+    }
+
+    fn average_convnet_dataset_loss(
+        model: &CompiledModel,
+        parameters: &HashMap<String, Tensor>,
+        dataset: &TensorDataset,
+    ) -> f32 {
+        let mut total = 0.0;
+        for example in &dataset.examples {
+            let predicted = infer(
+                model,
+                parameters,
+                &HashMap::from([(
+                    "x".to_string(),
+                    example
+                        .inputs
+                        .get("x")
+                        .expect("ConvNet example should contain x")
+                        .clone(),
+                )]),
+            )
+            .expect("infer should pass on ConvNet fixture");
+            let target = example
+                .inputs
+                .get("target")
+                .expect("ConvNet example should contain target");
+            total += mean_squared_error(&predicted, target);
+        }
+        total / dataset.len() as f32
     }
 
     fn assert_all_tensors_are_finite(parameters: &HashMap<String, Tensor>) {
