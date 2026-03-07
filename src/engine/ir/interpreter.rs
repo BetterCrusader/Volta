@@ -1354,6 +1354,10 @@ fn evaluate_op(
         }
         Op::Identity(value) => read_value(values, *value, Some(node_id)),
         Op::Dropout { input, .. } => read_value(values, *input, Some(node_id)),
+        Op::MultiHeadAttentionBackward { .. } => Err(error(
+            "MultiHeadAttentionBackward is not supported by the interpreter".to_string(),
+            Some(node_id),
+        )),
     }
 }
 

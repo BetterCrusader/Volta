@@ -441,6 +441,7 @@ fn infer_type_for_op(
             require_tensor_or_unknown(same, node_id, "softmax cross entropy")
         }
         Op::Plugin { .. } => Ok(ValueType::Unknown),
+        Op::MultiHeadAttentionBackward { .. } => Ok(ValueType::Tensor),
     }
 }
 

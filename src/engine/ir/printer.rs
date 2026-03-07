@@ -38,6 +38,7 @@ pub fn op_name(op: &Op) -> &'static str {
         Op::GruCell { .. } => "GruCell",
         Op::GruCellBackward { .. } => "GruCellBackward",
         Op::MultiHeadAttention { .. } => "MultiHeadAttention",
+        Op::MultiHeadAttentionBackward { .. } => "MultiHeadAttentionBackward",
         Op::SinusoidalPE { .. } => "SinusoidalPE",
         Op::RoPE { .. } => "RoPE",
         Op::RoPEBackward { .. } => "RoPEBackward",
@@ -666,6 +667,19 @@ fn format_op(op: &Op) -> String {
                 "softmax_cross_entropy {} {}",
                 fmt_value(logits),
                 fmt_value(targets)
+            )
+        }
+        Op::MultiHeadAttentionBackward {
+            q_input,
+            num_heads,
+            output_idx,
+            ..
+        } => {
+            format!(
+                "mha_bwd q={} heads={} out={}",
+                fmt_value(q_input),
+                num_heads,
+                output_idx
             )
         }
     }

@@ -566,6 +566,33 @@ fn hash_op(op: &Op, hasher: &mut SipHasher13) {
             logits.0.hash(hasher);
             targets.0.hash(hasher);
         }
+        Op::MultiHeadAttentionBackward {
+            q_input,
+            k_input,
+            v_input,
+            w_q,
+            w_k,
+            w_v,
+            w_o,
+            attn_weights,
+            context,
+            upstream,
+            num_heads,
+            output_idx,
+        } => {
+            q_input.0.hash(hasher);
+            k_input.0.hash(hasher);
+            v_input.0.hash(hasher);
+            w_q.0.hash(hasher);
+            w_k.0.hash(hasher);
+            w_v.0.hash(hasher);
+            w_o.0.hash(hasher);
+            attn_weights.0.hash(hasher);
+            context.0.hash(hasher);
+            upstream.0.hash(hasher);
+            num_heads.hash(hasher);
+            output_idx.hash(hasher);
+        }
     }
 }
 

@@ -462,6 +462,20 @@ fn infer_shape_for_op(
             }
         }
         Op::Removed => Ok(ShapeFact::Unknown),
+        Op::MultiHeadAttentionBackward {
+            q_input,
+            output_idx,
+            ..
+        } => match shape_of(*q_input, shapes) {
+            ShapeFact::Tensor(s) if s.len() == 3 => {
+                // Gradient shape matches the corresponding forward input shape.
+                Ok(ShapeFact::Tensor(s))
+            }
+            ShapeFact::Unknown => Ok(ShapeFact::Unknown),
+            _ => Err(format!(
+                "MultiHeadAttentionBackward output_idx={output_idx}: expected rank-3 q_input"
+            )),
+        },
         Op::SoftmaxCrossEntropyLossFromLogits { logits, targets } => {
             let log_shape = shape_of(*logits, shapes);
             let target_shape = shape_of(*targets, shapes);

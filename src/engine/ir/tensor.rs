@@ -37,8 +37,8 @@ impl PartialEq for Tensor {
         }
 
         // Logical comparison following strides.
-        let self_contig = self.make_contiguous().unwrap();
-        let other_contig = other.make_contiguous().unwrap();
+        let Ok(self_contig) = self.make_contiguous() else { return false; };
+        let Ok(other_contig) = other.make_contiguous() else { return false; };
         let len = self.logical_len();
         self_contig.data[..len] == other_contig.data[..len]
     }
@@ -161,11 +161,36 @@ impl Tensor {
     /// Otherwise, it performs a deep copy into a new contiguous allocation (O(N)).
     pub fn make_contiguous(&self) -> Result<Self, TensorError> {
         if self.is_contiguous() {
+            // Validate that the contiguous slice is within bounds.
+            let end = self.offset.saturating_add(self.logical_len());
+            if end > self.data.len() {
+                return Err(TensorError {
+                    message: format!(
+                        "Tensor offset {} + len {} exceeds data buffer len {}",
+                        self.offset,
+                        self.logical_len(),
+                        self.data.len()
+                    ),
+                });
+            }
             return Ok(self.clone());
         }
 
         let total_elements = self.logical_len();
         let mut new_data = vec![0.0; total_elements];
+        // Validate bounds before copying to avoid panic in copy_to_slice.
+        for dim in 0..self.shape.len() {
+            let max_idx = self.offset
+                + (self.shape[dim].saturating_sub(1)) * self.strides[dim];
+            if max_idx >= self.data.len() {
+                return Err(TensorError {
+                    message: format!(
+                        "Tensor out of bounds: offset={}, stride={}, shape={}, data.len()={}",
+                        self.offset, self.strides[dim], self.shape[dim], self.data.len()
+                    ),
+                });
+            }
+        }
         self.copy_to_slice(&mut new_data);
 
         Self::new(self.shape.clone(), new_data)
@@ -620,5 +645,20 @@ mod tests {
         for (&got, &exp) in out.data.iter().zip(expected.iter()) {
             assert!((got - exp).abs() < 1e-4);
         }
+    }
+
+    #[test]
+    fn tensor_eq_invalid_offset() {
+        // Build a tensor with offset far beyond the data buffer — make_contiguous will fail.
+        let valid = Tensor::new(vec![1], vec![1.0_f32]).unwrap();
+        let invalid = Tensor {
+            shape: vec![1],
+            strides: vec![1],
+            offset: 100,          // offset > data.len() — intentionally invalid
+            data: std::sync::Arc::new(vec![1.0_f32; 4]),
+        };
+        // Must return false, not panic.
+        assert!(!invalid.eq(&valid));
+        assert!(!valid.eq(&invalid));
     }
 }
