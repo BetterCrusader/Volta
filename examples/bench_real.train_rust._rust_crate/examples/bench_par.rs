@@ -1,4 +1,5 @@
 // bench_par.rs — test different Rayon parallelism thresholds
+#![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
 #[path = "common/mod.rs"]
 mod common;
 

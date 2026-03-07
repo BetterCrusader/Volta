@@ -1,6 +1,10 @@
 // bench_fused.rs — 3-in-1 fused GEMM: forward + backward + SGD in one W pass
 // Run: cargo run --release --example bench_fused
-#![allow(non_snake_case)]
+#![allow(
+    non_snake_case,
+    clippy::needless_range_loop,
+    clippy::too_many_arguments
+)]
 #[path = "common/mod.rs"]
 mod common;
 

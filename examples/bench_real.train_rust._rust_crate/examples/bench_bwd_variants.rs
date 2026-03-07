@@ -1,7 +1,11 @@
 // bench_bwd_variants.rs — compare backward pass strategies
 // Tests different approaches to computing delta_prev = W @ delta^T without allocating dt
 // Run: cargo run --release --example bench_bwd_variants
-#![allow(non_snake_case)]
+#![allow(
+    non_snake_case,
+    clippy::needless_range_loop,
+    clippy::too_many_arguments
+)]
 #[path = "common/mod.rs"]
 mod common;
 
@@ -191,7 +195,7 @@ fn bwd_sgemm_trans_b(
     }
 }
 
-fn lcg_fill(v: &mut Vec<f32>, rng: &mut u64) {
+fn lcg_fill(v: &mut [f32], rng: &mut u64) {
     for x in v.iter_mut() {
         *rng = rng
             .wrapping_mul(6364136223846793005)

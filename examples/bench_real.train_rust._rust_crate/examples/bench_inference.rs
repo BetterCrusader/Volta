@@ -2,7 +2,7 @@
 // Measures: Volta AOT-compiled inference vs PyTorch inference baseline
 // No backward pass, no weight copy, no SGD — pure forward throughput
 // Run: cargo run --release --example bench_inference
-#![allow(non_snake_case)]
+#![allow(non_snake_case, clippy::needless_range_loop)]
 #[path = "common/mod.rs"]
 mod common;
 

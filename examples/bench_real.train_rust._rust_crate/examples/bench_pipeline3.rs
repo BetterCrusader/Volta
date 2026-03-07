@@ -3,6 +3,7 @@
 // Forward uses faer (15-27% faster for large layers).
 // Backward r>c uses gemm stride trick (no transpose, 37-49% faster).
 // par_threads=4 empirically best for pipeline balance.
+#![allow(clippy::needless_range_loop)]
 #[path = "common/mod.rs"]
 mod common;
 

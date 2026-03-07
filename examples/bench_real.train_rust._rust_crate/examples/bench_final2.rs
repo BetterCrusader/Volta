@@ -1,3 +1,4 @@
+#![allow(clippy::needless_range_loop)]
 // bench_final2.rs — layer-pipelined backward+SGD
 // For each layer i (N→0): sgd(i) runs PARALLEL with bwd_delta(i-1)
 // This hides SGD cost behind backward compute.

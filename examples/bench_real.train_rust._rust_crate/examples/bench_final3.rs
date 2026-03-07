@@ -1,3 +1,4 @@
+#![allow(clippy::needless_range_loop)]
 // bench_final3.rs — fwd(N+1) || [copy_ws || (bwd layer-by-layer with SGD overlap)]
 // Within Thread B: for each layer i from N-1 to 0:
 //   compute delta_i, then spawn SGD(i), continue to delta_{i-1}

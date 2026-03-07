@@ -1,3 +1,4 @@
+#![allow(dead_code, clippy::needless_range_loop)]
 // bench_final.rs — final comparison: v3 sequential vs pipeline3-way
 // 15 runs × 50 steps, p50 reported
 #[path = "common/mod.rs"]

@@ -1,7 +1,11 @@
 // bench_official_v3.rs — AVX-512 fused bias+relu, relu_mask, transpose
 // AVX-512F: 16 floats/cycle instead of 8 (AVX2)
 // Run: cargo run --release --example bench_official_v3
-#![allow(non_snake_case)]
+#![allow(
+    non_snake_case,
+    clippy::needless_range_loop,
+    clippy::too_many_arguments
+)]
 #[path = "common/mod.rs"]
 mod common;
 

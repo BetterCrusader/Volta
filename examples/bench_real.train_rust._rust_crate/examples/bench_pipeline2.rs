@@ -2,6 +2,7 @@
 //   Thread A: fwd(N+1)
 //   Thread B: rayon::join(copy_ws, compute_grads(N))  →  apply_sgd(N)
 // copy_ws is hidden behind compute_grads compute time.
+#![allow(clippy::needless_range_loop)]
 #[path = "common/mod.rs"]
 mod common;
 

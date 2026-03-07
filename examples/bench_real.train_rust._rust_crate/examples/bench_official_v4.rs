@@ -1,6 +1,6 @@
 // bench_official_v4.rs — faer forward+SGD, gemm-crate stride bwd for r>c layers
 // Run: cargo run --release --example bench_official_v4
-#![allow(non_snake_case, dead_code)]
+#![allow(non_snake_case, dead_code, clippy::needless_range_loop)]
 #[path = "common/mod.rs"]
 mod common;
 

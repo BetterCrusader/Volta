@@ -1,6 +1,7 @@
 // bench_pipeline.rs — double-buffered pipeline: fwd(step N+1) || bwd+sgd(step N)
 // Stale-W by 1 step — mathematically different but converges, checksum drifts slightly
 // Run: cargo run --release --example bench_pipeline
+#![allow(clippy::needless_range_loop)]
 #[path = "common/mod.rs"]
 mod common;
 

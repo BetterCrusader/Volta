@@ -1,7 +1,7 @@
 // bench_official_v2.rs — official-style benchmark matching bench_train_volta_rust.c
 // Uses same params: B=64, steps=50, runs=7, warmup=10, deterministic input
 // Exits cleanly via ExitProcess to avoid Rayon DLL abort issue
-#![allow(non_snake_case)]
+#![allow(non_snake_case, clippy::needless_range_loop)]
 #[path = "common/mod.rs"]
 mod common;
 

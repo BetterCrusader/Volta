@@ -1,7 +1,7 @@
 // profiler.rs — мікропрофайлер кожної секції training step
 // Вимірює: gemm_fwd, bias_relu, loss, gemm_bwd, transpose, sgd_update окремо
 // Запуск: cargo run --release --example profiler
-#![allow(non_snake_case)]
+#![allow(non_snake_case, clippy::needless_range_loop)]
 use std::time::Instant;
 
 #[cfg(target_arch = "x86_64")]

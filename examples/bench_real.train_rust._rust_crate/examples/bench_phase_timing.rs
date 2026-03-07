@@ -1,4 +1,5 @@
 // bench_phase_timing.rs — measure individual phase costs to find bottleneck
+#![allow(clippy::needless_range_loop)]
 #[path = "common/mod.rs"]
 mod common;
 

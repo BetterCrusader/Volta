@@ -1,3 +1,4 @@
+#![allow(clippy::needless_range_loop)]
 // bench_microkernel.rs — custom AVX-512 GEMM for M=64 (batch dimension)
 // Strategy: C[64×N] = A[64×K] @ B[K×N]
 //   - Tile N by 64 (4 zmm registers = 64 floats)

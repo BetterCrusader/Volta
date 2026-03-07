@@ -1,3 +1,4 @@
+#![allow(clippy::needless_range_loop)]
 // bench_affinity.rs — pin rayon threads to cores, then benchmark pipeline
 // Uses Windows SetThreadAffinityMask to reduce scheduler jitter
 #[path = "common/mod.rs"]
