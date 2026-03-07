@@ -75,6 +75,15 @@ pub struct TrainError {
     pub message: String,
 }
 
+#[derive(Debug, Clone)]
+struct BestSnapshot {
+    parameters: HashMap<ValueId, Tensor>,
+    optimizer_state: OptimizerState,
+    monitored_loss: f32,
+    train_loss: f32,
+    val_loss: Option<f32>,
+}
+
 impl From<crate::ir::tensor::TensorError> for TrainError {
     fn from(err: crate::ir::tensor::TensorError) -> Self {
         TrainError {
@@ -221,8 +230,9 @@ pub fn train_graph_with_backend(
     // Early stopping state
     let mut es_best_loss = f32::INFINITY;
     let mut es_patience_counter = 0usize;
-    let mut es_best_params: Option<HashMap<ValueId, Tensor>> = None;
+    let mut es_best_snapshot: Option<BestSnapshot> = None;
     let mut es_stopped_epoch = None::<usize>;
+    let mut restored_snapshot_metrics = None::<(f32, Option<f32>)>;
 
     for epoch in 0..config.epochs {
         let mut epoch_loss_sum = 0.0;
@@ -583,9 +593,13 @@ pub fn train_graph_with_backend(
             if monitored < es_best_loss - es.min_delta {
                 es_best_loss = monitored;
                 es_patience_counter = 0;
-                if es.restore_best_weights {
-                    es_best_params = Some(raw_params.clone());
-                }
+                es_best_snapshot = Some(BestSnapshot {
+                    parameters: raw_params.clone(),
+                    optimizer_state: optimizer_state.clone(),
+                    monitored_loss: monitored,
+                    train_loss: epoch_train_loss,
+                    val_loss: final_val_loss_out,
+                });
             } else {
                 es_patience_counter += 1;
                 if es_patience_counter >= es.patience {
@@ -604,8 +618,28 @@ pub fn train_graph_with_backend(
     // Restore best weights if early stopping was triggered and restore_best_weights=true
     if let (Some(es), Some(_)) = (&config.early_stopping, &es_stopped_epoch) {
         if es.restore_best_weights {
-            if let Some(best) = es_best_params {
-                raw_params = best;
+            if let Some(best_snapshot) = es_best_snapshot {
+                ensure_finite_scalar(
+                    "early_stopping_restore",
+                    "best_snapshot.monitored_loss",
+                    best_snapshot.monitored_loss,
+                )?;
+                ensure_finite_scalar(
+                    "early_stopping_restore",
+                    "best_snapshot.train_loss",
+                    best_snapshot.train_loss,
+                )?;
+                if let Some(best_val_loss) = best_snapshot.val_loss {
+                    ensure_finite_scalar(
+                        "early_stopping_restore",
+                        "best_snapshot.val_loss",
+                        best_val_loss,
+                    )?;
+                }
+                raw_params = best_snapshot.parameters;
+                optimizer_state = best_snapshot.optimizer_state;
+                restored_snapshot_metrics =
+                    Some((best_snapshot.train_loss, best_snapshot.val_loss));
                 // Sync arc_params
                 for (value_id, tensor) in &raw_params {
                     arc_params.insert(*value_id, Arc::new(tensor.clone()));
@@ -625,30 +659,34 @@ pub fn train_graph_with_backend(
         }
     }
 
-    let final_loss = if let Some(sample) = dataset.last() {
-        let context = build_context_with_ids(sample, &arc_params, &tracked_params);
-        let loss_runtime = execute_terminal_with_backend_buffered(
-            forward_graph,
-            &forward_plan,
-            &forward_plan.schedule.ordered_nodes,
-            backend,
-            &context,
-            &mut fwd_buf,
-        )
-        .map_err(|e| TrainError {
-            message: format!("Final loss execute failed: {}", e.message),
-        })?;
-        let Some(loss_runtime) = loss_runtime else {
-            return Err(TrainError {
-                message: "Forward graph produced no final loss output".to_string(),
-            });
+    let final_loss =
+        if let Some((restored_train_loss, restored_val_loss)) = restored_snapshot_metrics {
+            final_val_loss_out = restored_val_loss;
+            restored_train_loss
+        } else if let Some(sample) = dataset.last() {
+            let context = build_context_with_ids(sample, &arc_params, &tracked_params);
+            let loss_runtime = execute_terminal_with_backend_buffered(
+                forward_graph,
+                &forward_plan,
+                &forward_plan.schedule.ordered_nodes,
+                backend,
+                &context,
+                &mut fwd_buf,
+            )
+            .map_err(|e| TrainError {
+                message: format!("Final loss execute failed: {}", e.message),
+            })?;
+            let Some(loss_runtime) = loss_runtime else {
+                return Err(TrainError {
+                    message: "Forward graph produced no final loss output".to_string(),
+                });
+            };
+            let loss = scalar_from_runtime(loss_runtime).map_err(|e| TrainError { message: e })?;
+            ensure_finite_scalar("forward", "final_loss", loss)?;
+            loss
+        } else {
+            0.0
         };
-        let loss = scalar_from_runtime(loss_runtime).map_err(|e| TrainError { message: e })?;
-        ensure_finite_scalar("forward", "final_loss", loss)?;
-        loss
-    } else {
-        0.0
-    };
 
     let mut final_parameters = HashMap::new();
     for (name, value_id) in tracked_params {
@@ -1083,26 +1121,50 @@ mod tests {
     #[test]
     fn early_stopping_restores_best_weights() {
         let (graph, loss) = build_linear_mse_graph();
-        let mut params = HashMap::new();
-        params.insert(
-            "w".to_string(),
-            Tensor::new(vec![1, 1], vec![0.0]).expect("valid tensor"),
-        );
+        let params = single_weight_params(0.0);
         let dataset = vec![sample(1.0, 1.0)];
         let val_dataset = vec![sample(1.0, 1.0)];
 
-        let mut config = TrainConfig::new(5, OptimizerConfig::Sgd { lr: 1.0 });
+        let baseline = train_graph(
+            &graph,
+            loss,
+            params.clone(),
+            &dataset,
+            &val_dataset,
+            &TrainConfig::new(
+                1,
+                OptimizerConfig::Adam {
+                    lr: 0.1,
+                    beta1: 0.9,
+                    beta2: 0.999,
+                    epsilon: 1e-8,
+                },
+            ),
+        )
+        .expect("baseline training should succeed");
+
+        let mut config = TrainConfig::new(
+            5,
+            OptimizerConfig::Adam {
+                lr: 0.1,
+                beta1: 0.9,
+                beta2: 0.999,
+                epsilon: 1e-8,
+            },
+        );
         config.early_stopping = Some(EarlyStoppingConfig {
             patience: 1,
-            min_delta: 1e-6,
+            min_delta: 10.0,
             restore_best_weights: true,
         });
 
         let result = train_graph(&graph, loss, params, &dataset, &val_dataset, &config)
             .expect("training with early stopping should succeed");
 
-        assert_eq!(result.final_val_loss, Some(1.0));
-        assert!((weight_scalar(&result, "w") - 2.0).abs() < 1e-6);
+        assert_eq!(result.final_parameters, baseline.final_parameters);
+        assert_eq!(result.optimizer_state, baseline.optimizer_state);
+        assert_eq!(result.final_val_loss, baseline.final_val_loss);
+        assert_eq!(result.optimizer_state.step, 1);
         assert!((result.final_loss - 1.0).abs() < 1e-6);
     }
 
