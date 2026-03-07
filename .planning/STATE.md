@@ -196,6 +196,7 @@ progress:
 | 2 | add multi-step PyTorch training parity through real train_graph | 2026-03-07 | e9bafb6 | [2-add-multi-step-pytorch-training-parity-t](./quick/2-add-multi-step-pytorch-training-parity-t/) |
 | 3 | add MHA bias gradients and transformer training parity | 2026-03-07 | 50979c8 | [3-add-mha-bias-gradients-and-transformer-t](./quick/3-add-mha-bias-gradients-and-transformer-t/) |
 | 4 | expand train_graph parity coverage (optimizers, accumulation, clip grad) | 2026-03-07 | 148e9c7 | [4-add-parity-for-gradient-accumulation-a](./quick/4-add-parity-for-gradient-accumulation-a/) |
+| 5 | fix benchmark sorting helpers and simplify timing organization | 2026-03-07 | 48cb0ea | [5-fix-benchmark-sorting-helpers-and-simpli](./quick/5-fix-benchmark-sorting-helpers-and-simpli/) |
 
 ### Важливі числа
 
@@ -214,7 +215,7 @@ progress:
 
 **Наступний крок:** Розширити parity на `RmsProp`/`Adagrad` або перевірити `gradient_accumulation_steps` і `clip_grad` на transformer training path
 
-**Остання сесія:** 2026-03-07T19:41:12Z — Completed quick task 4 (train_graph optimizer/accumulation/clip parity, commit `148e9c7`)
+**Остання сесія:** 2026-03-07T18:42:33Z — Completed quick task 5 (benchmark timing helper cleanup, commit `48cb0ea`)
 
 ---
 
