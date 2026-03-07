@@ -86,6 +86,19 @@ All passes are wrapped with a verifier guard (`pass_utils::run_with_verifier_gua
 ### Backend abstraction (`backend.rs`)
 `Backend` trait with `CpuBackend` (always available) and `CudaBackend` (behind `cuda` feature). CPU backend executes fully sequentially for determinism.
 
+Backends also expose explicit capability metadata through `backend_capabilities.rs`:
+
+- backend kind
+- device class (`Cpu` vs `Gpu`)
+- vendor (`GenericCpu`, `Nvidia`, ...)
+- maturity (`Validated` vs `Experimental`)
+- phase coverage (`Inference`, `Training`)
+- runtime execution support
+- gradient-update support
+- determinism coverage (`Strict`, `Balanced`, `Fast`)
+
+`runtime.rs` validates requested execution mode against those capabilities before compiling or dispatching the plan. This keeps backend growth honest: adding a new backend now requires declaring what it can actually do instead of inheriting optimistic defaults.
+
 ### CUDA backend (`cuda/`, feature-gated)
 Exists behind `--features cuda`. Device management, memory profiling, kernel lowering, determinism policy enforcement. Status: compiles, GPU performance has not been benchmarked.
 

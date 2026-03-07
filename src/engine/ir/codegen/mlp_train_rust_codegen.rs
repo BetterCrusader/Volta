@@ -69,7 +69,11 @@ fn resolve_mkl_lib_path_from(
 ) -> Result<String, RustTrainCodegenError> {
     // Helper: check if mkl_rt exists in a lib dir
     let has_mkl = |p: &str| -> bool {
-        let lib = if cfg!(windows) { "mkl_rt.lib" } else { "libmkl_rt.so" };
+        let lib = if cfg!(windows) {
+            "mkl_rt.lib"
+        } else {
+            "libmkl_rt.so"
+        };
         std::path::Path::new(p).join(lib).exists()
     };
 
@@ -234,7 +238,9 @@ fn generate_rust_source(
         s.push_str("    fn cblas_sgemm(order: i32, transa: i32, transb: i32, m: i32, n: i32, k: i32, alpha: f32, a: *const f32, lda: i32, b: *const f32, ldb: i32, beta: f32, c: *mut f32, ldc: i32);\n");
         s.push_str("}\n");
         s.push_str("const CblasRowMajor: i32 = 101; const CblasNoTrans: i32 = 111; const CblasTrans: i32 = 112;\n\n");
-        s.push_str("fn sgemm(C: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize) {\n");
+        s.push_str(
+            "fn sgemm(C: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize) {\n",
+        );
         s.push_str("    unsafe { cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m as i32, n as i32, k as i32, 1.0f32, A, k as i32, B, n as i32, 0.0f32, C, n as i32); }\n");
         s.push_str("}\n\n");
         s.push_str("fn sgemm_tn(C: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize) {\n");
@@ -251,7 +257,9 @@ fn generate_rust_source(
         s.push_str("    else if ops < (1<<25) { gemm::Parallelism::Rayon(5) }\n");
         s.push_str("    else { gemm::Parallelism::Rayon(0) }\n");
         s.push_str("}\n\n");
-        s.push_str("fn sgemm(C: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize) {\n");
+        s.push_str(
+            "fn sgemm(C: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize) {\n",
+        );
         s.push_str("    unsafe { gemm::gemm(m,n,k, C,1isize,n as isize, false, A,1isize,k as isize, B,1isize,n as isize, 0f32,1f32, false,false,false, par(m,k,n)); }\n");
         s.push_str("}\n\n");
         s.push_str("fn sgemm_tn(C: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize) {\n");
@@ -1032,6 +1040,9 @@ mod tests {
     fn merged_rustflags_appends_when_other_flags_present() {
         let result = merged_rustflags(Some("-C opt-level=3"));
         assert!(result.contains("-C opt-level=3"), "must keep existing flag");
-        assert!(result.contains("-C target-cpu=native"), "must inject native");
+        assert!(
+            result.contains("-C target-cpu=native"),
+            "must inject native"
+        );
     }
 }

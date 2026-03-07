@@ -37,8 +37,12 @@ impl PartialEq for Tensor {
         }
 
         // Logical comparison following strides.
-        let Ok(self_contig) = self.make_contiguous() else { return false; };
-        let Ok(other_contig) = other.make_contiguous() else { return false; };
+        let Ok(self_contig) = self.make_contiguous() else {
+            return false;
+        };
+        let Ok(other_contig) = other.make_contiguous() else {
+            return false;
+        };
         let len = self.logical_len();
         self_contig.data[..len] == other_contig.data[..len]
     }
@@ -180,13 +184,15 @@ impl Tensor {
         let mut new_data = vec![0.0; total_elements];
         // Validate bounds before copying to avoid panic in copy_to_slice.
         for dim in 0..self.shape.len() {
-            let max_idx = self.offset
-                + (self.shape[dim].saturating_sub(1)) * self.strides[dim];
+            let max_idx = self.offset + (self.shape[dim].saturating_sub(1)) * self.strides[dim];
             if max_idx >= self.data.len() {
                 return Err(TensorError {
                     message: format!(
                         "Tensor out of bounds: offset={}, stride={}, shape={}, data.len()={}",
-                        self.offset, self.strides[dim], self.shape[dim], self.data.len()
+                        self.offset,
+                        self.strides[dim],
+                        self.shape[dim],
+                        self.data.len()
                     ),
                 });
             }
@@ -654,7 +660,7 @@ mod tests {
         let invalid = Tensor {
             shape: vec![1],
             strides: vec![1],
-            offset: 100,          // offset > data.len() — intentionally invalid
+            offset: 100, // offset > data.len() — intentionally invalid
             data: std::sync::Arc::new(vec![1.0_f32; 4]),
         };
         // Must return false, not panic.

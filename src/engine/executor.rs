@@ -2457,8 +2457,7 @@ impl Executor {
             Expr::Str { value, .. } => Ok(Value::Str(value.clone())),
             Expr::Symbol { name, .. } => Ok(Value::Str(name.clone())),
             Expr::Call { callee, args, span } => {
-                if self.runtime.structs.contains_key(callee) {
-                    let field_names = self.runtime.structs.get(callee).cloned().unwrap();
+                if let Some(field_names) = self.runtime.structs.get(callee).cloned() {
                     let mut fields = HashMap::new();
                     for (name, arg_expr) in field_names.into_iter().zip(args.iter()) {
                         fields.insert(name, self.eval_expr(arg_expr)?);

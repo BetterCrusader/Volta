@@ -307,6 +307,7 @@ fn key_of(op: &Op) -> Option<CseKey> {
         | Op::Upsample2D { .. }
         | Op::Upsample2DBackward { .. }
         | Op::MultiHeadAttention { .. }
+        | Op::MultiHeadAttentionBackward { .. }
         | Op::SinusoidalPE { .. }
         | Op::RoPE { .. }
         | Op::RoPEBackward { .. }

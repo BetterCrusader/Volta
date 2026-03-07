@@ -56,7 +56,8 @@ pub use autograd::{AutogradError, GradientGraph, build_reverse_graph};
 pub use backend::CudaBackend;
 pub use backend::{Backend, BackendError, CompiledProgram, CpuBackend};
 pub use backend_capabilities::{
-    BackendCapabilities, BackendKind, DeterminismLevel, ExecutionPhase,
+    BackendCapabilities, BackendKind, BackendMaturity, BackendValidationError, BackendVendor,
+    DeterminismLevel, DeviceClass, ExecutionPhase,
 };
 pub use block::{BasicBlock, BasicBlockId};
 pub use compiler_flags::CompilerFlags;

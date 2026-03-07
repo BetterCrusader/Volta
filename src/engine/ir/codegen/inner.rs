@@ -1003,6 +1003,9 @@ mod tests {
 
     #[test]
     fn shim_bytes_not_empty() {
-        assert!(GEMM_SHIM_C.len() > 0, "GEMM_SHIM_C must be non-empty (include_bytes! embed check)");
+        assert!(
+            GEMM_SHIM_C.len() > 0,
+            "GEMM_SHIM_C must be non-empty (include_bytes! embed check)"
+        );
     }
 }

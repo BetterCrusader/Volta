@@ -6,6 +6,12 @@ use std::process::ExitCode;
 use volta::ast::{Program, Stmt};
 use volta::diagnostics::{best_suggestion, render_diagnostic, render_span_diagnostic};
 use volta::executor::Executor;
+#[cfg(feature = "cuda")]
+use volta::ir::CudaBackend;
+use volta::ir::{
+    Backend, BackendCapabilities, BackendMaturity, BackendVendor, CpuBackend, DeterminismLevel,
+    DeviceClass,
+};
 use volta::lexer::Lexer;
 use volta::parser::Parser;
 use volta::semantic::SemanticAnalyzer;
@@ -769,8 +775,15 @@ struct DoctorReport {
     cpu_threads: usize,
     onnx_import_enabled: bool,
     gpu_env: GpuEnvStatus,
+    backends: Vec<BackendDoctorEntry>,
     warnings: Vec<String>,
     healthy: bool,
+}
+
+#[derive(Debug, Clone)]
+struct BackendDoctorEntry {
+    name: String,
+    capabilities: BackendCapabilities,
 }
 
 fn collect_doctor_report() -> DoctorReport {
@@ -779,15 +792,22 @@ fn collect_doctor_report() -> DoctorReport {
         .unwrap_or(1);
     let gpu_env = parse_gpu_env_status();
     let onnx_import_enabled = cfg!(feature = "onnx-import");
+    let backends = collect_backend_report();
     let mut warnings = Vec::new();
     if let Some(warning) = &gpu_env.parse_warning {
         warnings.push(warning.clone());
+    }
+    for backend in &backends {
+        if backend.capabilities.maturity == BackendMaturity::Experimental {
+            warnings.push(format!("backend '{}' is marked experimental", backend.name));
+        }
     }
     let healthy = warnings.is_empty();
     DoctorReport {
         cpu_threads,
         onnx_import_enabled,
         gpu_env,
+        backends,
         warnings,
         healthy,
     }
@@ -796,8 +816,30 @@ fn collect_doctor_report() -> DoctorReport {
 fn print_doctor(report: &DoctorReport, json: bool) {
     if json {
         let raw = report.gpu_env.raw.clone().unwrap_or_default();
+        let backends_json = report
+            .backends
+            .iter()
+            .map(|backend| {
+                format!(
+                    "{{\"name\":\"{}\",\"device_class\":\"{}\",\"vendor\":\"{}\",\"maturity\":\"{}\",\"supports_inference\":{},\"supports_training\":{},\"supports_runtime_execution\":{},\"supports_gradient_updates\":{},\"supports_strict_determinism\":{},\"supports_balanced_determinism\":{},\"supports_fast_determinism\":{},\"default_determinism\":\"{}\"}}",
+                    json_escape(&backend.name),
+                    device_class_name(backend.capabilities.device_class),
+                    backend_vendor_name(backend.capabilities.vendor),
+                    backend_maturity_name(backend.capabilities.maturity),
+                    backend.capabilities.supports_inference,
+                    backend.capabilities.supports_training,
+                    backend.capabilities.supports_runtime_execution,
+                    backend.capabilities.supports_gradient_updates,
+                    backend.capabilities.supports_strict_determinism,
+                    backend.capabilities.supports_balanced_determinism,
+                    backend.capabilities.supports_fast_determinism,
+                    determinism_name(backend.capabilities.default_determinism),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
         println!(
-            "{{\"tool\":\"volta-doctor\",\"version\":\"{}\",\"os\":\"{}\",\"arch\":\"{}\",\"cpu_threads\":{},\"gpu_available\":{},\"gpu_env_raw\":\"{}\",\"gpu_env_valid\":{},\"feature_onnx_import\":{},\"warning_count\":{},\"warnings\":[{}],\"healthy\":{},\"strict_would_fail\":{}}}",
+            "{{\"tool\":\"volta-doctor\",\"version\":\"{}\",\"os\":\"{}\",\"arch\":\"{}\",\"cpu_threads\":{},\"gpu_available\":{},\"gpu_env_raw\":\"{}\",\"gpu_env_valid\":{},\"feature_onnx_import\":{},\"backends\":[{}],\"warning_count\":{},\"warnings\":[{}],\"healthy\":{},\"strict_would_fail\":{}}}",
             env!("CARGO_PKG_VERSION"),
             std::env::consts::OS,
             std::env::consts::ARCH,
@@ -806,6 +848,7 @@ fn print_doctor(report: &DoctorReport, json: bool) {
             json_escape(&raw),
             report.gpu_env.parse_warning.is_none(),
             report.onnx_import_enabled,
+            backends_json,
             report.warnings.len(),
             report
                 .warnings
@@ -856,6 +899,78 @@ fn print_doctor(report: &DoctorReport, json: bool) {
             "disabled"
         }
     );
+    println!("  backends:");
+    for backend in &report.backends {
+        println!(
+            "    - {}: device={}, vendor={}, maturity={}, phase=inference:{} training:{}, runtime={}, gradients={}, determinism=[strict:{} balanced:{} fast:{}], default={}",
+            backend.name,
+            device_class_name(backend.capabilities.device_class),
+            backend_vendor_name(backend.capabilities.vendor),
+            backend_maturity_name(backend.capabilities.maturity),
+            yes_no(backend.capabilities.supports_inference),
+            yes_no(backend.capabilities.supports_training),
+            yes_no(backend.capabilities.supports_runtime_execution),
+            yes_no(backend.capabilities.supports_gradient_updates),
+            yes_no(backend.capabilities.supports_strict_determinism),
+            yes_no(backend.capabilities.supports_balanced_determinism),
+            yes_no(backend.capabilities.supports_fast_determinism),
+            determinism_name(backend.capabilities.default_determinism),
+        );
+    }
+}
+
+fn collect_backend_report() -> Vec<BackendDoctorEntry> {
+    let mut backends = Vec::new();
+
+    let cpu = CpuBackend;
+    backends.push(BackendDoctorEntry {
+        name: "cpu".to_string(),
+        capabilities: cpu.capabilities(),
+    });
+
+    #[cfg(feature = "cuda")]
+    {
+        let cuda = CudaBackend;
+        backends.push(BackendDoctorEntry {
+            name: "cuda".to_string(),
+            capabilities: cuda.capabilities(),
+        });
+    }
+
+    backends
+}
+
+fn yes_no(value: bool) -> &'static str {
+    if value { "yes" } else { "no" }
+}
+
+fn device_class_name(device_class: DeviceClass) -> &'static str {
+    match device_class {
+        DeviceClass::Cpu => "cpu",
+        DeviceClass::Gpu => "gpu",
+    }
+}
+
+fn backend_vendor_name(vendor: BackendVendor) -> &'static str {
+    match vendor {
+        BackendVendor::GenericCpu => "generic-cpu",
+        BackendVendor::Nvidia => "nvidia",
+    }
+}
+
+fn backend_maturity_name(maturity: BackendMaturity) -> &'static str {
+    match maturity {
+        BackendMaturity::Experimental => "experimental",
+        BackendMaturity::Validated => "validated",
+    }
+}
+
+fn determinism_name(level: DeterminismLevel) -> &'static str {
+    match level {
+        DeterminismLevel::Strict => "strict",
+        DeterminismLevel::Balanced => "balanced",
+        DeterminismLevel::Fast => "fast",
+    }
 }
 
 #[derive(Debug, Clone)]
