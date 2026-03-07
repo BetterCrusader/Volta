@@ -326,17 +326,55 @@ fn apply_adamw(
             message: format!("AdamW learning rate must be a finite positive number, got {lr}"),
         });
     }
+    if !(0.0..1.0).contains(&beta1) || !beta1.is_finite() {
+        return Err(OptimizerError {
+            message: format!("AdamW beta1 must be in [0, 1), got {beta1}"),
+        });
+    }
+    if !(0.0..1.0).contains(&beta2) || !beta2.is_finite() {
+        return Err(OptimizerError {
+            message: format!("AdamW beta2 must be in [0, 1), got {beta2}"),
+        });
+    }
+    if !epsilon.is_finite() || epsilon <= 0.0 {
+        return Err(OptimizerError {
+            message: format!("AdamW epsilon must be a finite positive number, got {epsilon}"),
+        });
+    }
+    if !weight_decay.is_finite() || weight_decay < 0.0 {
+        return Err(OptimizerError {
+            message: format!(
+                "AdamW weight_decay must be a finite non-negative number, got {weight_decay}"
+            ),
+        });
+    }
     let step_i32 = i32::try_from(state.step).map_err(|_| OptimizerError {
         message: "Optimizer step overflow for AdamW bias correction".to_string(),
     })?;
 
     let bias1 = 1.0_f32 - beta1.powi(step_i32);
     let bias2 = 1.0_f32 - beta2.powi(step_i32);
+    if bias1 <= 0.0 || bias2 <= 0.0 {
+        return Err(OptimizerError {
+            message: format!(
+                "AdamW bias correction underflowed (bias1={bias1}, bias2={bias2}); step={}",
+                state.step
+            ),
+        });
+    }
 
     for (value_id, parameter) in parameters {
         let Some(gradient) = gradients.get(value_id) else {
             continue;
         };
+        if parameter.shape != gradient.shape {
+            return Err(OptimizerError {
+                message: format!(
+                    "Shape mismatch in AdamW for ValueId {}: {:?} vs {:?}",
+                    value_id.0, parameter.shape, gradient.shape
+                ),
+            });
+        }
 
         let m = state.adam_m.entry(*value_id).or_insert(
             Tensor::zeros(parameter.shape.clone()).map_err(|err| OptimizerError {
@@ -706,23 +744,94 @@ mod tests {
     #[test]
     fn adam_updates_parameter_numerically_correct() {
         let mut params = HashMap::new();
-        params.insert(vid(0), Tensor::new(vec![1], vec![0.5_f32]).expect("valid tensor"));
+        params.insert(
+            vid(0),
+            Tensor::new(vec![1], vec![0.5_f32]).expect("valid tensor"),
+        );
         let mut grads = HashMap::new();
-        grads.insert(vid(0), Tensor::new(vec![1], vec![0.1_f32]).expect("valid tensor"));
+        grads.insert(
+            vid(0),
+            Tensor::new(vec![1], vec![0.1_f32]).expect("valid tensor"),
+        );
         let mut state = OptimizerState::default();
         apply_gradients(
             &mut params,
             &grads,
-            &OptimizerConfig::Adam { lr: 0.001, beta1: 0.9, beta2: 0.999, epsilon: 1e-8 },
+            &OptimizerConfig::Adam {
+                lr: 0.001,
+                beta1: 0.9,
+                beta2: 0.999,
+                epsilon: 1e-8,
+            },
             &mut state,
         )
         .expect("adam update should succeed");
         let w = params.get(&vid(0)).expect("param exists");
         // Reference (f64): w1 = 0.5 - 0.001*(0.1/(sqrt(0.01)+1e-8)) ≈ 0.499000010
         assert!(
-            (w.data[0] - 0.499_000_01_f32).abs() < 1e-5,
+            (w.data[0] - 0.499_f32).abs() < 1e-5,
             "Adam step 1: expected ≈0.499000, got {}",
             w.data[0]
         );
+    }
+
+    #[test]
+    fn adamw_rejects_invalid_hyperparameters() {
+        let mut params = HashMap::new();
+        params.insert(
+            vid(0),
+            Tensor::new(vec![1], vec![1.0]).expect("valid tensor"),
+        );
+        let mut grads = HashMap::new();
+        grads.insert(
+            vid(0),
+            Tensor::new(vec![1], vec![1.0]).expect("valid tensor"),
+        );
+        let mut state = OptimizerState::default();
+
+        let err = apply_gradients(
+            &mut params,
+            &grads,
+            &OptimizerConfig::AdamW {
+                lr: 0.001,
+                beta1: 1.0,
+                beta2: 0.999,
+                epsilon: 1e-8,
+                weight_decay: 0.01,
+            },
+            &mut state,
+        )
+        .expect_err("beta1=1.0 must be rejected for AdamW");
+        assert!(err.message.contains("beta1"));
+
+        let err = apply_gradients(
+            &mut params,
+            &grads,
+            &OptimizerConfig::AdamW {
+                lr: 0.001,
+                beta1: 0.9,
+                beta2: 0.999,
+                epsilon: 0.0,
+                weight_decay: 0.01,
+            },
+            &mut state,
+        )
+        .expect_err("epsilon=0 must be rejected for AdamW");
+        assert!(err.message.contains("epsilon"));
+
+        let err = apply_gradients(
+            &mut params,
+            &grads,
+            &OptimizerConfig::AdamW {
+                lr: 0.001,
+                beta1: 0.9,
+                beta2: 0.999,
+                epsilon: 1e-8,
+                weight_decay: -0.01,
+            },
+            &mut state,
+        )
+        .expect_err("negative weight_decay must be rejected for AdamW");
+        assert!(err.message.contains("weight_decay"));
     }
 }

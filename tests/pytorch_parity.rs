@@ -5,8 +5,8 @@ use std::sync::Arc;
 use serde_json::Value;
 use volta::ir::{
     ExecutionContext, Graph, Op, OptimizerConfig, OptimizerState, RuntimeValue, Tensor,
-    TrainConfig, TrainSample, TransformerConfig, add_transformer_encoder_block, apply_gradients,
-    build_reverse_graph, execute_value_with_context, train_graph,
+    TrainConfig, TrainSample, TransformerConfig, ValueId, add_transformer_encoder_block,
+    apply_gradients, build_reverse_graph, execute_value_with_context, train_graph,
 };
 
 fn require_pytorch() -> bool {
@@ -108,6 +108,159 @@ fn assert_close(label: &str, actual: &[f32], expected: &[f32], tol: f32) {
         assert!(
             delta <= tol,
             "{label}[{index}] mismatch: actual={lhs}, expected={rhs}, delta={delta}, tol={tol}"
+        );
+    }
+}
+
+fn build_mlp_training_graph() -> (Graph, ValueId) {
+    let mut graph = Graph::new();
+    let block = graph.create_block();
+
+    let (_, x) = graph.add_op(block, Op::Input("x".to_string())).unwrap();
+    let (_, target) = graph
+        .add_op(block, Op::Input("target".to_string()))
+        .unwrap();
+    let (_, w1) = graph
+        .add_op(block, Op::Parameter("w1".to_string()))
+        .unwrap();
+    let (_, b1) = graph
+        .add_op(block, Op::Parameter("b1".to_string()))
+        .unwrap();
+    let (_, w2) = graph
+        .add_op(block, Op::Parameter("w2".to_string()))
+        .unwrap();
+    let (_, b2) = graph
+        .add_op(block, Op::Parameter("b2".to_string()))
+        .unwrap();
+
+    let (_, hidden) = graph
+        .add_op(
+            block,
+            Op::Gemm {
+                lhs: x,
+                rhs: w1,
+                bias: Some(b1),
+                alpha: 1.0,
+                beta: 1.0,
+            },
+        )
+        .unwrap();
+    let (_, hidden_relu) = graph.add_op(block, Op::Relu(hidden)).unwrap();
+    let (_, out) = graph
+        .add_op(
+            block,
+            Op::Gemm {
+                lhs: hidden_relu,
+                rhs: w2,
+                bias: Some(b2),
+                alpha: 1.0,
+                beta: 1.0,
+            },
+        )
+        .unwrap();
+    let (_, diff) = graph.add_op(block, Op::Sub(out, target)).unwrap();
+    let (_, sq) = graph.add_op(block, Op::Mul(diff, diff)).unwrap();
+    let (_, loss) = graph
+        .add_op(
+            block,
+            Op::ReduceMean {
+                input: sq,
+                axis: None,
+                keepdims: false,
+            },
+        )
+        .unwrap();
+
+    graph.bind_input_shape("x", vec![2, 3]);
+    graph.bind_input_shape("target", vec![2, 2]);
+    graph.bind_parameter_shape("w1", vec![3, 4]);
+    graph.bind_parameter_shape("b1", vec![4]);
+    graph.bind_parameter_shape("w2", vec![4, 2]);
+    graph.bind_parameter_shape("b2", vec![2]);
+
+    (graph, loss)
+}
+
+fn mlp_training_initial_parameters() -> HashMap<String, Tensor> {
+    HashMap::from([
+        (
+            "w1".to_string(),
+            Tensor::new(
+                vec![3, 4],
+                vec![
+                    0.1, -0.2, 0.3, 0.4, 0.5, 0.6, -0.7, 0.8, -0.9, 1.0, 0.2, -0.3,
+                ],
+            )
+            .unwrap(),
+        ),
+        (
+            "b1".to_string(),
+            Tensor::new(vec![4], vec![0.05, -0.1, 0.15, 0.2]).unwrap(),
+        ),
+        (
+            "w2".to_string(),
+            Tensor::new(vec![4, 2], vec![0.2, -0.4, 0.1, 0.3, -0.5, 0.7, 0.6, -0.2]).unwrap(),
+        ),
+        (
+            "b2".to_string(),
+            Tensor::new(vec![2], vec![0.25, -0.35]).unwrap(),
+        ),
+    ])
+}
+
+fn mlp_training_dataset() -> Vec<TrainSample> {
+    vec![
+        TrainSample {
+            inputs: HashMap::from([
+                (
+                    "x".to_string(),
+                    Tensor::new(vec![2, 3], vec![0.2, -0.1, 0.3, 0.7, 0.5, -0.4]).unwrap(),
+                ),
+                (
+                    "target".to_string(),
+                    Tensor::new(vec![2, 2], vec![0.1, -0.2, 0.3, 0.4]).unwrap(),
+                ),
+            ]),
+        },
+        TrainSample {
+            inputs: HashMap::from([
+                (
+                    "x".to_string(),
+                    Tensor::new(vec![2, 3], vec![0.4, 0.2, -0.5, -0.3, 0.6, 0.8]).unwrap(),
+                ),
+                (
+                    "target".to_string(),
+                    Tensor::new(vec![2, 2], vec![0.2, 0.05, -0.1, 0.6]).unwrap(),
+                ),
+            ]),
+        },
+    ]
+}
+
+fn assert_mlp_training_result_matches_pytorch(
+    result: &volta::ir::TrainResult,
+    expected: &Value,
+    label: &str,
+) {
+    assert!(
+        (result.final_loss - scalar_f32(expected, "final_loss")).abs() <= 1e-5,
+        "{label}.final_loss mismatch: actual={}, expected={}",
+        result.final_loss,
+        scalar_f32(expected, "final_loss")
+    );
+
+    for name in ["w1", "b1", "w2", "b2"] {
+        let actual = result
+            .final_parameters
+            .get(name)
+            .unwrap_or_else(|| panic!("missing final parameter '{name}'"))
+            .data
+            .to_vec();
+        assert_close(
+            &format!("{label}.param.{name}"),
+            &actual,
+            &json_f32_array(&expected["final_parameters"], name),
+            1e-5,
         );
     }
 }
@@ -1096,6 +1249,28 @@ fn pytorch_parity_transformer_multi_step_sgd_train_graph() {
         return;
     };
 
+    let (graph, loss) = build_transformer_training_graph();
+    let initial_parameters = transformer_training_initial_parameters();
+    let dataset = transformer_training_dataset();
+
+    let result = train_graph(
+        &graph,
+        loss,
+        initial_parameters,
+        &dataset,
+        &[],
+        &TrainConfig::new(2, OptimizerConfig::Sgd { lr: 0.01 }),
+    )
+    .expect("transformer training should succeed");
+
+    assert_transformer_training_result_matches_pytorch(
+        &result,
+        &expected,
+        "transformer_train_loop_sgd",
+    );
+}
+
+fn build_transformer_training_graph() -> (Graph, ValueId) {
     let mut graph = Graph::new();
     let block = graph.create_block();
 
@@ -1198,7 +1373,11 @@ fn pytorch_parity_transformer_multi_step_sgd_train_graph() {
     graph.bind_parameter_shape("ln2_w", vec![4]);
     graph.bind_parameter_shape("ln2_b", vec![4]);
 
-    let initial_parameters = HashMap::from([
+    (graph, loss)
+}
+
+fn transformer_training_initial_parameters() -> HashMap<String, Tensor> {
+    HashMap::from([
         (
             "w_q".to_string(),
             Tensor::new(
@@ -1305,9 +1484,11 @@ fn pytorch_parity_transformer_multi_step_sgd_train_graph() {
             "ln2_b".to_string(),
             Tensor::new(vec![4], vec![-0.05, 0.1, -0.15, 0.2]).unwrap(),
         ),
-    ]);
+    ])
+}
 
-    let dataset = vec![
+fn transformer_training_dataset() -> Vec<TrainSample> {
+    vec![
         TrainSample {
             inputs: HashMap::from([
                 (
@@ -1345,23 +1526,19 @@ fn pytorch_parity_transformer_multi_step_sgd_train_graph() {
                 ),
             ]),
         },
-    ];
+    ]
+}
 
-    let result = train_graph(
-        &graph,
-        loss,
-        initial_parameters,
-        &dataset,
-        &[],
-        &TrainConfig::new(2, OptimizerConfig::Sgd { lr: 0.01 }),
-    )
-    .expect("transformer training should succeed");
-
+fn assert_transformer_training_result_matches_pytorch(
+    result: &volta::ir::TrainResult,
+    expected: &Value,
+    label: &str,
+) {
     assert!(
-        (result.final_loss - scalar_f32(&expected, "final_loss")).abs() <= 1e-5,
-        "transformer final_loss mismatch: actual={}, expected={}",
+        (result.final_loss - scalar_f32(expected, "final_loss")).abs() <= 1e-5,
+        "{label}.final_loss mismatch: actual={}, expected={}",
         result.final_loss,
-        scalar_f32(&expected, "final_loss")
+        scalar_f32(expected, "final_loss")
     );
 
     for name in ["w_q", "b_q", "w_o", "ln1_w", "ffn_w1", "ln2_w"] {
@@ -1375,12 +1552,83 @@ fn pytorch_parity_transformer_multi_step_sgd_train_graph() {
             .to_vec();
         let expected_values = json_f32_array(&expected["final_parameters"], name);
         assert_close(
-            &format!("transformer_train_loop.param.{name}"),
+            &format!("{label}.param.{name}"),
             &actual,
             &expected_values,
             1e-5,
         );
     }
+}
+
+#[test]
+fn pytorch_parity_transformer_multi_step_adam_train_graph() {
+    let Some(expected) = run_pytorch_case("transformer_train_loop_adam") else {
+        return;
+    };
+
+    let (graph, loss) = build_transformer_training_graph();
+    let initial_parameters = transformer_training_initial_parameters();
+    let dataset = transformer_training_dataset();
+
+    let result = train_graph(
+        &graph,
+        loss,
+        initial_parameters,
+        &dataset,
+        &[],
+        &TrainConfig::new(
+            2,
+            OptimizerConfig::Adam {
+                lr: 0.005,
+                beta1: 0.9,
+                beta2: 0.999,
+                epsilon: 1e-8,
+            },
+        ),
+    )
+    .expect("transformer Adam training should succeed");
+
+    assert_transformer_training_result_matches_pytorch(
+        &result,
+        &expected,
+        "transformer_train_loop_adam",
+    );
+}
+
+#[test]
+fn pytorch_parity_transformer_multi_step_adamw_train_graph() {
+    let Some(expected) = run_pytorch_case("transformer_train_loop_adamw") else {
+        return;
+    };
+
+    let (graph, loss) = build_transformer_training_graph();
+    let initial_parameters = transformer_training_initial_parameters();
+    let dataset = transformer_training_dataset();
+
+    let result = train_graph(
+        &graph,
+        loss,
+        initial_parameters,
+        &dataset,
+        &[],
+        &TrainConfig::new(
+            2,
+            OptimizerConfig::AdamW {
+                lr: 0.005,
+                beta1: 0.9,
+                beta2: 0.999,
+                epsilon: 1e-8,
+                weight_decay: 0.01,
+            },
+        ),
+    )
+    .expect("transformer AdamW training should succeed");
+
+    assert_transformer_training_result_matches_pytorch(
+        &result,
+        &expected,
+        "transformer_train_loop_adamw",
+    );
 }
 
 #[test]
@@ -1589,122 +1837,9 @@ fn pytorch_parity_mlp_multi_step_sgd_train_graph() {
         return;
     };
 
-    let mut graph = Graph::new();
-    let block = graph.create_block();
-
-    let (_, x) = graph.add_op(block, Op::Input("x".to_string())).unwrap();
-    let (_, target) = graph
-        .add_op(block, Op::Input("target".to_string()))
-        .unwrap();
-    let (_, w1) = graph
-        .add_op(block, Op::Parameter("w1".to_string()))
-        .unwrap();
-    let (_, b1) = graph
-        .add_op(block, Op::Parameter("b1".to_string()))
-        .unwrap();
-    let (_, w2) = graph
-        .add_op(block, Op::Parameter("w2".to_string()))
-        .unwrap();
-    let (_, b2) = graph
-        .add_op(block, Op::Parameter("b2".to_string()))
-        .unwrap();
-
-    let (_, hidden) = graph
-        .add_op(
-            block,
-            Op::Gemm {
-                lhs: x,
-                rhs: w1,
-                bias: Some(b1),
-                alpha: 1.0,
-                beta: 1.0,
-            },
-        )
-        .unwrap();
-    let (_, hidden_relu) = graph.add_op(block, Op::Relu(hidden)).unwrap();
-    let (_, out) = graph
-        .add_op(
-            block,
-            Op::Gemm {
-                lhs: hidden_relu,
-                rhs: w2,
-                bias: Some(b2),
-                alpha: 1.0,
-                beta: 1.0,
-            },
-        )
-        .unwrap();
-    let (_, diff) = graph.add_op(block, Op::Sub(out, target)).unwrap();
-    let (_, sq) = graph.add_op(block, Op::Mul(diff, diff)).unwrap();
-    let (_, loss) = graph
-        .add_op(
-            block,
-            Op::ReduceMean {
-                input: sq,
-                axis: None,
-                keepdims: false,
-            },
-        )
-        .unwrap();
-
-    graph.bind_input_shape("x", vec![2, 3]);
-    graph.bind_input_shape("target", vec![2, 2]);
-    graph.bind_parameter_shape("w1", vec![3, 4]);
-    graph.bind_parameter_shape("b1", vec![4]);
-    graph.bind_parameter_shape("w2", vec![4, 2]);
-    graph.bind_parameter_shape("b2", vec![2]);
-
-    let initial_parameters = HashMap::from([
-        (
-            "w1".to_string(),
-            Tensor::new(
-                vec![3, 4],
-                vec![
-                    0.1, -0.2, 0.3, 0.4, 0.5, 0.6, -0.7, 0.8, -0.9, 1.0, 0.2, -0.3,
-                ],
-            )
-            .unwrap(),
-        ),
-        (
-            "b1".to_string(),
-            Tensor::new(vec![4], vec![0.05, -0.1, 0.15, 0.2]).unwrap(),
-        ),
-        (
-            "w2".to_string(),
-            Tensor::new(vec![4, 2], vec![0.2, -0.4, 0.1, 0.3, -0.5, 0.7, 0.6, -0.2]).unwrap(),
-        ),
-        (
-            "b2".to_string(),
-            Tensor::new(vec![2], vec![0.25, -0.35]).unwrap(),
-        ),
-    ]);
-
-    let dataset = vec![
-        TrainSample {
-            inputs: HashMap::from([
-                (
-                    "x".to_string(),
-                    Tensor::new(vec![2, 3], vec![0.2, -0.1, 0.3, 0.7, 0.5, -0.4]).unwrap(),
-                ),
-                (
-                    "target".to_string(),
-                    Tensor::new(vec![2, 2], vec![0.1, -0.2, 0.3, 0.4]).unwrap(),
-                ),
-            ]),
-        },
-        TrainSample {
-            inputs: HashMap::from([
-                (
-                    "x".to_string(),
-                    Tensor::new(vec![2, 3], vec![0.4, 0.2, -0.5, -0.3, 0.6, 0.8]).unwrap(),
-                ),
-                (
-                    "target".to_string(),
-                    Tensor::new(vec![2, 2], vec![0.2, 0.05, -0.1, 0.6]).unwrap(),
-                ),
-            ]),
-        },
-    ];
+    let (graph, loss) = build_mlp_training_graph();
+    let initial_parameters = mlp_training_initial_parameters();
+    let dataset = mlp_training_dataset();
 
     let result = train_graph(
         &graph,
@@ -1716,25 +1851,104 @@ fn pytorch_parity_mlp_multi_step_sgd_train_graph() {
     )
     .expect("multi-step training should succeed");
 
-    assert!(
-        (result.final_loss - scalar_f32(&expected, "final_loss")).abs() <= 1e-5,
-        "final_loss mismatch: actual={}, expected={}",
-        result.final_loss,
-        scalar_f32(&expected, "final_loss")
-    );
+    assert_mlp_training_result_matches_pytorch(&result, &expected, "mlp_train_loop_sgd");
+}
 
-    for name in ["w1", "b1", "w2", "b2"] {
-        let actual = result
-            .final_parameters
-            .get(name)
-            .unwrap_or_else(|| panic!("missing final parameter '{name}'"))
-            .data
-            .to_vec();
-        assert_close(
-            &format!("mlp_train_loop.param.{name}"),
-            &actual,
-            &json_f32_array(&expected["final_parameters"], name),
-            1e-5,
-        );
-    }
+#[test]
+fn pytorch_parity_mlp_multi_step_adam_train_graph() {
+    let Some(expected) = run_pytorch_case("mlp_train_loop_adam") else {
+        return;
+    };
+
+    let (graph, loss) = build_mlp_training_graph();
+    let initial_parameters = mlp_training_initial_parameters();
+    let dataset = mlp_training_dataset();
+
+    let result = train_graph(
+        &graph,
+        loss,
+        initial_parameters,
+        &dataset,
+        &[],
+        &TrainConfig::new(
+            3,
+            OptimizerConfig::Adam {
+                lr: 0.01,
+                beta1: 0.9,
+                beta2: 0.999,
+                epsilon: 1e-8,
+            },
+        ),
+    )
+    .expect("adam multi-step training should succeed");
+
+    assert_mlp_training_result_matches_pytorch(&result, &expected, "mlp_train_loop_adam");
+}
+
+#[test]
+fn pytorch_parity_mlp_multi_step_adamw_train_graph() {
+    let Some(expected) = run_pytorch_case("mlp_train_loop_adamw") else {
+        return;
+    };
+
+    let (graph, loss) = build_mlp_training_graph();
+    let initial_parameters = mlp_training_initial_parameters();
+    let dataset = mlp_training_dataset();
+
+    let result = train_graph(
+        &graph,
+        loss,
+        initial_parameters,
+        &dataset,
+        &[],
+        &TrainConfig::new(
+            3,
+            OptimizerConfig::AdamW {
+                lr: 0.01,
+                beta1: 0.9,
+                beta2: 0.999,
+                epsilon: 1e-8,
+                weight_decay: 0.01,
+            },
+        ),
+    )
+    .expect("adamw multi-step training should succeed");
+
+    assert_mlp_training_result_matches_pytorch(&result, &expected, "mlp_train_loop_adamw");
+}
+
+#[test]
+fn pytorch_parity_mlp_multi_step_sgd_accum2_train_graph() {
+    let Some(expected) = run_pytorch_case("mlp_train_loop_sgd_accum2") else {
+        return;
+    };
+
+    let (graph, loss) = build_mlp_training_graph();
+    let initial_parameters = mlp_training_initial_parameters();
+    let dataset = mlp_training_dataset();
+    let mut config = TrainConfig::new(3, OptimizerConfig::Sgd { lr: 0.05 });
+    config.gradient_accumulation_steps = 2;
+
+    let result = train_graph(&graph, loss, initial_parameters, &dataset, &[], &config)
+        .expect("sgd accumulation training should succeed");
+
+    assert_mlp_training_result_matches_pytorch(&result, &expected, "mlp_train_loop_sgd_accum2");
+}
+
+#[test]
+fn pytorch_parity_mlp_multi_step_sgd_clip_grad_train_graph() {
+    let Some(expected) = run_pytorch_case("mlp_train_loop_sgd_clip_grad") else {
+        return;
+    };
+
+    let (graph, loss) = build_mlp_training_graph();
+    let initial_parameters = mlp_training_initial_parameters();
+    let dataset = mlp_training_dataset();
+    let mut config = TrainConfig::new(3, OptimizerConfig::Sgd { lr: 0.05 });
+    config.clip_grad = Some(0.1);
+
+    let result = train_graph(&graph, loss, initial_parameters, &dataset, &[], &config)
+        .expect("sgd clip-grad training should succeed");
+
+    assert_mlp_training_result_matches_pytorch(&result, &expected, "mlp_train_loop_sgd_clip_grad");
 }

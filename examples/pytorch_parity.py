@@ -245,8 +245,8 @@ def transformer_case():
     }
 
 
-def transformer_train_loop_sgd_case():
-    dataset = [
+def transformer_training_dataset():
+    return [
         (
             torch.tensor(
                 [[[0.2, -0.1, 0.3, 0.4], [0.7, 0.5, -0.4, 0.1]]],
@@ -268,6 +268,9 @@ def transformer_train_loop_sgd_case():
             ),
         ),
     ]
+
+
+def transformer_training_parameters():
     w_q = torch.tensor(
         [
             [0.2, -0.1, 0.3, 0.4],
@@ -340,61 +343,39 @@ def transformer_train_loop_sgd_case():
     ffn_b2 = torch.tensor([0.2, -0.15, 0.05, 0.1], dtype=torch.float32, requires_grad=True)
     ln2_w = torch.tensor([0.95, -1.05, 0.85, 1.1], dtype=torch.float32, requires_grad=True)
     ln2_b = torch.tensor([-0.05, 0.1, -0.15, 0.2], dtype=torch.float32, requires_grad=True)
+    return (
+        w_q,
+        w_k,
+        w_v,
+        w_o,
+        b_q,
+        b_k,
+        b_v,
+        b_o,
+        ln1_w,
+        ln1_b,
+        ffn_w1,
+        ffn_b1,
+        ffn_w2,
+        ffn_b2,
+        ln2_w,
+        ln2_b,
+    )
 
+
+def transformer_forward(
+    x, w_q, w_k, w_v, w_o, b_q, b_k, b_v, b_o,
+    ln1_w, ln1_b, ffn_w1, ffn_b1, ffn_w2, ffn_b2, ln2_w, ln2_b,
+):
     batch = 1
     seq = 2
     d_model = 4
     num_heads = 2
     head_dim = d_model // num_heads
-    lr = 0.01
-    epochs = 2
 
-    params = [
-        w_q, w_k, w_v, w_o, b_q, b_k, b_v, b_o,
-        ln1_w, ln1_b, ffn_w1, ffn_b1, ffn_w2, ffn_b2, ln2_w, ln2_b,
-    ]
-
-    for _ in range(epochs):
-        for x, target in dataset:
-            for param in params:
-                if param.grad is not None:
-                    param.grad.zero_()
-
-            q_proj = torch.matmul(x, w_q.transpose(0, 1)) + b_q
-            k_proj = torch.matmul(x, w_k.transpose(0, 1)) + b_k
-            v_proj = torch.matmul(x, w_v.transpose(0, 1)) + b_v
-
-            q_heads = q_proj.view(batch, seq, num_heads, head_dim).transpose(1, 2)
-            k_heads = k_proj.view(batch, seq, num_heads, head_dim).transpose(1, 2)
-            v_heads = v_proj.view(batch, seq, num_heads, head_dim).transpose(1, 2)
-
-            scores = torch.matmul(q_heads, k_heads.transpose(-2, -1)) / math.sqrt(head_dim)
-            attn = torch.softmax(scores, dim=-1)
-            context = torch.matmul(attn, v_heads)
-            context = context.transpose(1, 2).contiguous().view(batch, seq, d_model)
-            attn_out = torch.matmul(context, w_o.transpose(0, 1)) + b_o
-
-            residual1 = x + attn_out
-            ln1_in = residual1.view(batch * seq, d_model)
-            ln1_out = F.layer_norm(ln1_in, (d_model,), ln1_w, ln1_b, 1e-5)
-            ffn1 = torch.matmul(ln1_out, ffn_w1) + ffn_b1
-            ffn1_act = F.gelu(ffn1, approximate="tanh")
-            ffn2 = torch.matmul(ffn1_act, ffn_w2) + ffn_b2
-            residual2 = ln1_out + ffn2
-            out = F.layer_norm(residual2, (d_model,), ln2_w, ln2_b, 1e-5)
-
-            diff = out - target
-            loss = torch.mean(diff * diff)
-            loss.backward()
-
-            with torch.no_grad():
-                for param in params:
-                    param -= lr * param.grad
-
-    last_x, last_target = dataset[-1]
-    q_proj = torch.matmul(last_x, w_q.transpose(0, 1)) + b_q
-    k_proj = torch.matmul(last_x, w_k.transpose(0, 1)) + b_k
-    v_proj = torch.matmul(last_x, w_v.transpose(0, 1)) + b_v
+    q_proj = torch.matmul(x, w_q.transpose(0, 1)) + b_q
+    k_proj = torch.matmul(x, w_k.transpose(0, 1)) + b_k
+    v_proj = torch.matmul(x, w_v.transpose(0, 1)) + b_v
     q_heads = q_proj.view(batch, seq, num_heads, head_dim).transpose(1, 2)
     k_heads = k_proj.view(batch, seq, num_heads, head_dim).transpose(1, 2)
     v_heads = v_proj.view(batch, seq, num_heads, head_dim).transpose(1, 2)
@@ -403,14 +384,73 @@ def transformer_train_loop_sgd_case():
     context = torch.matmul(attn, v_heads)
     context = context.transpose(1, 2).contiguous().view(batch, seq, d_model)
     attn_out = torch.matmul(context, w_o.transpose(0, 1)) + b_o
-    residual1 = last_x + attn_out
+    residual1 = x + attn_out
     ln1_in = residual1.view(batch * seq, d_model)
     ln1_out = F.layer_norm(ln1_in, (d_model,), ln1_w, ln1_b, 1e-5)
     ffn1 = torch.matmul(ln1_out, ffn_w1) + ffn_b1
     ffn1_act = F.gelu(ffn1, approximate="tanh")
     ffn2 = torch.matmul(ffn1_act, ffn_w2) + ffn_b2
     residual2 = ln1_out + ffn2
-    out = F.layer_norm(residual2, (d_model,), ln2_w, ln2_b, 1e-5)
+    return F.layer_norm(residual2, (d_model,), ln2_w, ln2_b, 1e-5)
+
+
+def transformer_train_loop_case(optimizer_kind):
+    dataset = transformer_training_dataset()
+    params = list(transformer_training_parameters())
+    (
+        w_q,
+        w_k,
+        w_v,
+        w_o,
+        b_q,
+        b_k,
+        b_v,
+        b_o,
+        ln1_w,
+        ln1_b,
+        ffn_w1,
+        ffn_b1,
+        ffn_w2,
+        ffn_b2,
+        ln2_w,
+        ln2_b,
+    ) = params
+
+    if optimizer_kind == "sgd":
+        optimizer = torch.optim.SGD(params, lr=0.01)
+        epochs = 2
+    elif optimizer_kind == "adam":
+        optimizer = torch.optim.Adam(params, lr=0.005, betas=(0.9, 0.999), eps=1e-8)
+        epochs = 2
+    elif optimizer_kind == "adamw":
+        optimizer = torch.optim.AdamW(
+            params,
+            lr=0.005,
+            betas=(0.9, 0.999),
+            eps=1e-8,
+            weight_decay=0.01,
+        )
+        epochs = 2
+    else:
+        raise ValueError(f"unknown optimizer kind: {optimizer_kind}")
+
+    for _ in range(epochs):
+        for x, target in dataset:
+            optimizer.zero_grad(set_to_none=True)
+            out = transformer_forward(
+                x, w_q, w_k, w_v, w_o, b_q, b_k, b_v, b_o,
+                ln1_w, ln1_b, ffn_w1, ffn_b1, ffn_w2, ffn_b2, ln2_w, ln2_b,
+            )
+            diff = out - target
+            loss = torch.mean(diff * diff)
+            loss.backward()
+            optimizer.step()
+
+    last_x, last_target = dataset[-1]
+    out = transformer_forward(
+        last_x, w_q, w_k, w_v, w_o, b_q, b_k, b_v, b_o,
+        ln1_w, ln1_b, ffn_w1, ffn_b1, ffn_w2, ffn_b2, ln2_w, ln2_b,
+    )
     diff = out - last_target
     final_loss = torch.mean(diff * diff)
 
@@ -425,6 +465,18 @@ def transformer_train_loop_sgd_case():
             "ln2_w": ln2_w.detach().reshape(-1).tolist(),
         },
     }
+
+
+def transformer_train_loop_sgd_case():
+    return transformer_train_loop_case("sgd")
+
+
+def transformer_train_loop_adam_case():
+    return transformer_train_loop_case("adam")
+
+
+def transformer_train_loop_adamw_case():
+    return transformer_train_loop_case("adamw")
 
 
 def mlp_train_sgd_case():
@@ -491,8 +543,8 @@ def mlp_train_sgd_case():
     }
 
 
-def mlp_train_loop_sgd_case():
-    dataset = [
+def mlp_train_dataset():
+    return [
         (
             torch.tensor([[0.2, -0.1, 0.3], [0.7, 0.5, -0.4]], dtype=torch.float32),
             torch.tensor([[0.1, -0.2], [0.3, 0.4]], dtype=torch.float32),
@@ -502,6 +554,9 @@ def mlp_train_loop_sgd_case():
             torch.tensor([[0.2, 0.05], [-0.1, 0.6]], dtype=torch.float32),
         ),
     ]
+
+
+def mlp_train_parameters():
     w1 = torch.tensor(
         [
             [0.1, -0.2, 0.3, 0.4],
@@ -518,30 +573,76 @@ def mlp_train_loop_sgd_case():
         requires_grad=True,
     )
     b2 = torch.tensor([0.25, -0.35], dtype=torch.float32, requires_grad=True)
-    lr = 0.05
-    epochs = 3
+    return w1, b1, w2, b2
+
+
+def mlp_forward(x, w1, b1, w2, b2):
+    hidden = torch.relu(torch.matmul(x, w1) + b1)
+    return torch.matmul(hidden, w2) + b2
+
+
+def mlp_train_loop_case(optimizer_kind, accum_steps=1, clip_grad=None):
+    dataset = mlp_train_dataset()
+    w1, b1, w2, b2 = mlp_train_parameters()
+    params = [w1, b1, w2, b2]
+
+    if optimizer_kind == "sgd":
+        optimizer = torch.optim.SGD(params, lr=0.05)
+        epochs = 3
+    elif optimizer_kind == "adam":
+        optimizer = torch.optim.Adam(params, lr=0.01, betas=(0.9, 0.999), eps=1e-8)
+        epochs = 3
+    elif optimizer_kind == "adamw":
+        optimizer = torch.optim.AdamW(
+            params,
+            lr=0.01,
+            betas=(0.9, 0.999),
+            eps=1e-8,
+            weight_decay=0.01,
+        )
+        epochs = 3
+    else:
+        raise ValueError(f"unknown optimizer kind: {optimizer_kind}")
 
     for _ in range(epochs):
+        optimizer.zero_grad(set_to_none=True)
+        pending_steps = 0
         for x, target in dataset:
-            if w1.grad is not None:
-                w1.grad.zero_()
-                b1.grad.zero_()
-                w2.grad.zero_()
-                b2.grad.zero_()
-            hidden = torch.relu(torch.matmul(x, w1) + b1)
-            out = torch.matmul(hidden, w2) + b2
+            out = mlp_forward(x, w1, b1, w2, b2)
             diff = out - target
             loss = torch.mean(diff * diff)
             loss.backward()
-            with torch.no_grad():
-                w1 -= lr * w1.grad
-                b1 -= lr * b1.grad
-                w2 -= lr * w2.grad
-                b2 -= lr * b2.grad
+            pending_steps += 1
+
+            if pending_steps < accum_steps:
+                continue
+
+            if pending_steps > 1:
+                for param in params:
+                    if param.grad is not None:
+                        param.grad.div_(pending_steps)
+
+            if clip_grad is not None:
+                torch.nn.utils.clip_grad_norm_(params, clip_grad)
+
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+            pending_steps = 0
+
+        if pending_steps > 0:
+            if pending_steps > 1:
+                for param in params:
+                    if param.grad is not None:
+                        param.grad.div_(pending_steps)
+
+            if clip_grad is not None:
+                torch.nn.utils.clip_grad_norm_(params, clip_grad)
+
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
 
     last_x, last_target = dataset[-1]
-    hidden = torch.relu(torch.matmul(last_x, w1) + b1)
-    out = torch.matmul(hidden, w2) + b2
+    out = mlp_forward(last_x, w1, b1, w2, b2)
     diff = out - last_target
     final_loss = torch.mean(diff * diff)
 
@@ -554,6 +655,26 @@ def mlp_train_loop_sgd_case():
             "b2": b2.detach().reshape(-1).tolist(),
         },
     }
+
+
+def mlp_train_loop_sgd_case():
+    return mlp_train_loop_case("sgd")
+
+
+def mlp_train_loop_adam_case():
+    return mlp_train_loop_case("adam")
+
+
+def mlp_train_loop_adamw_case():
+    return mlp_train_loop_case("adamw")
+
+
+def mlp_train_loop_sgd_accum2_case():
+    return mlp_train_loop_case("sgd", accum_steps=2)
+
+
+def mlp_train_loop_sgd_clip_grad_case():
+    return mlp_train_loop_case("sgd", clip_grad=0.1)
 
 
 def mha_self_case():
@@ -756,10 +877,22 @@ def main():
         result = transformer_case()
     elif case == "transformer_train_loop_sgd":
         result = transformer_train_loop_sgd_case()
+    elif case == "transformer_train_loop_adam":
+        result = transformer_train_loop_adam_case()
+    elif case == "transformer_train_loop_adamw":
+        result = transformer_train_loop_adamw_case()
     elif case == "mlp_train_sgd":
         result = mlp_train_sgd_case()
     elif case == "mlp_train_loop_sgd":
         result = mlp_train_loop_sgd_case()
+    elif case == "mlp_train_loop_adam":
+        result = mlp_train_loop_adam_case()
+    elif case == "mlp_train_loop_adamw":
+        result = mlp_train_loop_adamw_case()
+    elif case == "mlp_train_loop_sgd_accum2":
+        result = mlp_train_loop_sgd_accum2_case()
+    elif case == "mlp_train_loop_sgd_clip_grad":
+        result = mlp_train_loop_sgd_clip_grad_case()
     elif case == "mha_self":
         result = mha_self_case()
     elif case == "mha":
