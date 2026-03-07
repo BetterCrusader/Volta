@@ -23,6 +23,8 @@ use inkwell::values::PointerValue;
 
 use crate::ir::{Graph, NodeId, Op, ValueId, build_schedule};
 
+const GEMM_SHIM_C: &[u8] = include_bytes!("gemm_shim.c");
+
 #[derive(Debug)]
 pub struct CodegenError {
     pub message: String,
@@ -115,7 +117,8 @@ pub fn link_object_to_exe(obj: &Path, exe: &Path) -> Result<(), CodegenError> {
         .unwrap_or_else(|| std::path::PathBuf::from("clang"));
 
     // Compile gemm_shim.c → gemm_shim.o next to the IR object
-    let shim_src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/engine/ir/codegen/gemm_shim.c");
+    let shim_src = obj.with_file_name("gemm_shim.c");
+    std::fs::write(&shim_src, GEMM_SHIM_C).map_err(|e| cg_err!("write gemm_shim.c: {}", e))?;
     let shim_obj = obj.with_file_name("gemm_shim.o");
 
     let shim_status = std::process::Command::new(&clang)
@@ -991,5 +994,15 @@ fn infer_shape(graph: &Graph, v: ValueId) -> Vec<usize> {
         Op::Relu(v) | Op::Identity(v) | Op::Output(v) => infer_shape(graph, *v),
         Op::Add(l, _) | Op::Sub(l, _) | Op::Mul(l, _) => infer_shape(graph, *l),
         _ => vec![1],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GEMM_SHIM_C;
+
+    #[test]
+    fn shim_bytes_not_empty() {
+        assert!(GEMM_SHIM_C.len() > 0, "GEMM_SHIM_C must be non-empty (include_bytes! embed check)");
     }
 }

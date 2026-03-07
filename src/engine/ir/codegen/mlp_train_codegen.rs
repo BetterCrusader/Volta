@@ -16,6 +16,8 @@
 //! volta_transpose_f32 is exported from gemm_shim.c.
 use std::path::Path;
 
+const GEMM_SHIM_C: &[u8] = include_bytes!("gemm_shim.c");
+
 #[derive(Debug)]
 pub struct MlpTrainCodegenError {
     pub message: String,
@@ -39,7 +41,10 @@ pub fn compile_mlp_train_dll(
 ) -> Result<(), MlpTrainCodegenError> {
     let c_src = out_dll.with_extension("train.c");
     let c_obj = out_dll.with_extension("train.o");
-    let shim_src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/engine/ir/codegen/gemm_shim.c");
+    let shim_src = out_dll.with_extension("shim.c");
+    std::fs::write(&shim_src, GEMM_SHIM_C).map_err(|e| MlpTrainCodegenError {
+        message: format!("write gemm_shim.c: {e}"),
+    })?;
     let shim_obj = out_dll.with_extension("shim.o");
 
     let code = generate_c_source(topology, init_weights)?;
@@ -406,4 +411,14 @@ fn generate_c_source(
     }
 
     Ok(s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GEMM_SHIM_C;
+
+    #[test]
+    fn gemm_shim_bytes_not_empty() {
+        assert!(GEMM_SHIM_C.len() > 0, "GEMM_SHIM_C must be non-empty (include_bytes! embed check)");
+    }
 }
