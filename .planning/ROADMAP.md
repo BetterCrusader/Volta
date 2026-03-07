@@ -25,7 +25,7 @@
   1. Бенчмарк Adam MLP B≤64 показує ≤1.1× відносно PyTorch eager — вимірювано тим самим harness (30 outer × 7 inner × 50 steps)
   2. SGD regression gate утримується: B=64 MLP-512 median < 2.10 ms після всіх змін optimizer
   3. Числовий регресійний тест Adam проходить проти reference implementation — градієнти відповідають до eps
-**Plans:** 3 plans
+**Plans:** 2/3 plans executed
 
 Plans:
 - [ ] 01-01-PLAN.md — AVX-512 safety fix: remove x86-v4 from gemm features in codegen template and benchmark crate
@@ -60,7 +60,7 @@ Plans:
 
 | Фаза | Планів виконано | Статус | Завершено |
 |------|-----------------|--------|-----------|
-| 1. Продуктивність Adam | 0/3 | Not started | - |
+| 1. Продуктивність Adam | 2/3 | In Progress|  |
 | 2. Інфраструктура і backend | 0/? | Not started | - |
 | 3. Надійність і коректність | 0/? | Not started | - |
 
