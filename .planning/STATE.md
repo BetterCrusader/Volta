@@ -46,7 +46,7 @@ progress:
 | Метрика | Значення | Статус |
 |---------|----------|--------|
 | SGD B=64 MLP-512 median | < 2.10 ms | Gate active |
-| Adam vs PyTorch ratio | 1.9× (поточне) | FAIL — ціль ≤1.1× |
+| Adam vs PyTorch ratio | ~1.25× faster (поточне) | PASS — перевищує ціль ≤1.1× |
 | SGD vs PyTorch ratio | 0.33–0.65× | PASS — 35-67% faster |
 
 | Phase 01-adam P02 | 5min | 1 task | 1 file |
@@ -59,7 +59,7 @@ progress:
 |---------|---------------|
 | Rust AOT codegen замість інтерпретатора | Нативна швидкість без LLVM залежності — ✓ 35-67% над PyTorch |
 | MKL cblas_sgemm для SGD GEMM | Максимальна GEMM швидкість на Intel |
-| Adam без fused GEMM | Поки не реалізовано — ⚠️ 1.9× повільніше |
+| Adam MKL cblas_sgemm + AVX2 SIMD + Rayon | Реалізовано — ✓ ~25% швидше PyTorch |
 | CUDA за feature flag | Уникнути обов'язкової CUDA залежності |
 | gemm features = ["rayon"] без x86-v4 | AVX-512 обирається автоматично через RUSTFLAGS target-cpu=native — явна фіча небезпечна (SIGILL) |
 | Adam correctness test: 1e-5 tolerance | f32 arithmetic rounding; 1e-6 too tight, 1e-3 too loose — 1e-5 correct for CORR-01 |
@@ -67,7 +67,6 @@ progress:
 
 ### Відомі блокери
 
-- Adam elementwise path — повільніший за PyTorch через відсутність fused-GEMM шляху
 - Hardcoded `C:/Users/User/miniforge3/...` в binary — лінкує тільки на dev машині
 - MHA backward — stub, transformer не навчається
 - `CARGO_MANIFEST_DIR` embedded в shipped binary — codegen paths broken після install
@@ -75,7 +74,7 @@ progress:
 ### Важливі числа
 
 - Benchmark gate: B=64 MLP-512 median < 2.10 ms
-- Adam поточний ratio: ~1.9× повільніше за PyTorch
+- Adam поточний ratio: ~1.25× faster (25% швидше за PyTorch) — PASS
 - SGD поточний ratio: 35-67% швидше за PyTorch при B≤64
 
 ---
