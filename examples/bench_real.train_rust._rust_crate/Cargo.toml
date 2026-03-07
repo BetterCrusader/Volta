@@ -11,5 +11,5 @@ panic = "abort"
 opt-level = 3
 
 [dependencies]
-gemm = { version = "0.19", features = ["rayon", "x86-v4"] }
+gemm = { version = "0.19", features = ["rayon"] }
 rayon = "1"
