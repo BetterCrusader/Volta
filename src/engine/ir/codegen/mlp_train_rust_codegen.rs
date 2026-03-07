@@ -50,6 +50,41 @@ fn merged_rustflags(existing: Option<&str>) -> String {
     format!("{existing} {TARGET_CPU_NATIVE_RUSTFLAG}")
 }
 
+/// Resolve MKL library path from environment variables.
+/// Priority: MKL_LIB_DIR > MKLROOT/lib > CONDA_PREFIX/Library/lib (only if mkl_rt exists) > hardcoded fallback.
+fn resolve_mkl_lib_path() -> String {
+    // Helper: check if mkl_rt exists in a lib dir
+    let has_mkl = |p: &str| -> bool {
+        let lib = if cfg!(windows) { "mkl_rt.lib" } else { "libmkl_rt.so" };
+        std::path::Path::new(p).join(lib).exists()
+    };
+
+    if let Ok(p) = std::env::var("MKL_LIB_DIR") {
+        let p = p.replace('\\', "/");
+        if has_mkl(&p) {
+            return p;
+        }
+    }
+    if let Ok(root) = std::env::var("MKLROOT") {
+        let p = format!("{}/lib", root.replace('\\', "/"));
+        if has_mkl(&p) {
+            return p;
+        }
+    }
+    if let Ok(conda) = std::env::var("CONDA_PREFIX") {
+        let p = format!("{}/Library/lib", conda.replace('\\', "/"));
+        if has_mkl(&p) {
+            return p;
+        }
+    }
+    // Fallback: check common conda env name "mkl"
+    if cfg!(windows) {
+        "C:/Users/User/miniforge3/envs/mkl/Library/lib".to_string()
+    } else {
+        "/usr/lib/x86_64-linux-gnu".to_string()
+    }
+}
+
 /// Compile a Rust-based training DLL using gemm crate.
 /// Requires: rustc in PATH, gemm crate compiled as rlib in target/release/deps/.
 pub fn compile_mlp_train_rust_dll(
@@ -76,7 +111,7 @@ pub fn compile_mlp_train_rust_dll(
         "[package]\nname = \"volta_train_rust\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
         [lib]\ncrate-type = [\"cdylib\"]\n\n\
         [profile.release]\npanic = \"abort\"\nopt-level = 3\n\n\
-        [dependencies]\ngemm = {{ version = \"{gemm_version}\", features = [\"rayon\", \"x86-v4\"] }}\nrayon = \"1\"\n"
+        [dependencies]\ngemm = {{ version = \"{gemm_version}\", features = [\"rayon\"] }}\nrayon = \"1\"\n"
     );
     std::fs::write(crate_dir.join("Cargo.toml"), &cargo_toml).map_err(|e| {
         RustTrainCodegenError {
@@ -84,14 +119,20 @@ pub fn compile_mlp_train_rust_dll(
         }
     })?;
 
-    // Write build.rs to link MKL
-    let mkl_lib_path = "C:/Users/User/miniforge3/envs/mkl/Library/lib";
-    let build_rs = format!(
-        "fn main() {{\n    println!(\"cargo:rustc-link-search=native={mkl_lib_path}\");\n    println!(\"cargo:rustc-link-lib=dylib=mkl_rt\");\n}}\n"
-    );
-    std::fs::write(crate_dir.join("build.rs"), &build_rs).map_err(|e| RustTrainCodegenError {
-        message: format!("write build.rs: {e}"),
-    })?;
+    // Write build.rs to link MKL — only needed for Adam/AdamW optimizer
+    let opt_lower = topology.optimizer.to_lowercase();
+    let use_mkl = opt_lower == "adam" || opt_lower == "adamw";
+    if use_mkl {
+        let mkl_lib_path = resolve_mkl_lib_path();
+        let build_rs = format!(
+            "fn main() {{\n    println!(\"cargo:rustc-link-search=native={mkl_lib_path}\");\n    println!(\"cargo:rustc-link-lib=dylib=mkl_rt\");\n}}\n"
+        );
+        std::fs::write(crate_dir.join("build.rs"), &build_rs).map_err(|e| {
+            RustTrainCodegenError {
+                message: format!("write build.rs: {e}"),
+            }
+        })?;
+    }
 
     // Resolve crate_dir to absolute path for --target-dir
     let abs_crate_dir = std::fs::canonicalize(&crate_dir).unwrap_or_else(|_| crate_dir.clone());
@@ -172,33 +213,44 @@ fn generate_rust_source(
     s.push_str("#![allow(non_snake_case, unused, private_interfaces)]\n");
     s.push_str("use std::alloc::{alloc_zeroed, dealloc, Layout};\n\n");
 
-    // MKL cblas_sgemm for all GEMM — better tile strategy than gemm crate for these shapes
-    s.push_str("#[link(name = \"mkl_rt\", kind = \"dylib\")]\n");
-    s.push_str("extern \"C\" {\n");
-    s.push_str("    fn cblas_sgemm(order: i32, transa: i32, transb: i32, m: i32, n: i32, k: i32, alpha: f32, a: *const f32, lda: i32, b: *const f32, ldb: i32, beta: f32, c: *mut f32, ldc: i32);\n");
-    s.push_str("}\n");
-    s.push_str("const CblasRowMajor: i32 = 101; const CblasNoTrans: i32 = 111; const CblasTrans: i32 = 112;\n\n");
-    // C = A[m×k] @ B[k×n]  (standard row-major) — beta=0 zeros C first
-    s.push_str(
-        "fn sgemm(C: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize) {\n",
-    );
-    s.push_str("    unsafe { cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m as i32, n as i32, k as i32, 1.0f32, A, k as i32, B, n as i32, 0.0f32, C, n as i32); }\n");
-    s.push_str("}\n\n");
-    // C[m×n] = A^T[m×k] @ B[k×n]  where A stored as [k×m] row-major → CblasTrans on A, lda=m
-    s.push_str(
-        "fn sgemm_tn(C: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize) {\n",
-    );
-    s.push_str("    unsafe { cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans, m as i32, n as i32, k as i32, 1.0f32, A, m as i32, B, n as i32, 0.0f32, C, n as i32); }\n");
-    s.push_str("}\n\n");
-    // W[m×n] -= lr * A^T[m×k] @ B[k×n]  — fused dW compute + SGD update via MKL beta=1
-    s.push_str("fn sgd_fused_tn(W: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize, lr: f32) {\n");
-    s.push_str("    unsafe { cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans, m as i32, n as i32, k as i32, -lr, A, m as i32, B, n as i32, 1.0f32, W, n as i32); }\n");
-    s.push_str("}\n\n");
-    // C[m×n] = A[m×k] @ B^T where B stored as [n×k] row-major → CblasTrans on B, ldb=k, ldc=n
-    // Usage: dX[B×r] = delta[B×c] @ W^T where W[r×c]: m=B,k=c,n=r,ldb=c
-    s.push_str("fn sgemm_nt(C: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize, b_cols: usize) {\n");
-    s.push_str("    unsafe { cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, m as i32, n as i32, k as i32, 1.0f32, A, k as i32, B, b_cols as i32, 0.0f32, C, n as i32); }\n");
-    s.push_str("}\n\n");
+    if use_adam_any {
+        // Adam/AdamW: all GEMM via MKL cblas_sgemm — better tile strategy for dW shapes
+        s.push_str("#[link(name = \"mkl_rt\", kind = \"dylib\")]\n");
+        s.push_str("extern \"C\" {\n");
+        s.push_str("    fn cblas_sgemm(order: i32, transa: i32, transb: i32, m: i32, n: i32, k: i32, alpha: f32, a: *const f32, lda: i32, b: *const f32, ldb: i32, beta: f32, c: *mut f32, ldc: i32);\n");
+        s.push_str("}\n");
+        s.push_str("const CblasRowMajor: i32 = 101; const CblasNoTrans: i32 = 111; const CblasTrans: i32 = 112;\n\n");
+        s.push_str("fn sgemm(C: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize) {\n");
+        s.push_str("    unsafe { cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m as i32, n as i32, k as i32, 1.0f32, A, k as i32, B, n as i32, 0.0f32, C, n as i32); }\n");
+        s.push_str("}\n\n");
+        s.push_str("fn sgemm_tn(C: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize) {\n");
+        s.push_str("    unsafe { cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans, m as i32, n as i32, k as i32, 1.0f32, A, m as i32, B, n as i32, 0.0f32, C, n as i32); }\n");
+        s.push_str("}\n\n");
+        s.push_str("fn sgemm_nt(C: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize, b_cols: usize) {\n");
+        s.push_str("    unsafe { cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, m as i32, n as i32, k as i32, 1.0f32, A, k as i32, B, b_cols as i32, 0.0f32, C, n as i32); }\n");
+        s.push_str("}\n\n");
+    } else {
+        // SGD/Adagrad: gemm crate + Rayon — better for fused ops and parallel forward
+        s.push_str("fn par(m: usize, k: usize, n: usize) -> gemm::Parallelism {\n");
+        s.push_str("    let ops = 2*m*k*n;\n");
+        s.push_str("    if ops < (1<<20) { gemm::Parallelism::None }\n");
+        s.push_str("    else if ops < (1<<25) { gemm::Parallelism::Rayon(5) }\n");
+        s.push_str("    else { gemm::Parallelism::Rayon(0) }\n");
+        s.push_str("}\n\n");
+        s.push_str("fn sgemm(C: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize) {\n");
+        s.push_str("    unsafe { gemm::gemm(m,n,k, C,1isize,n as isize, false, A,1isize,k as isize, B,1isize,n as isize, 0f32,1f32, false,false,false, par(m,k,n)); }\n");
+        s.push_str("}\n\n");
+        s.push_str("fn sgemm_tn(C: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize) {\n");
+        s.push_str("    unsafe { gemm::gemm(m,n,k, C,1isize,n as isize, false, A,m as isize,1isize, B,1isize,n as isize, 0f32,1f32, false,false,false, par(m,k,n)); }\n");
+        s.push_str("}\n\n");
+        s.push_str("fn sgemm_nt(C: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize, b_cols: usize) {\n");
+        s.push_str("    unsafe { gemm::gemm(m,n,k, C,1isize,n as isize, false, A,1isize,k as isize, B,b_cols as isize,1isize, 0f32,1f32, false,false,false, par(m,k,n)); }\n");
+        s.push_str("}\n\n");
+        // Fused dW + SGD: W += -lr * A^T @ B  (beta=1, alpha=-lr, so W stays in place)
+        s.push_str("fn sgd_fused_tn(W: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize, lr: f32) {\n");
+        s.push_str("    unsafe { gemm::gemm(m,n,k, W,1isize,n as isize, true, A,m as isize,1isize, B,1isize,n as isize, 1f32,-lr, false,false,false, par(m,k,n)); }\n");
+        s.push_str("}\n\n");
+    }
     // Adam weight update: dw already computed, update m/v/w in-place with AVX2+Rayon
     // Threshold: parallelize when n >= 1<<17 (128K elements)
     s.push_str("use rayon::prelude::*;\n");
