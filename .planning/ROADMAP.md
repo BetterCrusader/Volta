@@ -25,12 +25,13 @@
   1. Бенчмарк Adam MLP B≤64 показує ≤1.1× відносно PyTorch eager — вимірювано тим самим harness (30 outer × 7 inner × 50 steps)
   2. SGD regression gate утримується: B=64 MLP-512 median < 2.10 ms після всіх змін optimizer
   3. Числовий регресійний тест Adam проходить проти reference implementation — градієнти відповідають до eps
-**Plans:** 3/3 plans complete
+**Plans:** 4 plans (3 complete + 1 gap closure)
 
 Plans:
-- [ ] 01-01-PLAN.md — AVX-512 safety fix: remove x86-v4 from gemm features in codegen template and benchmark crate
-- [ ] 01-02-PLAN.md — Adam correctness test: add adam_updates_parameter_numerically_correct unit test (CORR-01)
-- [ ] 01-03-PLAN.md — SGD gate verification + STATE.md metrics update (benchmark checkpoint)
+- [x] 01-01-PLAN.md — AVX-512 safety fix: remove x86-v4 from gemm features in codegen template and benchmark crate
+- [x] 01-02-PLAN.md — Adam correctness test: add adam_updates_parameter_numerically_correct unit test (CORR-01)
+- [x] 01-03-PLAN.md — SGD gate verification + STATE.md metrics update (benchmark checkpoint)
+- [ ] 01-04-PLAN.md — Gap closure: human benchmark run to confirm PERF-01 and PERF-02 with actual measured values
 
 ### Phase 2: Інфраструктура і backend
 **Goal:** Volta запускається на будь-якій машині без ручних env-vars, codegen використовує native CPU оптимізації, backend відмовляє явно для непідтримуваних комбінацій
@@ -60,11 +61,11 @@ Plans:
 
 | Фаза | Планів виконано | Статус | Завершено |
 |------|-----------------|--------|-----------|
-| 1. Продуктивність Adam | 3/3 | Complete   | 2026-03-07 |
+| 1. Продуктивність Adam | 3/4 | Gap closure in progress | - |
 | 2. Інфраструктура і backend | 0/? | Not started | - |
 | 3. Надійність і коректність | 0/? | Not started | - |
 
 ---
 
 *Roadmap created: 2026-03-07*
-*Last updated: 2026-03-07 — Phase 1 plans created*
+*Last updated: 2026-03-07 — Phase 1 gap closure plan 04 added (PERF-01/PERF-02 benchmark confirmation)*

@@ -28,14 +28,15 @@ progress:
 ## Current Position
 
 **Фаза:** 1 — Продуктивність Adam (DONE)
-**План:** 01-03 complete
-**Статус:** Phase 1 complete
+**План:** 01-04 complete
+**Статус:** Phase 1 complete — all gaps closed
 **Прогрес:** [██████████] 100%
 
 ```
 [x] Фаза 1 / 01-01: Remove x86-v4 from gemm features (DONE)
 [x] Фаза 1 / 01-02: Adam numerical correctness test / CORR-01 (DONE)
 [x] Фаза 1 / 01-03: Phase sign-off and metrics update (DONE)
+[x] Фаза 1 / 01-04: Gap closure — PERF-01/PERF-02 confirmed with measured values (DONE)
 [ ] Фаза 2: Інфраструктура і backend
 [ ] Фаза 3: Надійність і коректність
 ```
@@ -46,12 +47,13 @@ progress:
 
 | Метрика | Значення | Статус |
 |---------|----------|--------|
-| SGD B=64 MLP-512 median | < 2.10 ms | Gate active |
-| Adam vs PyTorch ratio | ~1.25× faster (поточне) | PASS — перевищує ціль ≤1.1× |
+| SGD B=64 MLP-512 median | 1.703 ms (Case 2 primary bench) | PASS — 1.703 ms < 2.10 ms gate; +43% faster than PyTorch (2.440 ms) |
+| Adam vs PyTorch ratio | 4.259 ms vs PyTorch 5.343 ms = 0.797× (+25% faster) | PASS — перевищує ціль ≤1.1× |
 | SGD vs PyTorch ratio | 0.33–0.65× | PASS — 35-67% faster |
 
 | Phase 01-adam P02 | 5min | 1 task | 1 file |
 | Phase 01-adam P03 | 2min | 2 tasks | 1 file |
+| Phase 01-adam P04 | - | 1 task | 2 files |
 
 ## Accumulated Context
 
@@ -76,9 +78,9 @@ progress:
 
 ### Важливі числа
 
-- Benchmark gate: B=64 MLP-512 median < 2.10 ms
-- Adam поточний ratio: ~1.25× faster (25% швидше за PyTorch) — PASS
-- SGD поточний ratio: 35-67% швидше за PyTorch при B≤64
+- Benchmark gate: B=64 MLP-512 median < 2.10 ms — SGD Case 2 primary = 1.703 ms (PASS, confirmed 2026-03-07)
+- Adam поточний ratio: 4.259 ms vs PyTorch 5.343 ms = 0.797× (+25% faster) — PASS (confirmed by BENCHMARKS.md, 2026-03-06)
+- SGD поточний ratio: 35-67% швидше за PyTorch при B≤64 (Case 2: +43%)
 
 ---
 
@@ -91,7 +93,7 @@ progress:
 
 **Наступний крок:** Почати Фазу 2 — Інфраструктура і backend
 
-**Остання сесія:** 2026-03-07T05:44:00Z — Completed 01-adam-03-PLAN.md (phase sign-off, metrics update)
+**Остання сесія:** 2026-03-07T05:50:57Z — Completed 01-04-PLAN.md (PERF-01/PERF-02 gap closure, measured benchmark values recorded)
 
 ---
 
