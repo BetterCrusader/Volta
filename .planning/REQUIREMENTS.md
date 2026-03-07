@@ -9,7 +9,7 @@
 
 - [x] **PERF-01**: Adam optimizer досягає паритету з PyTorch (≤1.1×) або перевищує на B≤64 MLP benchmarks
 - [x] **PERF-02**: SGD regression gate зберігається: B=64 MLP-512 median < 2.10 ms після будь-яких змін
-- [ ] **PERF-03**: `target-cpu=native` автоматично пропагується в `compile-train --rust` без ручного RUSTFLAGS
+- [x] **PERF-03**: `target-cpu=native` автоматично пропагується в `compile-train --rust` без ручного RUSTFLAGS
 
 ### Correctness
 
@@ -20,7 +20,7 @@
 ### Infrastructure
 
 - [x] **INFRA-01**: Hardcoded dev MKL path (`C:/Users/User/miniforge3/...`) прибрано — повертає Err з інструкцією встановити MKL_LIB_DIR
-- [ ] **INFRA-02**: `CARGO_MANIFEST_DIR` не embedded в shipped binary — gemm_shim.c шукається відносно `std::env::current_exe()`
+- [x] **INFRA-02**: `CARGO_MANIFEST_DIR` не embedded в shipped binary — gemm_shim.c шукається відносно `std::env::current_exe()`
 - [x] **INFRA-03**: Graph fingerprinting використовує SipHasher (стабільний між Rust versions) замість DefaultHasher
 
 ### Reliability
@@ -68,10 +68,10 @@
 | PERF-01 | Phase 1 | Complete |
 | PERF-02 | Phase 1 | Complete |
 | CORR-01 | Phase 1 | Complete |
-| PERF-03 | Phase 2 | Pending |
+| PERF-03 | Phase 2 | Complete |
 | CORR-02 | Phase 2 | Pending |
 | INFRA-01 | Phase 2 | Complete |
-| INFRA-02 | Phase 2 | Pending |
+| INFRA-02 | Phase 2 | Complete |
 | INFRA-03 | Phase 2 | Complete |
 | CORR-03 | Phase 3 | Pending |
 | RELY-01 | Phase 3 | Pending |
