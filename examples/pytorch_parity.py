@@ -479,6 +479,134 @@ def transformer_train_loop_adamw_case():
     return transformer_train_loop_case("adamw")
 
 
+def transformer_train_loop_sgd_accum2_case():
+    dataset = transformer_training_dataset()
+    params = list(transformer_training_parameters())
+    (
+        w_q,
+        w_k,
+        w_v,
+        w_o,
+        b_q,
+        b_k,
+        b_v,
+        b_o,
+        ln1_w,
+        ln1_b,
+        ffn_w1,
+        ffn_b1,
+        ffn_w2,
+        ffn_b2,
+        ln2_w,
+        ln2_b,
+    ) = params
+
+    optimizer = torch.optim.SGD(params, lr=0.01)
+    epochs = 2
+    accum_steps = 2
+
+    for _ in range(epochs):
+        optimizer.zero_grad(set_to_none=True)
+        pending_steps = 0
+        for x, target in dataset:
+            out = transformer_forward(
+                x, w_q, w_k, w_v, w_o, b_q, b_k, b_v, b_o,
+                ln1_w, ln1_b, ffn_w1, ffn_b1, ffn_w2, ffn_b2, ln2_w, ln2_b,
+            )
+            diff = out - target
+            loss = torch.mean(diff * diff)
+            loss.backward()
+            pending_steps += 1
+            if pending_steps < accum_steps:
+                continue
+            if pending_steps > 1:
+                for param in params:
+                    if param.grad is not None:
+                        param.grad.div_(pending_steps)
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+            pending_steps = 0
+
+    last_x, last_target = dataset[-1]
+    out = transformer_forward(
+        last_x, w_q, w_k, w_v, w_o, b_q, b_k, b_v, b_o,
+        ln1_w, ln1_b, ffn_w1, ffn_b1, ffn_w2, ffn_b2, ln2_w, ln2_b,
+    )
+    diff = out - last_target
+    final_loss = torch.mean(diff * diff)
+
+    return {
+        "final_loss": float(final_loss.detach().item()),
+        "final_parameters": {
+            "w_q": w_q.detach().reshape(-1).tolist(),
+            "b_q": b_q.detach().reshape(-1).tolist(),
+            "w_o": w_o.detach().reshape(-1).tolist(),
+            "ln1_w": ln1_w.detach().reshape(-1).tolist(),
+            "ffn_w1": ffn_w1.detach().reshape(-1).tolist(),
+            "ln2_w": ln2_w.detach().reshape(-1).tolist(),
+        },
+    }
+
+
+def transformer_train_loop_sgd_clip_grad_case():
+    dataset = transformer_training_dataset()
+    params = list(transformer_training_parameters())
+    (
+        w_q,
+        w_k,
+        w_v,
+        w_o,
+        b_q,
+        b_k,
+        b_v,
+        b_o,
+        ln1_w,
+        ln1_b,
+        ffn_w1,
+        ffn_b1,
+        ffn_w2,
+        ffn_b2,
+        ln2_w,
+        ln2_b,
+    ) = params
+
+    optimizer = torch.optim.SGD(params, lr=0.01)
+    epochs = 2
+
+    for _ in range(epochs):
+        for x, target in dataset:
+            optimizer.zero_grad(set_to_none=True)
+            out = transformer_forward(
+                x, w_q, w_k, w_v, w_o, b_q, b_k, b_v, b_o,
+                ln1_w, ln1_b, ffn_w1, ffn_b1, ffn_w2, ffn_b2, ln2_w, ln2_b,
+            )
+            diff = out - target
+            loss = torch.mean(diff * diff)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(params, 0.1)
+            optimizer.step()
+
+    last_x, last_target = dataset[-1]
+    out = transformer_forward(
+        last_x, w_q, w_k, w_v, w_o, b_q, b_k, b_v, b_o,
+        ln1_w, ln1_b, ffn_w1, ffn_b1, ffn_w2, ffn_b2, ln2_w, ln2_b,
+    )
+    diff = out - last_target
+    final_loss = torch.mean(diff * diff)
+
+    return {
+        "final_loss": float(final_loss.detach().item()),
+        "final_parameters": {
+            "w_q": w_q.detach().reshape(-1).tolist(),
+            "b_q": b_q.detach().reshape(-1).tolist(),
+            "w_o": w_o.detach().reshape(-1).tolist(),
+            "ln1_w": ln1_w.detach().reshape(-1).tolist(),
+            "ffn_w1": ffn_w1.detach().reshape(-1).tolist(),
+            "ln2_w": ln2_w.detach().reshape(-1).tolist(),
+        },
+    }
+
+
 def mlp_train_sgd_case():
     x = torch.tensor(
         [[0.2, -0.1, 0.3], [0.7, 0.5, -0.4]],
@@ -601,6 +729,24 @@ def mlp_train_loop_case(optimizer_kind, accum_steps=1, clip_grad=None):
             weight_decay=0.01,
         )
         epochs = 3
+    elif optimizer_kind == "rmsprop":
+        optimizer = torch.optim.RMSprop(
+            params,
+            lr=0.01,
+            alpha=0.99,
+            eps=1e-8,
+            weight_decay=0.0,
+            momentum=0.0,
+        )
+        epochs = 3
+    elif optimizer_kind == "adagrad":
+        optimizer = torch.optim.Adagrad(
+            params,
+            lr=0.1,
+            eps=1e-8,
+            weight_decay=0.0,
+        )
+        epochs = 3
     else:
         raise ValueError(f"unknown optimizer kind: {optimizer_kind}")
 
@@ -667,6 +813,14 @@ def mlp_train_loop_adam_case():
 
 def mlp_train_loop_adamw_case():
     return mlp_train_loop_case("adamw")
+
+
+def mlp_train_loop_rmsprop_case():
+    return mlp_train_loop_case("rmsprop")
+
+
+def mlp_train_loop_adagrad_case():
+    return mlp_train_loop_case("adagrad")
 
 
 def mlp_train_loop_sgd_accum2_case():
@@ -881,6 +1035,10 @@ def main():
         result = transformer_train_loop_adam_case()
     elif case == "transformer_train_loop_adamw":
         result = transformer_train_loop_adamw_case()
+    elif case == "transformer_train_loop_sgd_accum2":
+        result = transformer_train_loop_sgd_accum2_case()
+    elif case == "transformer_train_loop_sgd_clip_grad":
+        result = transformer_train_loop_sgd_clip_grad_case()
     elif case == "mlp_train_sgd":
         result = mlp_train_sgd_case()
     elif case == "mlp_train_loop_sgd":
@@ -889,6 +1047,10 @@ def main():
         result = mlp_train_loop_adam_case()
     elif case == "mlp_train_loop_adamw":
         result = mlp_train_loop_adamw_case()
+    elif case == "mlp_train_loop_rmsprop":
+        result = mlp_train_loop_rmsprop_case()
+    elif case == "mlp_train_loop_adagrad":
+        result = mlp_train_loop_adagrad_case()
     elif case == "mlp_train_loop_sgd_accum2":
         result = mlp_train_loop_sgd_accum2_case()
     elif case == "mlp_train_loop_sgd_clip_grad":

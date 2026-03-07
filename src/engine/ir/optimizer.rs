@@ -513,7 +513,7 @@ fn apply_adagrad(
         {
             let gwd = *g + weight_decay * *p;
             *acc_i += gwd * gwd;
-            *p -= lr * gwd / (*acc_i + epsilon).sqrt();
+            *p -= lr * gwd / (acc_i.sqrt() + epsilon);
         }
     }
     Ok(())

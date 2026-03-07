@@ -1632,6 +1632,50 @@ fn pytorch_parity_transformer_multi_step_adamw_train_graph() {
 }
 
 #[test]
+fn pytorch_parity_transformer_multi_step_sgd_accum2_train_graph() {
+    let Some(expected) = run_pytorch_case("transformer_train_loop_sgd_accum2") else {
+        return;
+    };
+
+    let (graph, loss) = build_transformer_training_graph();
+    let initial_parameters = transformer_training_initial_parameters();
+    let dataset = transformer_training_dataset();
+    let mut config = TrainConfig::new(2, OptimizerConfig::Sgd { lr: 0.01 });
+    config.gradient_accumulation_steps = 2;
+
+    let result = train_graph(&graph, loss, initial_parameters, &dataset, &[], &config)
+        .expect("transformer accumulation training should succeed");
+
+    assert_transformer_training_result_matches_pytorch(
+        &result,
+        &expected,
+        "transformer_train_loop_sgd_accum2",
+    );
+}
+
+#[test]
+fn pytorch_parity_transformer_multi_step_sgd_clip_grad_train_graph() {
+    let Some(expected) = run_pytorch_case("transformer_train_loop_sgd_clip_grad") else {
+        return;
+    };
+
+    let (graph, loss) = build_transformer_training_graph();
+    let initial_parameters = transformer_training_initial_parameters();
+    let dataset = transformer_training_dataset();
+    let mut config = TrainConfig::new(2, OptimizerConfig::Sgd { lr: 0.01 });
+    config.clip_grad = Some(0.1);
+
+    let result = train_graph(&graph, loss, initial_parameters, &dataset, &[], &config)
+        .expect("transformer clip-grad training should succeed");
+
+    assert_transformer_training_result_matches_pytorch(
+        &result,
+        &expected,
+        "transformer_train_loop_sgd_clip_grad",
+    );
+}
+
+#[test]
 fn pytorch_parity_mlp_single_sgd_step() {
     let Some(expected) = run_pytorch_case("mlp_train_sgd") else {
         return;
@@ -1915,6 +1959,68 @@ fn pytorch_parity_mlp_multi_step_adamw_train_graph() {
     .expect("adamw multi-step training should succeed");
 
     assert_mlp_training_result_matches_pytorch(&result, &expected, "mlp_train_loop_adamw");
+}
+
+#[test]
+fn pytorch_parity_mlp_multi_step_rmsprop_train_graph() {
+    let Some(expected) = run_pytorch_case("mlp_train_loop_rmsprop") else {
+        return;
+    };
+
+    let (graph, loss) = build_mlp_training_graph();
+    let initial_parameters = mlp_training_initial_parameters();
+    let dataset = mlp_training_dataset();
+
+    let result = train_graph(
+        &graph,
+        loss,
+        initial_parameters,
+        &dataset,
+        &[],
+        &TrainConfig::new(
+            3,
+            OptimizerConfig::RmsProp {
+                lr: 0.01,
+                alpha: 0.99,
+                epsilon: 1e-8,
+                weight_decay: 0.0,
+                momentum: 0.0,
+            },
+        ),
+    )
+    .expect("rmsprop multi-step training should succeed");
+
+    assert_mlp_training_result_matches_pytorch(&result, &expected, "mlp_train_loop_rmsprop");
+}
+
+#[test]
+fn pytorch_parity_mlp_multi_step_adagrad_train_graph() {
+    let Some(expected) = run_pytorch_case("mlp_train_loop_adagrad") else {
+        return;
+    };
+
+    let (graph, loss) = build_mlp_training_graph();
+    let initial_parameters = mlp_training_initial_parameters();
+    let dataset = mlp_training_dataset();
+
+    let result = train_graph(
+        &graph,
+        loss,
+        initial_parameters,
+        &dataset,
+        &[],
+        &TrainConfig::new(
+            3,
+            OptimizerConfig::Adagrad {
+                lr: 0.1,
+                epsilon: 1e-8,
+                weight_decay: 0.0,
+            },
+        ),
+    )
+    .expect("adagrad multi-step training should succeed");
+
+    assert_mlp_training_result_matches_pytorch(&result, &expected, "mlp_train_loop_adagrad");
 }
 
 #[test]
