@@ -43,7 +43,12 @@ Plans:
   3. Shipped binary `volta compile-train` не містить `C:/Users/User/...` шляху — `gemm_shim.c` знаходиться відносно `current_exe()`
   4. Graph fingerprint стабільний між Rust compiler versions — один і той же граф дає один і той же hash при різних `rustc`
   5. `CpuBackend::capabilities()` повертає явну матрицю; спроба Adam на unsupported backend повертає `Err` замість silent fallback
-**Plans:** TBD
+**Plans:** 3 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — SipHasher swap (fingerprint.rs + backend.rs) + MKL error handling (resolve_mkl_lib_path → Result)
+- [ ] 02-02-PLAN.md — gemm_shim.c portability (include_bytes! replaces CARGO_MANIFEST_DIR at both sites) + merged_rustflags tests
+- [ ] 02-03-PLAN.md — BackendCapabilities: add supports_adam field + validate_optimizer() method
 
 ### Phase 3: Надійність і коректність
 **Goal:** Transformer архітектури навчаються коректно, аварійні виходи в бібліотечному коді замінені на Result
@@ -62,10 +67,10 @@ Plans:
 | Фаза | Планів виконано | Статус | Завершено |
 |------|-----------------|--------|-----------|
 | 1. Продуктивність Adam | 4/4 | Complete   | 2026-03-07 |
-| 2. Інфраструктура і backend | 0/? | Not started | - |
+| 2. Інфраструктура і backend | 0/3 | Not started | - |
 | 3. Надійність і коректність | 0/? | Not started | - |
 
 ---
 
 *Roadmap created: 2026-03-07*
-*Last updated: 2026-03-07 — Phase 1 gap closure plan 04 added (PERF-01/PERF-02 benchmark confirmation)*
+*Last updated: 2026-03-07 — Phase 2 plans created (02-01 through 02-03)*
