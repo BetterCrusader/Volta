@@ -1365,6 +1365,7 @@ fn evaluate_op(
             bias_q,
             bias_k,
             bias_v,
+            bias_o: _,
             attn_weights,
             context,
             upstream,
@@ -1643,6 +1644,25 @@ fn evaluate_op(
             let d_w_v =
                 Tensor::new(vec![d_model, d_model], dwv_data).map_err(|e| err(e.message))?;
 
+            let sum_bias_grad = |grad: &Tensor, seq: usize| -> Result<Tensor, InterpreterError> {
+                let gc = grad.make_contiguous().map_err(|e| err(e.message))?;
+                let mut out = vec![0.0_f32; d_model];
+                for b in 0..batch {
+                    for s in 0..seq {
+                        let base = (b * seq + s) * d_model;
+                        for d in 0..d_model {
+                            out[d] += gc.data[base + d];
+                        }
+                    }
+                }
+                Tensor::new(vec![d_model], out).map_err(|e| err(e.message))
+            };
+
+            let d_b_q = sum_bias_grad(&dq_proj, seq_q)?;
+            let d_b_k = sum_bias_grad(&dk_proj, seq_k)?;
+            let d_b_v = sum_bias_grad(&dv_proj, seq_k)?;
+            let d_b_o = sum_bias_grad(&up_c, seq_q)?;
+
             let result = match output_idx {
                 0 => dq_input,
                 1 => dk_input,
@@ -1651,6 +1671,10 @@ fn evaluate_op(
                 4 => d_w_k,
                 5 => d_w_v,
                 6 => d_w_o,
+                7 => d_b_q,
+                8 => d_b_k,
+                9 => d_b_v,
+                10 => d_b_o,
                 _ => {
                     return Err(err(
                         "MultiHeadAttentionBackward: invalid output_idx".to_string()

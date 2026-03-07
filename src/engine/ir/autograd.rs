@@ -748,6 +748,7 @@ pub fn build_reverse_graph(
                 bias_q,
                 bias_k,
                 bias_v,
+                bias_o,
                 num_heads,
                 output_idx,
                 ..
@@ -774,8 +775,13 @@ pub fn build_reverse_graph(
                 let aw_m = mapped(&forward_to_backward, attn_weights_output)?;
                 let ctx_m = mapped(&forward_to_backward, context_output)?;
 
-                // Emit 7 MultiHeadAttentionBackward nodes, one per gradient target.
-                for grad_output_idx in 0..7_usize {
+                let bq_m = mapped(&forward_to_backward, *bias_q)?;
+                let bk_m = mapped(&forward_to_backward, *bias_k)?;
+                let bv_m = mapped(&forward_to_backward, *bias_v)?;
+                let bo_m = mapped(&forward_to_backward, *bias_o)?;
+
+                // Emit MHA backward nodes for inputs, weights, and all four biases.
+                for grad_output_idx in 0..11_usize {
                     let (_, grad_value) = backward
                         .add_op(
                             block,
@@ -787,9 +793,10 @@ pub fn build_reverse_graph(
                                 w_k: wk_m,
                                 w_v: wv_m,
                                 w_o: wo_m,
-                                bias_q: mapped(&forward_to_backward, *bias_q)?,
-                                bias_k: mapped(&forward_to_backward, *bias_k)?,
-                                bias_v: mapped(&forward_to_backward, *bias_v)?,
+                                bias_q: bq_m,
+                                bias_k: bk_m,
+                                bias_v: bv_m,
+                                bias_o: bo_m,
                                 attn_weights: aw_m,
                                 context: ctx_m,
                                 upstream,
@@ -810,6 +817,10 @@ pub fn build_reverse_graph(
                         4 => wk_m,
                         5 => wv_m,
                         6 => wo_m,
+                        7 => bq_m,
+                        8 => bk_m,
+                        9 => bv_m,
+                        10 => bo_m,
                         _ => unreachable!(),
                     };
                     accumulate_grad(&mut backward, block, &mut grad_map, target, grad_value)?;

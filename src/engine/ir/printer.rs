@@ -674,16 +674,18 @@ fn format_op(op: &Op) -> String {
             bias_q,
             bias_k,
             bias_v,
+            bias_o,
             num_heads,
             output_idx,
             ..
         } => {
             format!(
-                "mha_bwd q={} bq={} bk={} bv={} heads={} out={}",
+                "mha_bwd q={} bq={} bk={} bv={} bo={} heads={} out={}",
                 fmt_value(q_input),
                 fmt_value(bias_q),
                 fmt_value(bias_k),
                 fmt_value(bias_v),
+                fmt_value(bias_o),
                 num_heads,
                 output_idx
             )

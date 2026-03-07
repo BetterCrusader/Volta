@@ -651,8 +651,15 @@ fn pytorch_parity_mha_forward_and_gradients() {
         1e-4,
     );
 
-    let grad_graph = build_reverse_graph(&graph, loss, &[q, v, w_q, w_o]).unwrap();
-    for (name, value_id) in [("q", q), ("v", v), ("w_q", w_q), ("w_o", w_o)] {
+    let grad_graph = build_reverse_graph(&graph, loss, &[q, v, b_q, b_o, w_q, w_o]).unwrap();
+    for (name, value_id) in [
+        ("q", q),
+        ("v", v),
+        ("b_q", b_q),
+        ("b_o", b_o),
+        ("w_q", w_q),
+        ("w_o", w_o),
+    ] {
         let gradient = *grad_graph.gradients.get(&value_id).unwrap();
         let actual = tensor_data(
             execute_value_with_context(&grad_graph.backward, gradient, &context).unwrap(),
@@ -822,8 +829,14 @@ fn pytorch_parity_mha_self_attention_forward_and_gradients() {
         1e-4,
     );
 
-    let grad_graph = build_reverse_graph(&graph, loss, &[x, w_q, w_o]).unwrap();
-    for (name, value_id) in [("x", x), ("w_q", w_q), ("w_o", w_o)] {
+    let grad_graph = build_reverse_graph(&graph, loss, &[x, b_q, b_o, w_q, w_o]).unwrap();
+    for (name, value_id) in [
+        ("x", x),
+        ("b_q", b_q),
+        ("b_o", b_o),
+        ("w_q", w_q),
+        ("w_o", w_o),
+    ] {
         let gradient = *grad_graph.gradients.get(&value_id).unwrap();
         let actual = tensor_data(
             execute_value_with_context(&grad_graph.backward, gradient, &context).unwrap(),
@@ -1073,6 +1086,299 @@ fn pytorch_parity_transformer_block_forward_and_gradients() {
             &actual,
             &json_f32_array(&expected["gradients"], name),
             2e-4,
+        );
+    }
+}
+
+#[test]
+fn pytorch_parity_transformer_multi_step_sgd_train_graph() {
+    let Some(expected) = run_pytorch_case("transformer_train_loop_sgd") else {
+        return;
+    };
+
+    let mut graph = Graph::new();
+    let block = graph.create_block();
+
+    let (_, x) = graph.add_op(block, Op::Input("x".to_string())).unwrap();
+    let (_, target) = graph
+        .add_op(block, Op::Input("target".to_string()))
+        .unwrap();
+    let (_, w_q) = graph
+        .add_op(block, Op::Parameter("w_q".to_string()))
+        .unwrap();
+    let (_, w_k) = graph
+        .add_op(block, Op::Parameter("w_k".to_string()))
+        .unwrap();
+    let (_, w_v) = graph
+        .add_op(block, Op::Parameter("w_v".to_string()))
+        .unwrap();
+    let (_, w_o) = graph
+        .add_op(block, Op::Parameter("w_o".to_string()))
+        .unwrap();
+    let (_, b_q) = graph
+        .add_op(block, Op::Parameter("b_q".to_string()))
+        .unwrap();
+    let (_, b_k) = graph
+        .add_op(block, Op::Parameter("b_k".to_string()))
+        .unwrap();
+    let (_, b_v) = graph
+        .add_op(block, Op::Parameter("b_v".to_string()))
+        .unwrap();
+    let (_, b_o) = graph
+        .add_op(block, Op::Parameter("b_o".to_string()))
+        .unwrap();
+    let (_, ln1_w) = graph
+        .add_op(block, Op::Parameter("ln1_w".to_string()))
+        .unwrap();
+    let (_, ln1_b) = graph
+        .add_op(block, Op::Parameter("ln1_b".to_string()))
+        .unwrap();
+    let (_, ffn_w1) = graph
+        .add_op(block, Op::Parameter("ffn_w1".to_string()))
+        .unwrap();
+    let (_, ffn_b1) = graph
+        .add_op(block, Op::Parameter("ffn_b1".to_string()))
+        .unwrap();
+    let (_, ffn_w2) = graph
+        .add_op(block, Op::Parameter("ffn_w2".to_string()))
+        .unwrap();
+    let (_, ffn_b2) = graph
+        .add_op(block, Op::Parameter("ffn_b2".to_string()))
+        .unwrap();
+    let (_, ln2_w) = graph
+        .add_op(block, Op::Parameter("ln2_w".to_string()))
+        .unwrap();
+    let (_, ln2_b) = graph
+        .add_op(block, Op::Parameter("ln2_b".to_string()))
+        .unwrap();
+
+    let config = TransformerConfig {
+        d_model: 4,
+        num_heads: 2,
+        ffn_dim: 6,
+        dropout: 0.0,
+        causal: false,
+        epsilon: 1e-5,
+    };
+
+    let out = add_transformer_encoder_block(
+        &mut graph, block, x, w_q, w_k, w_v, w_o, b_q, b_k, b_v, b_o, ln1_w, ln1_b, ffn_w1, ffn_b1,
+        ffn_w2, ffn_b2, ln2_w, ln2_b, &config,
+    )
+    .unwrap();
+    let (_, diff) = graph.add_op(block, Op::Sub(out, target)).unwrap();
+    let (_, sq) = graph.add_op(block, Op::Mul(diff, diff)).unwrap();
+    let (_, loss) = graph
+        .add_op(
+            block,
+            Op::ReduceMean {
+                input: sq,
+                axis: None,
+                keepdims: false,
+            },
+        )
+        .unwrap();
+
+    graph.bind_input_shape("x", vec![1, 2, 4]);
+    graph.bind_input_shape("target", vec![2, 4]);
+    graph.bind_parameter_shape("w_q", vec![4, 4]);
+    graph.bind_parameter_shape("w_k", vec![4, 4]);
+    graph.bind_parameter_shape("w_v", vec![4, 4]);
+    graph.bind_parameter_shape("w_o", vec![4, 4]);
+    graph.bind_parameter_shape("b_q", vec![4]);
+    graph.bind_parameter_shape("b_k", vec![4]);
+    graph.bind_parameter_shape("b_v", vec![4]);
+    graph.bind_parameter_shape("b_o", vec![4]);
+    graph.bind_parameter_shape("ln1_w", vec![4]);
+    graph.bind_parameter_shape("ln1_b", vec![4]);
+    graph.bind_parameter_shape("ffn_w1", vec![4, 6]);
+    graph.bind_parameter_shape("ffn_b1", vec![6]);
+    graph.bind_parameter_shape("ffn_w2", vec![6, 4]);
+    graph.bind_parameter_shape("ffn_b2", vec![4]);
+    graph.bind_parameter_shape("ln2_w", vec![4]);
+    graph.bind_parameter_shape("ln2_b", vec![4]);
+
+    let initial_parameters = HashMap::from([
+        (
+            "w_q".to_string(),
+            Tensor::new(
+                vec![4, 4],
+                vec![
+                    0.2, -0.1, 0.3, 0.4, -0.5, 0.6, 0.1, -0.2, 0.7, 0.2, -0.3, 0.5, 0.4, -0.6, 0.8,
+                    0.1,
+                ],
+            )
+            .unwrap(),
+        ),
+        (
+            "w_k".to_string(),
+            Tensor::new(
+                vec![4, 4],
+                vec![
+                    0.1, 0.2, -0.4, 0.3, 0.5, -0.7, 0.6, 0.2, -0.3, 0.8, 0.4, -0.1, 0.2, 0.1, 0.5,
+                    -0.6,
+                ],
+            )
+            .unwrap(),
+        ),
+        (
+            "w_v".to_string(),
+            Tensor::new(
+                vec![4, 4],
+                vec![
+                    0.3, -0.2, 0.1, 0.7, 0.6, 0.4, -0.5, 0.2, 0.2, -0.8, 0.9, 0.1, -0.4, 0.3, 0.2,
+                    0.5,
+                ],
+            )
+            .unwrap(),
+        ),
+        (
+            "w_o".to_string(),
+            Tensor::new(
+                vec![4, 4],
+                vec![
+                    0.4, -0.3, 0.2, 0.1, 0.5, 0.6, -0.7, 0.2, -0.1, 0.8, 0.3, -0.4, 0.7, -0.2, 0.5,
+                    0.6,
+                ],
+            )
+            .unwrap(),
+        ),
+        (
+            "b_q".to_string(),
+            Tensor::new(vec![4], vec![0.05, -0.1, 0.15, -0.2]).unwrap(),
+        ),
+        (
+            "b_k".to_string(),
+            Tensor::new(vec![4], vec![-0.05, 0.2, -0.15, 0.1]).unwrap(),
+        ),
+        (
+            "b_v".to_string(),
+            Tensor::new(vec![4], vec![0.1, 0.05, -0.2, 0.25]).unwrap(),
+        ),
+        (
+            "b_o".to_string(),
+            Tensor::new(vec![4], vec![-0.1, 0.15, 0.05, -0.05]).unwrap(),
+        ),
+        (
+            "ln1_w".to_string(),
+            Tensor::new(vec![4], vec![1.0, 0.9, 1.1, -0.8]).unwrap(),
+        ),
+        (
+            "ln1_b".to_string(),
+            Tensor::new(vec![4], vec![0.05, -0.1, 0.15, 0.2]).unwrap(),
+        ),
+        (
+            "ffn_w1".to_string(),
+            Tensor::new(
+                vec![4, 6],
+                vec![
+                    0.2, -0.3, 0.1, 0.5, 0.4, -0.2, 0.6, 0.7, -0.5, 0.2, -0.1, 0.3, -0.4, 0.8, 0.9,
+                    -0.6, 0.2, 0.1, 0.3, -0.7, 0.4, 0.5, -0.8, 0.6,
+                ],
+            )
+            .unwrap(),
+        ),
+        (
+            "ffn_b1".to_string(),
+            Tensor::new(vec![6], vec![0.1, -0.2, 0.05, 0.15, -0.1, 0.2]).unwrap(),
+        ),
+        (
+            "ffn_w2".to_string(),
+            Tensor::new(
+                vec![6, 4],
+                vec![
+                    0.3, -0.4, 0.2, 0.1, 0.5, 0.6, -0.7, 0.2, -0.1, 0.8, 0.3, -0.4, 0.7, -0.2, 0.5,
+                    0.6, 0.4, 0.1, -0.3, 0.2, -0.5, 0.9, 0.6, -0.7,
+                ],
+            )
+            .unwrap(),
+        ),
+        (
+            "ffn_b2".to_string(),
+            Tensor::new(vec![4], vec![0.2, -0.15, 0.05, 0.1]).unwrap(),
+        ),
+        (
+            "ln2_w".to_string(),
+            Tensor::new(vec![4], vec![0.95, -1.05, 0.85, 1.1]).unwrap(),
+        ),
+        (
+            "ln2_b".to_string(),
+            Tensor::new(vec![4], vec![-0.05, 0.1, -0.15, 0.2]).unwrap(),
+        ),
+    ]);
+
+    let dataset = vec![
+        TrainSample {
+            inputs: HashMap::from([
+                (
+                    "x".to_string(),
+                    Tensor::new(
+                        vec![1, 2, 4],
+                        vec![0.2, -0.1, 0.3, 0.4, 0.7, 0.5, -0.4, 0.1],
+                    )
+                    .unwrap(),
+                ),
+                (
+                    "target".to_string(),
+                    Tensor::new(vec![2, 4], vec![0.05, -0.1, 0.2, 0.3, 0.4, -0.2, 0.1, 0.5])
+                        .unwrap(),
+                ),
+            ]),
+        },
+        TrainSample {
+            inputs: HashMap::from([
+                (
+                    "x".to_string(),
+                    Tensor::new(
+                        vec![1, 2, 4],
+                        vec![0.4, 0.2, -0.5, 0.6, -0.3, 0.8, 0.1, -0.7],
+                    )
+                    .unwrap(),
+                ),
+                (
+                    "target".to_string(),
+                    Tensor::new(
+                        vec![2, 4],
+                        vec![0.15, 0.05, -0.2, 0.25, -0.1, 0.3, 0.6, -0.4],
+                    )
+                    .unwrap(),
+                ),
+            ]),
+        },
+    ];
+
+    let result = train_graph(
+        &graph,
+        loss,
+        initial_parameters,
+        &dataset,
+        &[],
+        &TrainConfig::new(2, OptimizerConfig::Sgd { lr: 0.01 }),
+    )
+    .expect("transformer training should succeed");
+
+    assert!(
+        (result.final_loss - scalar_f32(&expected, "final_loss")).abs() <= 1e-5,
+        "transformer final_loss mismatch: actual={}, expected={}",
+        result.final_loss,
+        scalar_f32(&expected, "final_loss")
+    );
+
+    for name in ["w_q", "b_q", "w_o", "ln1_w", "ffn_w1", "ln2_w"] {
+        let actual = result
+            .final_parameters
+            .get(name)
+            .unwrap_or_else(|| panic!("missing final parameter '{name}'"))
+            .make_contiguous()
+            .expect("contiguous final parameter")
+            .data
+            .to_vec();
+        let expected_values = json_f32_array(&expected["final_parameters"], name);
+        assert_close(
+            &format!("transformer_train_loop.param.{name}"),
+            &actual,
+            &expected_values,
+            1e-5,
         );
     }
 }

@@ -348,7 +348,8 @@ pub enum Op {
         output_idx: usize,
     },
     /// MHA backward — output_idx selects which gradient to compute:
-    /// 0=dq_input, 1=dk_input, 2=dv_input, 3=dw_q, 4=dw_k, 5=dw_v, 6=dw_o
+    /// 0=dq_input, 1=dk_input, 2=dv_input, 3=dw_q, 4=dw_k, 5=dw_v, 6=dw_o,
+    /// 7=db_q, 8=db_k, 9=db_v, 10=db_o
     MultiHeadAttentionBackward {
         q_input: ValueId,
         k_input: ValueId,
@@ -360,6 +361,7 @@ pub enum Op {
         bias_q: ValueId,
         bias_k: ValueId,
         bias_v: ValueId,
+        bias_o: ValueId,
         attn_weights: ValueId, // saved from forward (output_idx=1 node)
         context: ValueId,      // saved from forward (output_idx=5 node)
         upstream: ValueId,     // upstream gradient (d_loss/d_output)
@@ -667,6 +669,7 @@ impl Op {
                 bias_q,
                 bias_k,
                 bias_v,
+                bias_o,
                 attn_weights,
                 context,
                 upstream,
@@ -683,6 +686,7 @@ impl Op {
                     *bias_q,
                     *bias_k,
                     *bias_v,
+                    *bias_o,
                     *attn_weights,
                     *context,
                     *upstream,
@@ -1050,6 +1054,7 @@ impl Op {
                 bias_q,
                 bias_k,
                 bias_v,
+                bias_o,
                 attn_weights,
                 context,
                 upstream,
@@ -1065,6 +1070,7 @@ impl Op {
                 *bias_q = remap(*bias_q);
                 *bias_k = remap(*bias_k);
                 *bias_v = remap(*bias_v);
+                *bias_o = remap(*bias_o);
                 *attn_weights = remap(*attn_weights);
                 *context = remap(*context);
                 *upstream = remap(*upstream);
