@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: complete
-last_updated: "2026-03-07T05:44:00Z"
+last_updated: "2026-03-07T05:55:36.911Z"
 progress:
   total_phases: 3
   completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
+  total_plans: 4
+  completed_plans: 4
   percent: 100
 ---
 
@@ -68,6 +68,8 @@ progress:
 | gemm features = ["rayon"] без x86-v4 | AVX-512 обирається автоматично через RUSTFLAGS target-cpu=native — явна фіча небезпечна (SIGILL) |
 | Adam correctness test: 1e-5 tolerance | f32 arithmetic rounding; 1e-6 too tight, 1e-3 too loose — 1e-5 correct for CORR-01 |
 | CORR-01: test-only, no code change | apply_adam implementation already correct; test formalizes guarantee |
+| PERF-02 gate context: 1.703 ms (Case 2 primary) not 2.237 ms (Adam-session SGD) | Two SGD figures in BENCHMARKS.md measure different thermal/cache states; gate applies only to cold primary bench |
+| PERF-01 Adam: discard 2026-03-07 run without MKL (2.464 ms) | Adam codegen requires MKL at runtime; run without MKL does not exercise the optimized path — BENCHMARKS.md 2026-03-06 data (0.797x) is the valid measurement |
 
 ### Відомі блокери
 
