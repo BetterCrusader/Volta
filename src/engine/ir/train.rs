@@ -742,11 +742,12 @@ fn set_optimizer_lr(config: OptimizerConfig, new_lr: f32) -> OptimizerConfig {
 mod tests {
     use std::collections::HashMap;
 
+    use crate::ir::optimizer::LrSchedule;
     use crate::ir::{
         Backend, BackendCapabilities, BackendError, BackendKind, BackendMaturity, BackendVendor,
-        CompiledProgram, DeterminismLevel, DeviceClass, ExecutionContext, ExecutionPlan, Graph,
-        NodeId, Op, OptimizerConfig, Tensor, TrainConfig, TrainSample, ValueId, train_graph,
-        train_graph_with_backend,
+        CompiledProgram, DeterminismLevel, DeviceClass, EarlyStoppingConfig, ExecutionContext,
+        ExecutionPlan, Graph, NodeId, Op, OptimizerConfig, Tensor, TrainConfig, TrainResult,
+        TrainSample, ValueId, train_graph, train_graph_with_backend,
     };
 
     #[test]
@@ -900,6 +901,55 @@ mod tests {
         assert!(err.message.contains("Training"));
     }
 
+    #[test]
+    fn lr_schedule_step_decay_changes_training_updates() {
+        let (graph, loss) = build_linear_mse_graph();
+        let mut params = HashMap::new();
+        params.insert(
+            "w".to_string(),
+            Tensor::new(vec![1, 1], vec![1.0]).expect("valid tensor"),
+        );
+        let dataset = vec![sample(1.0, 0.0)];
+
+        let mut config = TrainConfig::new(2, OptimizerConfig::Sgd { lr: 0.1 });
+        config.lr_schedule = Some(LrSchedule::Step {
+            step_size: 1,
+            gamma: 0.5,
+        });
+
+        let result = train_graph(&graph, loss, params, &dataset, &[], &config)
+            .expect("training with step lr schedule should succeed");
+
+        assert!((weight_scalar(&result, "w") - 0.72).abs() < 1e-6);
+        assert!((result.final_loss - 0.5184).abs() < 1e-6);
+    }
+
+    #[test]
+    fn early_stopping_restores_best_weights() {
+        let (graph, loss) = build_linear_mse_graph();
+        let mut params = HashMap::new();
+        params.insert(
+            "w".to_string(),
+            Tensor::new(vec![1, 1], vec![0.0]).expect("valid tensor"),
+        );
+        let dataset = vec![sample(1.0, 1.0)];
+        let val_dataset = vec![sample(1.0, 1.0)];
+
+        let mut config = TrainConfig::new(5, OptimizerConfig::Sgd { lr: 1.0 });
+        config.early_stopping = Some(EarlyStoppingConfig {
+            patience: 1,
+            min_delta: 1e-6,
+            restore_best_weights: true,
+        });
+
+        let result = train_graph(&graph, loss, params, &dataset, &val_dataset, &config)
+            .expect("training with early stopping should succeed");
+
+        assert_eq!(result.final_val_loss, Some(1.0));
+        assert!((weight_scalar(&result, "w") - 2.0).abs() < 1e-6);
+        assert!((result.final_loss - 1.0).abs() < 1e-6);
+    }
+
     fn build_linear_mse_graph() -> (Graph, crate::ir::ValueId) {
         let mut graph = Graph::new();
         let block = graph.create_block();
@@ -938,5 +988,13 @@ mod tests {
             Tensor::new(vec![1, 1], vec![y]).expect("valid tensor"),
         );
         TrainSample { inputs }
+    }
+
+    fn weight_scalar(result: &TrainResult, name: &str) -> f32 {
+        result
+            .final_parameters
+            .get(name)
+            .expect("parameter must exist")
+            .data[0]
     }
 }
