@@ -16,61 +16,136 @@ fn sgemm_tn(C: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: us
     unsafe { gemm::gemm(m,n,k, C,1isize,n as isize, false, A,m as isize,1isize, B,1isize,n as isize, 0f32,1f32, false,false,false, par(m,k,n)); }
 }
 
-// --- SGD backends ---
-
-#[link(name = "mkl_rt", kind = "dylib")]
-extern "C" {
-    fn cblas_sgemm(
-        layout: i32, transa: i32, transb: i32,
-        m: i32, n: i32, k: i32,
-        alpha: f32, a: *const f32, lda: i32,
-        b: *const f32, ldb: i32,
-        beta: f32, c: *mut f32, ldc: i32,
-    );
+fn sgemm_nt(C: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize, b_cols: usize) {
+    unsafe { gemm::gemm(m,n,k, C,1isize,n as isize, false, A,1isize,k as isize, B,b_cols as isize,1isize, 0f32,1f32, false,false,false, par(m,k,n)); }
 }
 
-// MKL: W[m×n] += -lr * act^T @ delta
-// act is k×m (B×m) row-major → transa=Trans, lda=m
-// delta is k×n (B×n) row-major → transb=NoTrans, ldb=n
-#[inline]
-fn sgd_fused_tn_mkl(W: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize, lr: f32) {
-    unsafe {
-        cblas_sgemm(
-            101, // CblasRowMajor
-            112, // CblasTrans
-            111, // CblasNoTrans
-            m as i32, n as i32, k as i32,
-            -lr, A, m as i32,
-            B, n as i32,
-            1.0f32, W, n as i32,
-        );
-    }
-}
-
-#[inline]
-fn sgd_fused_tn_gemmcrate(W: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize, lr: f32) {
+fn sgd_fused_tn(W: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize, lr: f32) {
     unsafe { gemm::gemm(m,n,k, W,1isize,n as isize, true, A,m as isize,1isize, B,1isize,n as isize, 1f32,-lr, false,false,false, par(m,k,n)); }
 }
 
-// Runtime backend selection via VOLTA_SGD_BACKEND env var:
-//   VOLTA_SGD_BACKEND=mkl   → MKL cblas (default when MKL available)
-//   VOLTA_SGD_BACKEND=gemm  → gemm crate
-// Default: MKL (since mkl_rt.lib is linked)
-fn sgd_fused_tn(W: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize, lr: f32) {
-    use std::sync::OnceLock;
-    static USE_MKL: OnceLock<bool> = OnceLock::new();
-    let use_mkl = USE_MKL.get_or_init(|| {
-        std::env::var("VOLTA_SGD_BACKEND").map(|v| v != "gemm").unwrap_or(true)
-    });
-    if *use_mkl {
-        sgd_fused_tn_mkl(W, A, B, m, k, n, lr);
-    } else {
-        sgd_fused_tn_gemmcrate(W, A, B, m, k, n, lr);
+// delta_prev[batch×r] = delta[batch×c] @ W^T  (r > c: shrinking layers — faster than 2 transposes + sgemm)
+fn bwd_delta_Wt(delta_prev: *mut f32, w: *const f32, delta: *const f32, r: usize, c: usize, batch: usize) {
+    unsafe { gemm::gemm(
+        batch, r, c,
+        delta_prev, 1isize, r as isize, false,
+        delta, 1isize, c as isize,
+        w, c as isize, 1isize,
+        0f32, 1f32, false, false, false,
+        par(batch, c, r),
+    ); }
+}
+
+// ── AVX2 fused bias + relu ────────────────────────────────────────────────────
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn bias_relu_avx2(pre: *mut f32, act: *mut f32, bias: *const f32, rows: usize, cols: usize) {
+    let zero = _mm256_setzero_ps();
+    for bi in 0..rows {
+        let mut j = 0usize;
+        while j + 8 <= cols {
+            let b = _mm256_loadu_ps(bias.add(j));
+            let p = _mm256_add_ps(_mm256_loadu_ps(pre.add(bi*cols+j)), b);
+            _mm256_storeu_ps(pre.add(bi*cols+j), p);
+            _mm256_storeu_ps(act.add(bi*cols+j), _mm256_max_ps(p, zero));
+            j += 8;
+        }
+        while j < cols {
+            let v = *pre.add(bi*cols+j) + *bias.add(j);
+            *pre.add(bi*cols+j) = v;
+            *act.add(bi*cols+j) = if v > 0.0 { v } else { 0.0 };
+            j += 1;
+        }
     }
 }
 
-fn sgemm_nt(C: *mut f32, A: *const f32, B: *const f32, m: usize, k: usize, n: usize, b_cols: usize) {
-    unsafe { gemm::gemm(m,n,k, C,1isize,n as isize, false, A,1isize,k as isize, B,b_cols as isize,1isize, 0f32,1f32, false,false,false, par(m,k,n)); }
+// ── AVX2 relu mask + db accumulate ───────────────────────────────────────────
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn relu_mask_db_avx2(delta: *mut f32, pre: *const f32, db: *mut f32, rows: usize, cols: usize) {
+    std::ptr::write_bytes(db, 0, cols * std::mem::size_of::<f32>());
+    let zero = _mm256_setzero_ps();
+    for bi in 0..rows {
+        let mut j = 0usize;
+        while j + 8 <= cols {
+            let p    = _mm256_loadu_ps(pre.add(bi*cols+j));
+            let d    = _mm256_loadu_ps(delta.add(bi*cols+j));
+            let mask = _mm256_cmp_ps(p, zero, _CMP_GT_OQ);
+            let d2   = _mm256_and_ps(d, mask);
+            _mm256_storeu_ps(delta.add(bi*cols+j), d2);
+            let acc  = _mm256_loadu_ps(db.add(j));
+            _mm256_storeu_ps(db.add(j), _mm256_add_ps(acc, d2));
+            j += 8;
+        }
+        while j < cols {
+            let mask = if *pre.add(bi*cols+j) > 0.0 { 1.0f32 } else { 0.0 };
+            let d = *delta.add(bi*cols+j) * mask;
+            *delta.add(bi*cols+j) = d;
+            *db.add(j) += d;
+            j += 1;
+        }
+    }
+}
+
+use rayon::prelude::*;
+fn adam_update(w: *mut f32, mw: *mut f32, vw: *mut f32, dw: *const f32, n: usize, b1: f32, b2: f32, bc1: f32, bc2: f32, lr: f32, eps: f32, wd: f32) {
+    const CHUNK: usize = 1 << 13;
+    if n >= 1 << 17 {
+        let w_s = w as usize; let mw_s = mw as usize; let vw_s = vw as usize; let dw_s = dw as usize;
+        (0..n).into_par_iter().step_by(CHUNK).for_each(|base: usize| {
+            let end: usize = (base + CHUNK).min(n);
+            unsafe { adam_update_slice((w_s + base*4) as *mut f32, (mw_s + base*4) as *mut f32, (vw_s + base*4) as *mut f32, (dw_s + base*4) as *const f32, 0, end - base, b1, b2, bc1, bc2, lr, eps, wd); }
+        });
+    } else {
+        unsafe { adam_update_slice(w, mw, vw, dw, 0, n, b1, b2, bc1, bc2, lr, eps, wd); }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn adam_update_slice(w: *mut f32, mw: *mut f32, vw: *mut f32, dw: *const f32, start: usize, end: usize, b1: f32, b2: f32, bc1: f32, bc2: f32, lr: f32, eps: f32, wd: f32) {
+    use std::arch::x86_64::*;
+    let vb1 = _mm256_set1_ps(b1); let v1mb1 = _mm256_set1_ps(1.0 - b1);
+    let vb2 = _mm256_set1_ps(b2); let v1mb2 = _mm256_set1_ps(1.0 - b2);
+    let vbc1 = _mm256_set1_ps(bc1); let vbc2 = _mm256_set1_ps(bc2);
+    let vlr = _mm256_set1_ps(lr); let veps = _mm256_set1_ps(eps);
+    let vwd = _mm256_set1_ps(wd);
+    let mut i = start;
+    while i + 8 <= end {
+        let g = _mm256_loadu_ps(dw.add(i));
+        let m0 = _mm256_loadu_ps(mw.add(i));
+        let v0 = _mm256_loadu_ps(vw.add(i));
+        let m1 = _mm256_add_ps(_mm256_mul_ps(vb1, m0), _mm256_mul_ps(v1mb1, g));
+        let v1 = _mm256_add_ps(_mm256_mul_ps(vb2, v0), _mm256_mul_ps(v1mb2, _mm256_mul_ps(g, g)));
+        _mm256_storeu_ps(mw.add(i), m1);
+        _mm256_storeu_ps(vw.add(i), v1);
+        let mhat = _mm256_div_ps(m1, vbc1);
+        let vhat = _mm256_div_ps(v1, vbc2);
+        let denom = _mm256_add_ps(_mm256_sqrt_ps(vhat), veps);
+        let w0 = _mm256_loadu_ps(w.add(i));
+        // step = lr * (mhat/denom + wd*w)
+        let step = _mm256_mul_ps(vlr, _mm256_add_ps(_mm256_div_ps(mhat, denom), _mm256_mul_ps(vwd, w0)));
+        _mm256_storeu_ps(w.add(i), _mm256_sub_ps(w0, step));
+        i += 8;
+    }
+    while i < end {
+        let g = *dw.add(i); let m0 = *mw.add(i); let v0 = *vw.add(i);
+        let m1 = b1*m0 + (1.0-b1)*g; *mw.add(i) = m1;
+        let v1 = b2*v0 + (1.0-b2)*g*g; *vw.add(i) = v1;
+        let w0 = *w.add(i);
+        *w.add(i) = w0 - lr * ((m1/bc1) / ((v1/bc2).sqrt() + eps) + wd * w0);
+        i += 1;
+    }
+}
+#[cfg(not(target_arch = "x86_64"))]
+unsafe fn adam_update_slice(w: *mut f32, mw: *mut f32, vw: *mut f32, dw: *const f32, start: usize, end: usize, b1: f32, b2: f32, bc1: f32, bc2: f32, lr: f32, eps: f32, wd: f32) {
+    for i in start..end {
+        let g = *dw.add(i); let m0 = *mw.add(i); let v0 = *vw.add(i);
+        let m1 = b1*m0 + (1.0-b1)*g; *mw.add(i) = m1;
+        let v1 = b2*v0 + (1.0-b2)*g*g; *vw.add(i) = v1;
+        let w0 = *w.add(i);
+        *w.add(i) = w0 - lr * ((m1/bc1) / ((v1/bc2).sqrt() + eps) + wd * w0);
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -261,34 +336,18 @@ pub unsafe extern "C" fn volta_train_free(h: *mut Handle) {
 pub unsafe extern "C" fn volta_train_step(h: *mut Handle, X: *const f32, Y: *const f32, lr: f32) {
     let B = (*h).batch;
 
-    // FORWARD — fused bias+relu per hidden layer
+    // FORWARD
     std::ptr::copy_nonoverlapping(X, (*h).act0, B*512);
     sgemm((*h).pre0, (*h).act0 as *const f32, (*h).w0 as *const f32, B, 512, 1024);
-    for bi in 0..B { for j in 0..1024 {
-        let v = *(*h).pre0.add(bi*1024+j) + *(*h).b0.add(j);
-        *(*h).pre0.add(bi*1024+j) = v;
-        *(*h).act1.add(bi*1024+j) = if v > 0.0 { v } else { 0.0 };
-    }}
+    bias_relu_avx2((*h).pre0, (*h).act1, (*h).b0 as *const f32, B, 1024);
     sgemm((*h).pre1, (*h).act1 as *const f32, (*h).w1 as *const f32, B, 1024, 1024);
-    for bi in 0..B { for j in 0..1024 {
-        let v = *(*h).pre1.add(bi*1024+j) + *(*h).b1.add(j);
-        *(*h).pre1.add(bi*1024+j) = v;
-        *(*h).act2.add(bi*1024+j) = if v > 0.0 { v } else { 0.0 };
-    }}
+    bias_relu_avx2((*h).pre1, (*h).act2, (*h).b1 as *const f32, B, 1024);
     sgemm((*h).pre2, (*h).act2 as *const f32, (*h).w2 as *const f32, B, 1024, 512);
-    for bi in 0..B { for j in 0..512 {
-        let v = *(*h).pre2.add(bi*512+j) + *(*h).b2.add(j);
-        *(*h).pre2.add(bi*512+j) = v;
-        *(*h).act3.add(bi*512+j) = if v > 0.0 { v } else { 0.0 };
-    }}
+    bias_relu_avx2((*h).pre2, (*h).act3, (*h).b2 as *const f32, B, 512);
     sgemm((*h).pre3, (*h).act3 as *const f32, (*h).w3 as *const f32, B, 512, 256);
-    for bi in 0..B { for j in 0..256 {
-        let v = *(*h).pre3.add(bi*256+j) + *(*h).b3.add(j);
-        *(*h).pre3.add(bi*256+j) = v;
-        *(*h).act4.add(bi*256+j) = if v > 0.0 { v } else { 0.0 };
-    }}
+    bias_relu_avx2((*h).pre3, (*h).act4, (*h).b3 as *const f32, B, 256);
     sgemm((*h).act5, (*h).act4 as *const f32, (*h).w4 as *const f32, B, 256, 1);
-    *(*h).act5 += *(*h).b4;
+    for bi in 0..B { *(*h).act5.add(bi) += *(*h).b4; }
 
     // MSE loss
     let mut lacc = 0.0f32;
@@ -296,68 +355,30 @@ pub unsafe extern "C" fn volta_train_step(h: *mut Handle, X: *const f32, Y: *con
     for k in 0..nt { let d = *(*h).act5.add(k) - *Y.add(k); lacc += d*d; *(*h).delta4.add(k) = 2.0*d/(nt as f32); }
     (*h).last_loss = lacc / (nt as f32);
 
-    // BACKWARD — fused relu_mask+db_reduce per non-last layer, correct order
-    // Layer 4 (last, no relu): db4 separate
-    std::ptr::write_bytes((*h).db4, 0, 1);
+    // BACKWARD
+    // W4 (r=256 > c=1): use direct delta@W^T — avoids 2 transposes
+    bwd_delta_Wt((*h).delta3, (*h).w4 as *const f32, (*h).delta4 as *const f32, 256, 1, B);
+    std::ptr::write_bytes((*h).db4, 0, std::mem::size_of::<f32>());
     for bi in 0..B { *(*h).db4 += *(*h).delta4.add(bi); }
-    // dX4 → delta3
-    fast_transpose((*h).dt4, (*h).delta4 as *const f32, B, 1);
-    sgemm((*h).tmp4, (*h).w4 as *const f32, (*h).dt4 as *const f32, 256, 1, B);
-    fast_transpose((*h).delta3, (*h).tmp4 as *const f32, 256, B);
-    // SGD w4, b4
-    sgd_fused_tn((*h).w4, (*h).act4 as *const f32, (*h).delta4 as *const f32, 256, B, 1, lr);
-    *(*h).b4 -= lr * *(*h).db4;
-
-    // Layer 3: fused relu_mask + db3 reduce; then dX3 → delta2; SGD w3,b3
-    std::ptr::write_bytes((*h).db3, 0, 256);
-    for bi in 0..B { for j in 0..256 {
-        let mask = if *(*h).pre3.add(bi*256+j) > 0.0 { 1.0f32 } else { 0.0 };
-        let d = *(*h).delta3.add(bi*256+j) * mask;
-        *(*h).delta3.add(bi*256+j) = d;
-        *(*h).db3.add(j) += d;
-    }}
-    fast_transpose((*h).dt3, (*h).delta3 as *const f32, B, 256);
-    sgemm((*h).tmp3, (*h).w3 as *const f32, (*h).dt3 as *const f32, 512, 256, B);
-    fast_transpose((*h).delta2, (*h).tmp3 as *const f32, 512, B);
-    sgd_fused_tn((*h).w3, (*h).act3 as *const f32, (*h).delta3 as *const f32, 512, B, 256, lr);
-    for k in 0..256 { *(*h).b3.add(k) -= lr * *(*h).db3.add(k); }
-
-    // Layer 2: fused relu_mask + db2 reduce; then dX2 → delta1; SGD w2,b2
-    std::ptr::write_bytes((*h).db2, 0, 512);
-    for bi in 0..B { for j in 0..512 {
-        let mask = if *(*h).pre2.add(bi*512+j) > 0.0 { 1.0f32 } else { 0.0 };
-        let d = *(*h).delta2.add(bi*512+j) * mask;
-        *(*h).delta2.add(bi*512+j) = d;
-        *(*h).db2.add(j) += d;
-    }}
-    fast_transpose((*h).dt2, (*h).delta2 as *const f32, B, 512);
-    sgemm((*h).tmp2, (*h).w2 as *const f32, (*h).dt2 as *const f32, 1024, 512, B);
-    fast_transpose((*h).delta1, (*h).tmp2 as *const f32, 1024, B);
-    sgd_fused_tn((*h).w2, (*h).act2 as *const f32, (*h).delta2 as *const f32, 1024, B, 512, lr);
-    for k in 0..512 { *(*h).b2.add(k) -= lr * *(*h).db2.add(k); }
-
-    // Layer 1: fused relu_mask + db1 reduce; then dX1 → delta0; SGD w1,b1
-    std::ptr::write_bytes((*h).db1, 0, 1024);
-    for bi in 0..B { for j in 0..1024 {
-        let mask = if *(*h).pre1.add(bi*1024+j) > 0.0 { 1.0f32 } else { 0.0 };
-        let d = *(*h).delta1.add(bi*1024+j) * mask;
-        *(*h).delta1.add(bi*1024+j) = d;
-        *(*h).db1.add(j) += d;
-    }}
+    relu_mask_db_avx2((*h).delta3, (*h).pre3 as *const f32, (*h).db3, B, 256);
+    // W3 (r=512 > c=256): use direct delta@W^T
+    bwd_delta_Wt((*h).delta2, (*h).w3 as *const f32, (*h).delta3 as *const f32, 512, 256, B);
+    relu_mask_db_avx2((*h).delta2, (*h).pre2 as *const f32, (*h).db2, B, 512);
+    // W2 (r=1024 > c=512): use direct delta@W^T
+    bwd_delta_Wt((*h).delta1, (*h).w2 as *const f32, (*h).delta2 as *const f32, 1024, 512, B);
+    relu_mask_db_avx2((*h).delta1, (*h).pre1 as *const f32, (*h).db1, B, 1024);
     fast_transpose((*h).dt1, (*h).delta1 as *const f32, B, 1024);
     sgemm((*h).tmp1, (*h).w1 as *const f32, (*h).dt1 as *const f32, 1024, 1024, B);
     fast_transpose((*h).delta0, (*h).tmp1 as *const f32, 1024, B);
+    relu_mask_db_avx2((*h).delta0, (*h).pre0 as *const f32, (*h).db0, B, 1024);
+    sgd_fused_tn((*h).w4, (*h).act4 as *const f32, (*h).delta4 as *const f32, 256, B, 1, lr);
+    for k in 0..1 { *(*h).b4.add(k) -= lr * *(*h).db4.add(k); }
+    sgd_fused_tn((*h).w3, (*h).act3 as *const f32, (*h).delta3 as *const f32, 512, B, 256, lr);
+    for k in 0..256 { *(*h).b3.add(k) -= lr * *(*h).db3.add(k); }
+    sgd_fused_tn((*h).w2, (*h).act2 as *const f32, (*h).delta2 as *const f32, 1024, B, 512, lr);
+    for k in 0..512 { *(*h).b2.add(k) -= lr * *(*h).db2.add(k); }
     sgd_fused_tn((*h).w1, (*h).act1 as *const f32, (*h).delta1 as *const f32, 1024, B, 1024, lr);
     for k in 0..1024 { *(*h).b1.add(k) -= lr * *(*h).db1.add(k); }
-
-    // Layer 0: fused relu_mask + db0 reduce; SGD w0,b0 (no dX needed for input)
-    std::ptr::write_bytes((*h).db0, 0, 1024);
-    for bi in 0..B { for j in 0..1024 {
-        let mask = if *(*h).pre0.add(bi*1024+j) > 0.0 { 1.0f32 } else { 0.0 };
-        let d = *(*h).delta0.add(bi*1024+j) * mask;
-        *(*h).delta0.add(bi*1024+j) = d;
-        *(*h).db0.add(j) += d;
-    }}
     sgd_fused_tn((*h).w0, (*h).act0 as *const f32, (*h).delta0 as *const f32, 512, B, 1024, lr);
     for k in 0..1024 { *(*h).b0.add(k) -= lr * *(*h).db0.add(k); }
 }
