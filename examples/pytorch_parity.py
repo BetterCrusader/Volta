@@ -617,7 +617,12 @@ def mlp_forward(x, w1, b1, w2, b2):
     return torch.matmul(hidden, w2) + b2
 
 
-def mlp_train_loop_case(optimizer_kind, accum_steps=1, clip_grad=None):
+def mlp_train_loop_case(
+    optimizer_kind,
+    accum_steps=1,
+    clip_grad=None,
+    epochs_override=None,
+):
     dataset = mlp_train_dataset()
     w1, b1, w2, b2 = mlp_train_parameters()
     params = [w1, b1, w2, b2]
@@ -658,6 +663,10 @@ def mlp_train_loop_case(optimizer_kind, accum_steps=1, clip_grad=None):
     else:
         raise ValueError(f"unknown optimizer kind: {optimizer_kind}")
 
+    if epochs_override is not None:
+        epochs = epochs_override
+
+    loss_trace = []
     for _ in range(epochs):
         optimizer.zero_grad(set_to_none=True)
         pending_steps = 0
@@ -665,6 +674,7 @@ def mlp_train_loop_case(optimizer_kind, accum_steps=1, clip_grad=None):
             out = mlp_forward(x, w1, b1, w2, b2)
             diff = out - target
             loss = torch.mean(diff * diff)
+            loss_trace.append(float(loss.detach().item()))
             loss.backward()
             pending_steps += 1
 
@@ -702,6 +712,7 @@ def mlp_train_loop_case(optimizer_kind, accum_steps=1, clip_grad=None):
 
     return {
         "final_loss": float(final_loss.detach().item()),
+        "loss_trace": loss_trace,
         "final_parameters": {
             "w1": w1.detach().reshape(-1).tolist(),
             "b1": b1.detach().reshape(-1).tolist(),
@@ -721,6 +732,18 @@ def mlp_train_loop_adam_case():
 
 def mlp_train_loop_adamw_case():
     return mlp_train_loop_case("adamw")
+
+
+def mlp_train_loop_long_sgd_case():
+    return mlp_train_loop_case("sgd", epochs_override=24)
+
+
+def mlp_train_loop_long_adam_case():
+    return mlp_train_loop_case("adam", epochs_override=24)
+
+
+def mlp_train_loop_long_adamw_case():
+    return mlp_train_loop_case("adamw", epochs_override=24)
 
 
 def mlp_train_loop_rmsprop_case():
@@ -955,6 +978,12 @@ def main():
         result = mlp_train_loop_adam_case()
     elif case == "mlp_train_loop_adamw":
         result = mlp_train_loop_adamw_case()
+    elif case == "mlp_train_loop_long_sgd":
+        result = mlp_train_loop_long_sgd_case()
+    elif case == "mlp_train_loop_long_adam":
+        result = mlp_train_loop_long_adam_case()
+    elif case == "mlp_train_loop_long_adamw":
+        result = mlp_train_loop_long_adamw_case()
     elif case == "mlp_train_loop_rmsprop":
         result = mlp_train_loop_rmsprop_case()
     elif case == "mlp_train_loop_adagrad":

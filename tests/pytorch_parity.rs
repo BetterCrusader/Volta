@@ -243,6 +243,11 @@ fn assert_mlp_training_result_matches_pytorch(
     label: &str,
 ) {
     assert!(
+        result.final_loss.is_finite(),
+        "{label}.final_loss must stay finite throughout train_graph"
+    );
+    assert_mlp_loss_trace_is_finite(expected, label);
+    assert!(
         (result.final_loss - scalar_f32(expected, "final_loss")).abs() <= 1e-5,
         "{label}.final_loss mismatch: actual={}, expected={}",
         result.final_loss,
@@ -254,13 +259,39 @@ fn assert_mlp_training_result_matches_pytorch(
             .final_parameters
             .get(name)
             .unwrap_or_else(|| panic!("missing final parameter '{name}'"))
+            .make_contiguous()
+            .expect("contiguous final parameter")
             .data
             .to_vec();
+        assert!(
+            actual.iter().all(|value| value.is_finite()),
+            "{label}.param.{name} must stay finite"
+        );
         assert_close(
             &format!("{label}.param.{name}"),
             &actual,
             &json_f32_array(&expected["final_parameters"], name),
             1e-5,
+        );
+    }
+}
+
+fn assert_mlp_loss_trace_is_finite(expected: &Value, label: &str) {
+    let Some(loss_trace) = expected["loss_trace"].as_array() else {
+        panic!("{label}.loss_trace missing from PyTorch reference");
+    };
+    assert!(
+        !loss_trace.is_empty(),
+        "{label}.loss_trace must contain long-loop samples"
+    );
+    for (index, loss) in loss_trace.iter().enumerate() {
+        let value = loss
+            .as_f64()
+            .unwrap_or_else(|| panic!("{label}.loss_trace[{index}] must be a numeric JSON scalar"))
+            as f32;
+        assert!(
+            value.is_finite(),
+            "{label}.loss_trace[{index}] is non-finite: {value}"
         );
     }
 }
@@ -1959,6 +1990,92 @@ fn pytorch_parity_mlp_multi_step_adamw_train_graph() {
     .expect("adamw multi-step training should succeed");
 
     assert_mlp_training_result_matches_pytorch(&result, &expected, "mlp_train_loop_adamw");
+}
+
+#[test]
+fn pytorch_parity_mlp_long_loop_sgd_train_graph() {
+    let Some(expected) = run_pytorch_case("mlp_train_loop_long_sgd") else {
+        return;
+    };
+
+    let (graph, loss) = build_mlp_training_graph();
+    let initial_parameters = mlp_training_initial_parameters();
+    let dataset = mlp_training_dataset();
+
+    let result = train_graph(
+        &graph,
+        loss,
+        initial_parameters,
+        &dataset,
+        &[],
+        &TrainConfig::new(24, OptimizerConfig::Sgd { lr: 0.05 }),
+    )
+    .expect("MLP long-loop SGD training should succeed");
+
+    assert_mlp_training_result_matches_pytorch(&result, &expected, "mlp_train_loop_long_sgd");
+}
+
+#[test]
+fn pytorch_parity_mlp_long_loop_adam_train_graph() {
+    let Some(expected) = run_pytorch_case("mlp_train_loop_long_adam") else {
+        return;
+    };
+
+    let (graph, loss) = build_mlp_training_graph();
+    let initial_parameters = mlp_training_initial_parameters();
+    let dataset = mlp_training_dataset();
+
+    let result = train_graph(
+        &graph,
+        loss,
+        initial_parameters,
+        &dataset,
+        &[],
+        &TrainConfig::new(
+            24,
+            OptimizerConfig::Adam {
+                lr: 0.01,
+                beta1: 0.9,
+                beta2: 0.999,
+                epsilon: 1e-8,
+            },
+        ),
+    )
+    .expect("MLP long-loop Adam training should succeed");
+
+    assert_mlp_training_result_matches_pytorch(&result, &expected, "mlp_train_loop_long_adam");
+}
+
+#[test]
+fn pytorch_parity_mlp_long_loop_adamw_train_graph() {
+    let Some(expected) = run_pytorch_case("mlp_train_loop_long_adamw") else {
+        return;
+    };
+
+    let (graph, loss) = build_mlp_training_graph();
+    let initial_parameters = mlp_training_initial_parameters();
+    let dataset = mlp_training_dataset();
+
+    let result = train_graph(
+        &graph,
+        loss,
+        initial_parameters,
+        &dataset,
+        &[],
+        &TrainConfig::new(
+            24,
+            OptimizerConfig::AdamW {
+                lr: 0.01,
+                beta1: 0.9,
+                beta2: 0.999,
+                epsilon: 1e-8,
+                weight_decay: 0.01,
+            },
+        ),
+    )
+    .expect("MLP long-loop AdamW training should succeed");
+
+    assert_mlp_training_result_matches_pytorch(&result, &expected, "mlp_train_loop_long_adamw");
 }
 
 #[test]
