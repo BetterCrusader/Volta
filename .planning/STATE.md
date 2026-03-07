@@ -2,13 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: unknown
-last_updated: "2026-03-07T05:20:31.517Z"
+status: complete
+last_updated: "2026-03-07T05:44:00Z"
 progress:
   total_phases: 3
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 3
-  completed_plans: 2
+  completed_plans: 3
+  percent: 100
 ---
 
 # State: Volta
@@ -20,21 +21,21 @@ progress:
 ## Project Reference
 
 **Ядро цінності:** CPU training швидший за PyTorch eager — виміряно, відтворювано, з числовою коректністю
-**Поточний фокус:** Фаза 1 — Продуктивність Adam
+**Поточний фокус:** Фаза 1 — ЗАВЕРШЕНО. Наступна: Фаза 2 — Інфраструктура і backend
 
 ---
 
 ## Current Position
 
-**Фаза:** 1 — Продуктивність Adam
-**План:** 01-02 complete
-**Статус:** In progress
-**Прогрес:** ████░░░░░░ 40%
+**Фаза:** 1 — Продуктивність Adam (DONE)
+**План:** 01-03 complete
+**Статус:** Phase 1 complete
+**Прогрес:** [██████████] 100%
 
 ```
 [x] Фаза 1 / 01-01: Remove x86-v4 from gemm features (DONE)
 [x] Фаза 1 / 01-02: Adam numerical correctness test / CORR-01 (DONE)
-[ ] Фаза 1: Продуктивність Adam (continued)
+[x] Фаза 1 / 01-03: Phase sign-off and metrics update (DONE)
 [ ] Фаза 2: Інфраструктура і backend
 [ ] Фаза 3: Надійність і коректність
 ```
@@ -50,6 +51,7 @@ progress:
 | SGD vs PyTorch ratio | 0.33–0.65× | PASS — 35-67% faster |
 
 | Phase 01-adam P02 | 5min | 1 task | 1 file |
+| Phase 01-adam P03 | 2min | 2 tasks | 1 file |
 
 ## Accumulated Context
 
@@ -70,6 +72,7 @@ progress:
 - Hardcoded `C:/Users/User/miniforge3/...` в binary — лінкує тільки на dev машині
 - MHA backward — stub, transformer не навчається
 - `CARGO_MANIFEST_DIR` embedded в shipped binary — codegen paths broken після install
+- bench_mlp2048 and bench_b128 examples fail to link MKL — pre-existing issue
 
 ### Важливі числа
 
@@ -86,9 +89,9 @@ progress:
 2. Читай `.planning/REQUIREMENTS.md` — повний список v1 вимог
 3. Читай `.planning/codebase/CONCERNS.md` — known bugs і tech debt
 
-**Наступний крок:** Продовжити Фазу 1 — Adam fused-GEMM path (наступний план)
+**Наступний крок:** Почати Фазу 2 — Інфраструктура і backend
 
-**Остання сесія:** 2026-03-07T05:25:00Z — Completed 01-adam-02-PLAN.md (CORR-01 test)
+**Остання сесія:** 2026-03-07T05:44:00Z — Completed 01-adam-03-PLAN.md (phase sign-off, metrics update)
 
 ---
 
