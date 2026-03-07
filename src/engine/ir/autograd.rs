@@ -2608,4 +2608,20 @@ mod tests {
         let result = build_reverse_graph(&g, loss, &[x]);
         assert!(result.is_ok(), "build_reverse_graph panicked or errored on shared-output graph: {:?}", result.err());
     }
+
+    #[test]
+    fn mha_backward_reduces_loss() {
+        // Build: q/k/v inputs -> MultiHeadAttention (6 nodes) -> take output_idx=0 -> sum -> loss
+        // Run 100 SGD steps on w_q; check final_loss < initial_loss.
+        // d_model=4, num_heads=2, batch=1, seq=2, lr=0.01
+        todo!("implement after Task 2")
+    }
+
+    #[test]
+    fn mha_gradient_matches_reference() {
+        // batch=1, seq=2, d_model=4, num_heads=2, identity weights
+        // Run one forward + backward step.
+        // Compare dq_input against expected values at tolerance 1e-3.
+        todo!("implement after Task 2")
+    }
 }
