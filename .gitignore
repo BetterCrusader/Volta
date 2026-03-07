@@ -24,6 +24,7 @@ examples/bench_tanh.train_rust._rust_crate/
 examples/bench_wide.train_rust._rust_crate/
 # Target dirs inside kept crates
 examples/**/_rust_crate/target/
+examples/*.train_rust._rust_crate/target/
 
 # IDE
 .idea/
