@@ -83,7 +83,14 @@ pub fn build_reverse_graph(
 
         match &node.op {
             Op::Plugin { operator, inputs } => {
-                let upstream = grad_map.get(&mapped_output).copied().unwrap();
+                let upstream = grad_map
+                    .get(&mapped_output)
+                    .copied()
+                    .ok_or_else(|| AutogradError {
+                        message: format!(
+                            "Plugin backward: missing upstream gradient for output {mapped_output:?}"
+                        ),
+                    })?;
                 let backward_ops = operator.get_backward_ops(
                     inputs,
                     node.output,
@@ -1695,15 +1702,32 @@ pub fn build_reverse_graph(
             }
             Op::QuantizeLinear { input, .. } => {
                 // Straight-through estimator: pass gradient through quantization unchanged.
-                let upstream = *grad_map.get(&mapped_output).unwrap();
+                let upstream = grad_map
+                    .get(&mapped_output)
+                    .copied()
+                    .ok_or_else(|| AutogradError {
+                        message: format!(
+                            "QuantizeLinear backward: missing upstream gradient for output {mapped_output:?}"
+                        ),
+                    })?;
                 let mapped_input = mapped(&forward_to_backward, *input)?;
                 accumulate_grad(&mut backward, block, &mut grad_map, mapped_input, upstream)?;
             }
             Op::DequantizeLinear { input, .. } => {
                 // Dequantize is a scale operation; pass gradient through as straight-through.
-                let upstream = *grad_map.get(&mapped_output).unwrap();
+                let upstream = grad_map
+                    .get(&mapped_output)
+                    .copied()
+                    .ok_or_else(|| AutogradError {
+                        message: format!(
+                            "DequantizeLinear backward: missing upstream gradient for output {mapped_output:?}"
+                        ),
+                    })?;
                 let mapped_input = mapped(&forward_to_backward, *input)?;
                 accumulate_grad(&mut backward, block, &mut grad_map, mapped_input, upstream)?;
+            }
+            Op::MultiHeadAttentionBackward { .. } => {
+                // MHABackward is a generated backward op — it does not need a second-order gradient.
             }
         }
     }
@@ -2567,5 +2591,21 @@ mod tests {
         // gw[1,0] = x[1,0]*g[0,0] + x[1,1]*g[0,1] + x[2,0]*g[1,0] + x[2,1]*g[1,1] = 4*1 + 5*1 + 7*1 + 8*1 = 24
         // gw[1,1] = x[1,1]*g[0,0] + x[1,2]*g[0,1] + x[2,1]*g[1,0] + x[2,2]*g[1,1] = 5*1 + 6*1 + 8*1 + 9*1 = 28
         assert_eq!(*tw.data, vec![12.0, 16.0, 24.0, 28.0]);
+    }
+
+    #[test]
+    fn build_reverse_graph_shared_output() {
+        // Build a simple graph: x -> relu -> (a) -> add(a, a) -> loss
+        // The value `a` is used as both inputs to the add — shared output feeding two ops.
+        let mut g = Graph::new();
+        let block = g.create_block();
+        let (_, x) = g.add_op(block, Op::Input("x".to_string())).unwrap();
+        let (_, a) = g.add_op(block, Op::Relu(x)).unwrap();
+        // Use Add(a, a) so `a` fans out to two input edges
+        let (_, loss) = g.add_op(block, Op::Add(a, a)).unwrap();
+        g.add_op(block, Op::Output(loss)).unwrap();
+
+        let result = build_reverse_graph(&g, loss, &[x]);
+        assert!(result.is_ok(), "build_reverse_graph panicked or errored on shared-output graph: {:?}", result.err());
     }
 }
