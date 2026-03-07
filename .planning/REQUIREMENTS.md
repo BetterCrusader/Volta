@@ -33,8 +33,18 @@
 ### Performance
 
 - **PERF-V2-01**: AutoTuner для tile sizes (MC, KC, NC) — sampling конфігурацій при DLL compile time
-- **PERF-V2-02**: JitCache підключений до training loop в `train_graph_with_backend`
-- **PERF-V2-03**: Arc<RwLock<Tensor>> для параметрів — уникнути N heap allocations + N tensor copies per optimizer step
+- **PERF-V2-02**: Compiled execution reuse в `train_graph_with_backend` доведений і regression-tested — repeated training steps не створюють per-step compile churn
+- **PERF-V2-03**: Training path прибирає per-step parameter rewrap churn; стабільні outer parameter handles зберігаються між optimizer steps, навіть якщо execution boundary ще використовує snapshot copies
+
+### Training Reliability
+
+- **TRAIN-V2-01**: CPU training loops для `SGD`, `Adam`, `AdamW` проходять довгі багатокрокові запуски без `NaN`, divergence або nondeterministic drift на контрольних моделях
+- **TRAIN-V2-02**: Щонайменше 2 end-to-end training cases (не micro parity) проходять реальне навчання і знижують loss на CPU path
+- **TRAIN-V2-03**: Є щонайменше 1 integration-grade CPU training regression case вище за raw IR helpers
+
+### Correctness
+
+- **CORR-V2-01**: PyTorch parity покриває не тільки op-level checks, а й multi-step training loops та реальні mini-model cases
 
 ### Platform
 
@@ -50,6 +60,18 @@
 ### Model Coverage
 
 - **MODEL-V2-01**: Conv2D, LayerNorm, MultiHeadAttention в AOT training codegen path
+
+### Product Surface
+
+- **UX-V2-01**: CLI help/output узгоджені між `run/check/info/compile/compile-train/doctor` і дають корисні actionable повідомлення замість розмитих помилок
+- **UX-V2-02**: `doctor` показує capability matrix, maturity, determinism guarantees і явні next steps для unsupported setups
+- **UX-V2-03**: Examples і docs відображають реальний supported path, команди перевіряються smoke-тестами
+
+### Distribution
+
+- **DIST-V2-01**: Репозиторій генерує нормальні release artifacts для підтримуваної платформи, а не тільки локальний dev build
+- **DIST-V2-02**: Install story перевірений з clean environment і задокументований кроками, які реально працюють
+- **DIST-V2-03**: Після install shipped binary проходить smoke-path для `--help`, `doctor` і хоча б одного compile/run сценарію
 
 ## Out of Scope
 
@@ -76,12 +98,27 @@
 | CORR-03 | Phase 3 | Complete |
 | RELY-01 | Phase 3 | Complete |
 | RELY-02 | Phase 3 | Complete |
+| PERF-V2-02 | Phase 4 | Complete |
+| PERF-V2-03 | Phase 4 | Complete |
+| TRAIN-V2-01 | Phase 4 | Planned |
+| TRAIN-V2-03 | Phase 4 | Planned |
+| CORR-V2-01 | Phase 5 | Planned |
+| TRAIN-V2-02 | Phase 5 | Planned |
+| MODEL-V2-01 | Phase 5 | Planned |
+| UX-V2-01 | Phase 6 | Planned |
+| UX-V2-02 | Phase 6 | Planned |
+| UX-V2-03 | Phase 6 | Planned |
+| PLAT-V2-01 | Phase 7 | Planned |
+| PLAT-V2-02 | Phase 7 | Planned |
+| DIST-V2-01 | Phase 7 | Planned |
+| DIST-V2-02 | Phase 7 | Planned |
+| DIST-V2-03 | Phase 7 | Planned |
 
 **Coverage:**
-- v1 requirements: 11 total
-- Mapped to phases: 11
-- Unmapped: 0 ✓
+- Total requirements: 25
+- Mapped to phases: 22
+- Unmapped: 3 (`CUDA-V2-01`, `CUDA-V2-02`, `CUDA-V2-03`)
 
 ---
 *Requirements defined: 2026-03-07*
-*Last updated: 2026-03-07 — traceability updated after roadmap creation*
+*Last updated: 2026-03-08 — 04-03 completed PERF-V2-02 and PERF-V2-03*
