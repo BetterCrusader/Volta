@@ -3,9 +3,23 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: completed
-last_updated: "2026-03-07T06:53:06.347Z"
+last_updated: "2026-03-07T08:05:11.202Z"
 progress:
   total_phases: 3
+  completed_phases: 3
+  total_plans: 9
+  completed_plans: 9
+  percent: 100
+---
+
+---
+gsd_state_version: 1.0
+milestone: v1.0
+milestone_name: milestone
+status: completed
+last_updated: "2026-03-07T06:53:06.347Z"
+progress:
+  [██████████] 100%
   completed_phases: 2
   total_plans: 7
   completed_plans: 7
@@ -82,23 +96,23 @@ progress:
 
 # State: Volta
 
-**Останнє оновлення:** 2026-03-07T07:42:00Z
+**Останнє оновлення:** 2026-03-07T08:40:00Z
 
 ---
 
 ## Project Reference
 
 **Ядро цінності:** CPU training швидший за PyTorch eager — виміряно, відтворювано, з числовою коректністю
-**Поточний фокус:** Фаза 3 — Надійність і коректність (03-01 DONE)
+**Поточний фокус:** Фаза 3 — Надійність і коректність (03-02 DONE)
 
 ---
 
 ## Current Position
 
 **Фаза:** 3 — Надійність і коректність (In Progress)
-**План:** 03-01 complete
-**Статус:** Phase 3 in progress — 03-01 done (Tensor::PartialEq + build_reverse_graph panic fixes / RELY-01, RELY-02)
-**Прогрес:** [█░░░░░░░░░] in progress
+**План:** 03-02 complete
+**Статус:** Phase 3 in progress — 03-02 done (MHA full backward pass: 7 gradients, 2 tests green / CORR-03)
+**Прогрес:** [██░░░░░░░░] in progress
 
 ```
 [x] Фаза 1 / 01-01: Remove x86-v4 from gemm features (DONE)
@@ -109,6 +123,7 @@ progress:
 [x] Фаза 2 / 02-02: Portable gemm_shim (include_bytes!) + merged_rustflags tests (DONE)
 [x] Фаза 2 / 02-03: Adam optimizer capability tracking — supports_adam + validate_optimizer / CORR-02 (DONE)
 [x] Фаза 3 / 03-01: Tensor::PartialEq panic-free + build_reverse_graph 3 unwraps fixed / RELY-01, RELY-02 (DONE)
+[x] Фаза 3 / 03-02: MHA full backward pass — 7 gradients (dq/dk/dv/dWq/dWk/dWv/dWo) / CORR-03 (DONE)
 ```
 
 ---
@@ -127,6 +142,7 @@ progress:
 | Phase 02-backend P01 | 6min | 2 tasks | 3 files |
 | Phase 02-backend P02-02 | 6min | 2 tasks | 3 files |
 | Phase 02-backend P03 | 2 | 1 tasks | 3 files |
+| Phase 03-nadiiinist-i-korektnost P03-02 | 45min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -150,11 +166,13 @@ progress:
 | CpuBackend supports_adam: true; CudaBackend supports_adam: false | validate_optimizer() makes Adam/backend contract explicit before compile; CUDA Adam not implemented in v1 |
 | make_contiguous bounds-check before copy_to_slice | copy_to_slice panics on invalid offset; returning Err from make_contiguous enables let-else pattern in PartialEq — no API surface change |
 | MultiHeadAttentionBackward arms: no-op in autograd backward | backward of backward not needed for v1; Err in interpreter is correct since MHABackward is a codegen-only op |
+| MHA sibling-scan for attn_weights/context | scan forward.nodes matching q_input ValueId + output_idx avoids storing extra ValueIds; output_idx==0 guard prevents double-counting |
+| MHA test differentiates v_input not q_input | d(sum)/d(q_input)=0 with fixed k/v due to softmax cancellation; v_input gradient always non-zero — meaningful test |
 
 ### Відомі блокери
 
 - ~~Hardcoded `C:/Users/User/miniforge3/...` в binary~~ — FIXED in 02-01
-- MHA backward — stub, transformer не навчається
+- ~~MHA backward — stub, transformer не навчається~~ — FIXED in 03-02
 - ~~`CARGO_MANIFEST_DIR` embedded в shipped binary — codegen paths broken після install~~ — FIXED in 02-02
 - bench_mlp2048 and bench_b128 examples fail to link MKL — pre-existing issue
 
@@ -173,9 +191,9 @@ progress:
 2. Читай `.planning/REQUIREMENTS.md` — повний список v1 вимог
 3. Читай `.planning/codebase/CONCERNS.md` — known bugs і tech debt
 
-**Наступний крок:** Продовжити Фазу 3 — Надійність і коректність
+**Наступний крок:** Продовжити Фазу 3 — Надійність і коректність (03-03 if exists, else Phase 3 sign-off)
 
-**Остання сесія:** 2026-03-07T07:42:00Z — Completed 03-01-PLAN.md (Tensor::PartialEq let-else, make_contiguous bounds check, 3 autograd unwraps → ok_or_else, RELY-01 + RELY-02 closed)
+**Остання сесія:** 2026-03-07T08:40:00Z — Completed 03-02-PLAN.md (MHA full backward: 7 gradients, sibling-scan, 2 TDD tests green, CORR-03 closed)
 
 ---
 
