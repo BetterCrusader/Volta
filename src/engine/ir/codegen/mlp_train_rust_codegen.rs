@@ -939,9 +939,8 @@ fn generate_rust_source(
 }
 
 #[cfg(test)]
-#[allow(unsafe_code)]
 mod tests {
-    use super::{merged_rustflags, resolve_mkl_lib_path};
+    use super::{merged_rustflags, resolve_mkl_lib_path_from};
 
     #[test]
     fn merged_rustflags_defaults_to_target_cpu_native() {
@@ -967,16 +966,8 @@ mod tests {
 
     #[test]
     fn mkl_not_found_returns_err_with_instructions() {
-        // Remove all MKL-related env vars so the function has no path to find MKL.
-        // We set them to known-nonexistent paths to ensure has_mkl returns false.
-        // SAFETY: test-only env mutation, not running concurrently with other env tests.
-        unsafe {
-            std::env::remove_var("MKL_LIB_DIR");
-            std::env::remove_var("MKLROOT");
-            std::env::remove_var("CONDA_PREFIX");
-        }
-
-        let result = resolve_mkl_lib_path();
+        // Pass None for all env vars — simulates a clean machine with no MKL configured.
+        let result = resolve_mkl_lib_path_from(None, None, None);
         let err = result.expect_err("should return Err when MKL is not found");
         assert!(
             err.message.contains("MKL not found for Adam codegen"),
@@ -997,21 +988,9 @@ mod tests {
 
     #[test]
     fn mkl_lib_dir_bad_path_returns_specific_err() {
-        // Set MKL_LIB_DIR to a real temp dir that does NOT contain mkl_rt.lib
-        let tmp = std::env::temp_dir();
-        let bad_path = tmp.to_string_lossy().replace('\\', "/");
-        // SAFETY: test-only env mutation, not running concurrently with other env tests.
-        unsafe {
-            std::env::set_var("MKL_LIB_DIR", &bad_path);
-            // Ensure other vars don't interfere
-            std::env::remove_var("MKLROOT");
-            std::env::remove_var("CONDA_PREFIX");
-        }
-
-        let result = resolve_mkl_lib_path();
-        // SAFETY: cleanup.
-        unsafe { std::env::remove_var("MKL_LIB_DIR"); }
-
+        // Provide a path that exists as a directory but contains no mkl_rt.lib.
+        let bad_path = std::env::temp_dir().to_string_lossy().replace('\\', "/");
+        let result = resolve_mkl_lib_path_from(Some(&bad_path), None, None);
         let err = result.expect_err("should return Err when MKL_LIB_DIR has no mkl_rt");
         assert!(
             err.message.contains("MKL_LIB_DIR set to"),
