@@ -58,7 +58,11 @@ Plans:
   1. Модель з `MultiHeadAttention` навчається і знижує loss — перевіряється тестом на 100 кроків з порівнянням градієнтів Q/K/V проти PyTorch reference
   2. `build_reverse_graph()` на незвичних graph structures (shared outputs) повертає `Err(AutogradError)` — не панікує
   3. `Tensor::PartialEq` на тензорі з невалідними stride/offset повертає `false` — не панікує
-**Plans:** TBD
+**Plans:** 2 plans
+
+Plans:
+- [ ] 03-01-PLAN.md — RELY-01 + RELY-02: fix 4 panic sites in tensor.rs and autograd.rs → ok_or_else / let-else
+- [ ] 03-02-PLAN.md — CORR-03: full MHA backward (Op::MultiHeadAttentionBackward + interpreter + autograd arm + tests)
 
 ---
 
@@ -68,9 +72,9 @@ Plans:
 |------|-----------------|--------|-----------|
 | 1. Продуктивність Adam | 4/4 | Complete   | 2026-03-07 |
 | 2. Інфраструктура і backend | 3/3 | Complete   | 2026-03-07 |
-| 3. Надійність і коректність | 0/? | Not started | - |
+| 3. Надійність і коректність | 0/2 | Not started | - |
 
 ---
 
 *Roadmap created: 2026-03-07*
-*Last updated: 2026-03-07 — Phase 2 plans created (02-01 through 02-03)*
+*Last updated: 2026-03-07 — Phase 3 plans created (03-01 through 03-02)*
