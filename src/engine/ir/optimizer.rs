@@ -702,4 +702,27 @@ mod tests {
             err.message
         );
     }
+
+    #[test]
+    fn adam_updates_parameter_numerically_correct() {
+        let mut params = HashMap::new();
+        params.insert(vid(0), Tensor::new(vec![1], vec![0.5_f32]).expect("valid tensor"));
+        let mut grads = HashMap::new();
+        grads.insert(vid(0), Tensor::new(vec![1], vec![0.1_f32]).expect("valid tensor"));
+        let mut state = OptimizerState::default();
+        apply_gradients(
+            &mut params,
+            &grads,
+            &OptimizerConfig::Adam { lr: 0.001, beta1: 0.9, beta2: 0.999, epsilon: 1e-8 },
+            &mut state,
+        )
+        .expect("adam update should succeed");
+        let w = params.get(&vid(0)).expect("param exists");
+        // Reference (f64): w1 = 0.5 - 0.001*(0.1/(sqrt(0.01)+1e-8)) ≈ 0.499000010
+        assert!(
+            (w.data[0] - 0.499_000_01_f32).abs() < 1e-5,
+            "Adam step 1: expected ≈0.499000, got {}",
+            w.data[0]
+        );
+    }
 }
