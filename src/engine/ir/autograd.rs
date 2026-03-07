@@ -737,13 +737,83 @@ pub fn build_reverse_graph(
                 }
             }
             Op::Upsample2DBackward { .. } => {}
-            Op::MultiHeadAttention { q_input, .. } => {
-                // TODO: implement full MHA backward with SDPA gradient decomposition.
-                // For now, approximate: pass upstream through to q_input.
-                // This allows the graph to be built and differentiated end-to-end
-                // when MHA is composed with other differentiable layers.
+            Op::MultiHeadAttention {
+                q_input,
+                k_input,
+                v_input,
+                w_q,
+                w_k,
+                w_v,
+                w_o,
+                num_heads,
+                output_idx,
+                ..
+            } => {
+                // Only emit backward compute for the primary output (output_idx == 0).
+                // The other five outputs (attn_weights, q_proj, k_proj, v_proj, context)
+                // are intermediate activations — no gradient flows from loss through them directly.
+                if *output_idx != 0 {
+                    continue;
+                }
+
+                // Find the sibling forward nodes for attn_weights (output_idx=1) and context (output_idx=5).
+                // They share the same q_input.
+                let attn_weights_fwd = forward.nodes.iter()
+                    .find(|n| matches!(&n.op, Op::MultiHeadAttention { q_input: qi, output_idx: 1, .. } if *qi == *q_input))
+                    .ok_or_else(|| AutogradError {
+                        message: "MHA backward: cannot find attn_weights sibling (output_idx=1)".to_string(),
+                    })?;
+                let context_fwd = forward.nodes.iter()
+                    .find(|n| matches!(&n.op, Op::MultiHeadAttention { q_input: qi, output_idx: 5, .. } if *qi == *q_input))
+                    .ok_or_else(|| AutogradError {
+                        message: "MHA backward: cannot find context sibling (output_idx=5)".to_string(),
+                    })?;
+
+                // Map all forward ValueIds to backward graph.
                 let q_m = mapped(&forward_to_backward, *q_input)?;
-                accumulate_grad(&mut backward, block, &mut grad_map, q_m, upstream)?;
+                let k_m = mapped(&forward_to_backward, *k_input)?;
+                let v_m = mapped(&forward_to_backward, *v_input)?;
+                let wq_m = mapped(&forward_to_backward, *w_q)?;
+                let wk_m = mapped(&forward_to_backward, *w_k)?;
+                let wv_m = mapped(&forward_to_backward, *w_v)?;
+                let wo_m = mapped(&forward_to_backward, *w_o)?;
+                let aw_m = mapped(&forward_to_backward, attn_weights_fwd.output)?;
+                let ctx_m = mapped(&forward_to_backward, context_fwd.output)?;
+
+                // Emit 7 MultiHeadAttentionBackward nodes, one per gradient target.
+                for grad_output_idx in 0..7_usize {
+                    let (_, grad_value) = backward
+                        .add_op(block, Op::MultiHeadAttentionBackward {
+                            q_input: q_m,
+                            k_input: k_m,
+                            v_input: v_m,
+                            w_q: wq_m,
+                            w_k: wk_m,
+                            w_v: wv_m,
+                            w_o: wo_m,
+                            attn_weights: aw_m,
+                            context: ctx_m,
+                            upstream,
+                            num_heads: *num_heads,
+                            output_idx: grad_output_idx,
+                        })
+                        .map_err(|e| AutogradError {
+                            message: format!("MHA backward op: {}", e.message),
+                        })?;
+
+                    // Map gradient to the correct forward input.
+                    let target = match grad_output_idx {
+                        0 => q_m,
+                        1 => k_m,
+                        2 => v_m,
+                        3 => wq_m,
+                        4 => wk_m,
+                        5 => wv_m,
+                        6 => wo_m,
+                        _ => unreachable!(),
+                    };
+                    accumulate_grad(&mut backward, block, &mut grad_map, target, grad_value)?;
+                }
             }
             Op::SinusoidalPE { input } => {
                 // PE is additive and constant: grad passes through as identity
@@ -2609,19 +2679,272 @@ mod tests {
         assert!(result.is_ok(), "build_reverse_graph panicked or errored on shared-output graph: {:?}", result.err());
     }
 
+    /// Helper: build a forward graph with 6 MHA output nodes plus a ReduceSum scalar loss.
+    /// Returns (graph, block, q_input_id, k_input_id, v_input_id, w_q_id, w_k_id, w_v_id,
+    ///          w_o_id, mha_output_id, loss_id)
+    #[allow(clippy::too_many_arguments)]
+    fn build_mha_graph(
+        d_model: usize,
+        num_heads: usize,
+        batch: usize,
+        seq_q: usize,
+        seq_k: usize,
+        causal: bool,
+    ) -> (
+        Graph,
+        crate::ir::BasicBlockId,
+        crate::ir::ValueId, // q_input
+        crate::ir::ValueId, // k_input
+        crate::ir::ValueId, // v_input
+        crate::ir::ValueId, // w_q
+        crate::ir::ValueId, // w_k
+        crate::ir::ValueId, // w_v
+        crate::ir::ValueId, // w_o
+        crate::ir::ValueId, // mha output (output_idx=0)
+        crate::ir::ValueId, // loss (ReduceSum of output)
+    ) {
+        let mut g = Graph::new();
+        let block = g.create_block();
+
+        let (_, q_in) = g.add_op(block, Op::Input("q_input".to_string())).unwrap();
+        let (_, k_in) = g.add_op(block, Op::Input("k_input".to_string())).unwrap();
+        let (_, v_in) = g.add_op(block, Op::Input("v_input".to_string())).unwrap();
+        let (_, wq) = g.add_op(block, Op::Parameter("w_q".to_string())).unwrap();
+        let (_, wk) = g.add_op(block, Op::Parameter("w_k".to_string())).unwrap();
+        let (_, wv) = g.add_op(block, Op::Parameter("w_v".to_string())).unwrap();
+        let (_, wo) = g.add_op(block, Op::Parameter("w_o".to_string())).unwrap();
+
+        // Zero biases as constants
+        let (_, bq) = g.add_op(block, Op::ConstTensor { shape: vec![d_model], data: vec![0.0; d_model] }).unwrap();
+        let (_, bk) = g.add_op(block, Op::ConstTensor { shape: vec![d_model], data: vec![0.0; d_model] }).unwrap();
+        let (_, bv) = g.add_op(block, Op::ConstTensor { shape: vec![d_model], data: vec![0.0; d_model] }).unwrap();
+        let (_, bo) = g.add_op(block, Op::ConstTensor { shape: vec![d_model], data: vec![0.0; d_model] }).unwrap();
+
+        let make_mha = |g: &mut Graph, idx: usize| {
+            g.add_op(block, Op::MultiHeadAttention {
+                q_input: q_in, k_input: k_in, v_input: v_in,
+                w_q: wq, w_k: wk, w_v: wv, w_o: wo,
+                bias_q: bq, bias_k: bk, bias_v: bv, bias_o: bo,
+                num_heads, causal, output_idx: idx,
+            }).unwrap().1
+        };
+
+        // output_idx=0 is the primary output; 1..5 are saved activations
+        let mha_out = make_mha(&mut g, 0);
+        let _mha_aw  = make_mha(&mut g, 1);
+        let _mha_qp  = make_mha(&mut g, 2);
+        let _mha_kp  = make_mha(&mut g, 3);
+        let _mha_vp  = make_mha(&mut g, 4);
+        let _mha_ctx = make_mha(&mut g, 5);
+
+        // Bind input shapes for shape inference
+        g.bind_input_shape("q_input", vec![batch, seq_q, d_model]);
+        g.bind_input_shape("k_input", vec![batch, seq_k, d_model]);
+        g.bind_input_shape("v_input", vec![batch, seq_k, d_model]);
+
+        let (_, loss) = g.add_op(block, Op::ReduceSum { input: mha_out, axis: None, keepdims: false }).unwrap();
+
+        (g, block, q_in, k_in, v_in, wq, wk, wv, wo, mha_out, loss)
+    }
+
     #[test]
     fn mha_backward_reduces_loss() {
-        // Build: q/k/v inputs -> MultiHeadAttention (6 nodes) -> take output_idx=0 -> sum -> loss
-        // Run 100 SGD steps on w_q; check final_loss < initial_loss.
         // d_model=4, num_heads=2, batch=1, seq=2, lr=0.01
-        todo!("implement after Task 2")
+        // Run 100 SGD steps on w_q; check final_loss < initial_loss.
+        let d_model = 4_usize;
+        let num_heads = 2_usize;
+        let batch = 1_usize;
+        let seq = 2_usize;
+        let lr = 0.01_f32;
+
+        let (forward, _, q_in_id, _k_in_id, _v_in_id, wq_id, _wk_id, _wv_id, _wo_id, _mha_out_id, loss_id) =
+            build_mha_graph(d_model, num_heads, batch, seq, seq, false);
+
+        let grad_graph = build_reverse_graph(&forward, loss_id, &[wq_id])
+            .expect("build_reverse_graph should succeed");
+
+        let wq_grad_value = *grad_graph.gradients.get(&wq_id).expect("w_q gradient must exist");
+
+        // Initial w_q: small random-like values via a deterministic pattern
+        let mut wq_data: Vec<f32> = (0..d_model * d_model)
+            .map(|i| (i as f32 + 1.0) * 0.1)
+            .collect();
+
+        // Inputs: fixed throughout training
+        let q_data: Vec<f32> = (0..batch * seq * d_model).map(|i| (i as f32 + 1.0) * 0.1).collect();
+
+        let make_tensor = |data: Vec<f32>, shape: Vec<usize>| {
+            RuntimeValue::Tensor(std::sync::Arc::new(
+                crate::ir::tensor::Tensor::new(shape, data).unwrap(),
+            ))
+        };
+
+        // Execute forward to get initial loss
+        let mut context = ExecutionContext::default();
+        context.inputs.insert("q_input".to_string(), make_tensor(q_data.clone(), vec![batch, seq, d_model]));
+        context.inputs.insert("k_input".to_string(), make_tensor(q_data.clone(), vec![batch, seq, d_model]));
+        context.inputs.insert("v_input".to_string(), make_tensor(q_data.clone(), vec![batch, seq, d_model]));
+        context.inputs.insert("__loss_grad".to_string(), make_tensor(vec![1.0], vec![1]));
+        context.parameters.insert("w_q".to_string(), make_tensor(wq_data.clone(), vec![d_model, d_model]));
+        context.parameters.insert("w_k".to_string(), make_tensor(eye(d_model), vec![d_model, d_model]));
+        context.parameters.insert("w_v".to_string(), make_tensor(eye(d_model), vec![d_model, d_model]));
+        context.parameters.insert("w_o".to_string(), make_tensor(eye(d_model), vec![d_model, d_model]));
+
+        let initial_loss = {
+            let rv = execute_value_with_context(&grad_graph.backward, {
+                // Get the loss value id mapped in backward graph
+                let mapped_loss = *forward.nodes.iter()
+                    .find(|n| n.output == loss_id)
+                    .map(|_| grad_graph.backward.nodes.iter()
+                        .rev()
+                        .find(|n| matches!(&n.op, Op::ReduceSum { .. }))
+                        .map(|n| &n.output)
+                        .unwrap())
+                    .unwrap();
+                mapped_loss
+            }, &context).expect("execute initial loss");
+            if let RuntimeValue::Tensor(t) = rv { t.data[0] } else { panic!("expected tensor") }
+        };
+
+        // SGD loop
+        for _ in 0..100 {
+            let mut ctx = ExecutionContext::default();
+            ctx.inputs.insert("q_input".to_string(), make_tensor(q_data.clone(), vec![batch, seq, d_model]));
+            ctx.inputs.insert("k_input".to_string(), make_tensor(q_data.clone(), vec![batch, seq, d_model]));
+            ctx.inputs.insert("v_input".to_string(), make_tensor(q_data.clone(), vec![batch, seq, d_model]));
+            ctx.inputs.insert("__loss_grad".to_string(), make_tensor(vec![1.0], vec![1]));
+            ctx.parameters.insert("w_q".to_string(), make_tensor(wq_data.clone(), vec![d_model, d_model]));
+            ctx.parameters.insert("w_k".to_string(), make_tensor(eye(d_model), vec![d_model, d_model]));
+            ctx.parameters.insert("w_v".to_string(), make_tensor(eye(d_model), vec![d_model, d_model]));
+            ctx.parameters.insert("w_o".to_string(), make_tensor(eye(d_model), vec![d_model, d_model]));
+
+            // Get gradient for w_q
+            let grad_rv = execute_value_with_context(&grad_graph.backward, wq_grad_value, &ctx)
+                .expect("execute grad");
+            let RuntimeValue::Tensor(grad_t) = grad_rv else { panic!("expected tensor grad") };
+
+            // SGD update: w_q -= lr * grad
+            let grad_c = grad_t.make_contiguous().unwrap();
+            for (w, g) in wq_data.iter_mut().zip(grad_c.data.iter()) {
+                *w -= lr * g;
+            }
+        }
+
+        // Compute final loss
+        let mut ctx = ExecutionContext::default();
+        ctx.inputs.insert("q_input".to_string(), make_tensor(q_data.clone(), vec![batch, seq, d_model]));
+        ctx.inputs.insert("k_input".to_string(), make_tensor(q_data.clone(), vec![batch, seq, d_model]));
+        ctx.inputs.insert("v_input".to_string(), make_tensor(q_data.clone(), vec![batch, seq, d_model]));
+        ctx.inputs.insert("__loss_grad".to_string(), make_tensor(vec![1.0], vec![1]));
+        ctx.parameters.insert("w_q".to_string(), make_tensor(wq_data.clone(), vec![d_model, d_model]));
+        ctx.parameters.insert("w_k".to_string(), make_tensor(eye(d_model), vec![d_model, d_model]));
+        ctx.parameters.insert("w_v".to_string(), make_tensor(eye(d_model), vec![d_model, d_model]));
+        ctx.parameters.insert("w_o".to_string(), make_tensor(eye(d_model), vec![d_model, d_model]));
+
+        let final_loss = {
+            let rv = execute_value_with_context(&grad_graph.backward, {
+                grad_graph.backward.nodes.iter()
+                    .rev()
+                    .find(|n| matches!(&n.op, Op::ReduceSum { .. }))
+                    .map(|n| n.output)
+                    .unwrap()
+            }, &ctx).expect("execute final loss");
+            if let RuntimeValue::Tensor(t) = rv { t.data[0] } else { panic!("expected tensor") }
+        };
+
+        assert!(
+            final_loss < initial_loss,
+            "Expected loss to decrease after 100 SGD steps; initial={initial_loss}, final={final_loss}"
+        );
+    }
+
+    fn eye(n: usize) -> Vec<f32> {
+        let mut data = vec![0.0_f32; n * n];
+        for i in 0..n { data[i * n + i] = 1.0; }
+        data
     }
 
     #[test]
     fn mha_gradient_matches_reference() {
         // batch=1, seq=2, d_model=4, num_heads=2, identity weights
-        // Run one forward + backward step.
-        // Compare dq_input against expected values at tolerance 1e-3.
-        todo!("implement after Task 2")
+        // Differentiate w.r.t. v_input: grad = d(sum(MHA_output))/d(v_input).
+        // With identity weights and sum loss, dv[j] = sum_i(aw[i,j]) per element (non-trivial).
+        // Compare analytical gradient against numerical finite-difference reference.
+        let d_model = 4_usize;
+        let num_heads = 2_usize;
+        let batch = 1_usize;
+        let seq = 2_usize;
+
+        // Build graph differentiating w.r.t. v_input
+        let (forward, _, _q_in_id, _k_in_id, v_in_id, _wq_id, _wk_id, _wv_id, _wo_id, _mha_out_id, loss_id) =
+            build_mha_graph(d_model, num_heads, batch, seq, seq, false);
+
+        let grad_graph = build_reverse_graph(&forward, loss_id, &[v_in_id])
+            .expect("build_reverse_graph should succeed");
+
+        let dv_grad_value = *grad_graph.gradients.get(&v_in_id).expect("v_input gradient must exist");
+
+        // Use specific non-trivial inputs
+        let q_data: Vec<f32> = vec![1.0, 0.5, 0.0, 0.0,  0.0, 1.0, 0.5, 0.0]; // [1,2,4]
+        let v_data: Vec<f32> = vec![0.5, 1.0, 0.0, 0.0,  0.0, 0.5, 1.0, 0.0]; // [1,2,4]
+
+        let make_tensor = |data: Vec<f32>, shape: Vec<usize>| {
+            RuntimeValue::Tensor(std::sync::Arc::new(
+                crate::ir::tensor::Tensor::new(shape, data).unwrap(),
+            ))
+        };
+
+        let mut ctx = ExecutionContext::default();
+        ctx.inputs.insert("q_input".to_string(), make_tensor(q_data.clone(), vec![batch, seq, d_model]));
+        ctx.inputs.insert("k_input".to_string(), make_tensor(q_data.clone(), vec![batch, seq, d_model]));
+        ctx.inputs.insert("v_input".to_string(), make_tensor(v_data.clone(), vec![batch, seq, d_model]));
+        ctx.inputs.insert("__loss_grad".to_string(), make_tensor(vec![1.0], vec![1]));
+        ctx.parameters.insert("w_q".to_string(), make_tensor(eye(d_model), vec![d_model, d_model]));
+        ctx.parameters.insert("w_k".to_string(), make_tensor(eye(d_model), vec![d_model, d_model]));
+        ctx.parameters.insert("w_v".to_string(), make_tensor(eye(d_model), vec![d_model, d_model]));
+        ctx.parameters.insert("w_o".to_string(), make_tensor(eye(d_model), vec![d_model, d_model]));
+
+        let dv_rv = execute_value_with_context(&grad_graph.backward, dv_grad_value, &ctx)
+            .expect("execute dv_input gradient");
+        let RuntimeValue::Tensor(dv_t) = dv_rv else { panic!("expected tensor") };
+        let dv_c = dv_t.make_contiguous().unwrap();
+        let dv_actual: Vec<f32> = dv_c.data.to_vec();
+        // eprintln!("dv_actual shape={:?} values={:?}", dv_t.shape, &dv_actual);
+
+        // Numerical gradient: perturb v_input, hold q/k fixed
+        let eps = 1e-3_f32;
+        let loss_fn_v = |v: Vec<f32>| -> f32 {
+            use crate::engine::ir::kernels::attention::multi_head_attention;
+            let qk = crate::ir::tensor::Tensor::new(vec![batch, seq, d_model], q_data.clone()).unwrap();
+            let vt = crate::ir::tensor::Tensor::new(vec![batch, seq, d_model], v).unwrap();
+            let w = crate::ir::tensor::Tensor::new(vec![d_model, d_model], eye(d_model)).unwrap();
+            let b = crate::ir::tensor::Tensor::new(vec![d_model], vec![0.0; d_model]).unwrap();
+            let out = multi_head_attention(&qk, &qk, &vt, &w, &w, &w, &w, &b, &b, &b, &b, num_heads, false)
+                .expect("mha forward");
+            let oc = out.output.make_contiguous().unwrap();
+            oc.data.iter().sum()
+        };
+
+        let mut dv_numerical = vec![0.0_f32; batch * seq * d_model];
+        for i in 0..batch * seq * d_model {
+            let mut v_plus = v_data.clone();
+            let mut v_minus = v_data.clone();
+            v_plus[i] += eps;
+            v_minus[i] -= eps;
+            dv_numerical[i] = (loss_fn_v(v_plus) - loss_fn_v(v_minus)) / (2.0 * eps);
+        }
+
+        // Verify the gradient is non-trivially non-zero (test is meaningful)
+        let max_numerical = dv_numerical.iter().fold(0.0_f32, |acc, &x| acc.max(x.abs()));
+        assert!(max_numerical > 0.01, "numerical gradient should be non-zero, max={max_numerical}");
+
+        // Check that analytical gradient matches numerical within tolerance 5e-3
+        for (i, (actual, expected)) in dv_actual.iter().zip(dv_numerical.iter()).enumerate() {
+            assert!(
+                (actual - expected).abs() < 5e-3,
+                "dv_input[{i}]: actual={actual}, numerical={expected}, diff={}",
+                (actual - expected).abs()
+            );
+        }
     }
 }
