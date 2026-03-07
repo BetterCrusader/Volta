@@ -167,6 +167,10 @@ pub fn train_graph_with_backend(
             tracked_params.push((name, value_id));
         }
     }
+    let tracked_param_names: HashMap<ValueId, String> = tracked_params
+        .iter()
+        .map(|(name, value_id)| (*value_id, name.clone()))
+        .collect();
 
     let mut optimizer_state = OptimizerState::default();
     let param_value_ids = tracked_params.iter().map(|(_, v)| *v).collect::<Vec<_>>();
@@ -259,8 +263,10 @@ pub fn train_graph_with_backend(
                 });
             };
 
-            epoch_loss_sum +=
+            let batch_loss =
                 scalar_from_runtime(loss_runtime.clone()).map_err(|e| TrainError { message: e })?;
+            ensure_finite_scalar("forward", "loss", batch_loss)?;
+            epoch_loss_sum += batch_loss;
             train_batches += 1;
 
             let seed = ones_like(&loss_runtime).map_err(|e| TrainError { message: e })?;
@@ -292,12 +298,18 @@ pub fn train_graph_with_backend(
                 let grad_tensor = runtime_to_tensor(grad_runtime).map_err(|e| TrainError {
                     message: format!("Gradient for '{name}' is invalid: {e}"),
                 })?;
+                ensure_finite_tensor("backward", &format!("gradient '{name}'"), &grad_tensor)?;
                 match accum_grads.get_mut(value_id) {
                     Some(existing) => {
                         let data = Arc::make_mut(&mut existing.data);
                         for (a, &b) in data.iter_mut().zip(grad_tensor.data.iter()) {
                             *a += b;
                         }
+                        ensure_finite_tensor(
+                            "backward",
+                            &format!("accumulated gradient '{name}'"),
+                            existing,
+                        )?;
                     }
                     None => {
                         accum_grads.insert(*value_id, grad_tensor);
@@ -327,6 +339,12 @@ pub fn train_graph_with_backend(
 
             // Gradient clipping by global norm
             let mut gradients_by_id = gradients_by_id;
+            ensure_finite_named_tensors(
+                "backward",
+                "gradient",
+                &gradients_by_id,
+                &tracked_param_names,
+            )?;
             if let Some(max_norm) = config.clip_grad {
                 if max_norm > 0.0 {
                     let global_sq_norm: f32 = gradients_by_id
@@ -346,6 +364,12 @@ pub fn train_graph_with_backend(
                     }
                 }
             }
+            ensure_finite_named_tensors(
+                "backward",
+                "gradient",
+                &gradients_by_id,
+                &tracked_param_names,
+            )?;
 
             backend
                 .apply_gradients(
@@ -358,6 +382,13 @@ pub fn train_graph_with_backend(
                 .map_err(|e| TrainError {
                     message: format!("Optimizer step failed: {}", e.message),
                 })?;
+            ensure_finite_named_tensors(
+                "optimizer",
+                "parameter",
+                &raw_params,
+                &tracked_param_names,
+            )?;
+            ensure_finite_optimizer_state("optimizer", &optimizer_state, &tracked_param_names)?;
 
             // Sync arc_params with updated raw_params (one Arc::new per updated param)
             for (value_id, tensor) in &raw_params {
@@ -382,6 +413,12 @@ pub fn train_graph_with_backend(
             }
 
             let mut gradients_by_id = accum_grads;
+            ensure_finite_named_tensors(
+                "backward",
+                "gradient",
+                &gradients_by_id,
+                &tracked_param_names,
+            )?;
 
             // Gradient clipping
             if let Some(max_norm) = config.clip_grad {
@@ -403,6 +440,12 @@ pub fn train_graph_with_backend(
                     }
                 }
             }
+            ensure_finite_named_tensors(
+                "backward",
+                "gradient",
+                &gradients_by_id,
+                &tracked_param_names,
+            )?;
 
             backend
                 .apply_gradients(
@@ -415,6 +458,13 @@ pub fn train_graph_with_backend(
                 .map_err(|e| TrainError {
                     message: format!("Optimizer step (flush) failed: {}", e.message),
                 })?;
+            ensure_finite_named_tensors(
+                "optimizer",
+                "parameter",
+                &raw_params,
+                &tracked_param_names,
+            )?;
+            ensure_finite_optimizer_state("optimizer", &optimizer_state, &tracked_param_names)?;
 
             for (value_id, tensor) in &raw_params {
                 if gradients_by_id.contains_key(value_id) {
@@ -428,6 +478,7 @@ pub fn train_graph_with_backend(
         } else {
             0.0
         };
+        ensure_finite_scalar("forward", "epoch_train_loss", epoch_train_loss)?;
 
         if !val_dataset.is_empty() {
             let mut val_loss_sum = 0.0;
@@ -453,8 +504,10 @@ pub fn train_graph_with_backend(
                             .to_string(),
                     });
                 };
-                val_loss_sum +=
+                let val_loss =
                     scalar_from_runtime(loss_runtime).map_err(|e| TrainError { message: e })?;
+                ensure_finite_scalar("forward", "validation_loss", val_loss)?;
+                val_loss_sum += val_loss;
 
                 // Compute accuracy if logits are available
                 #[allow(clippy::collapsible_if)]
@@ -491,6 +544,7 @@ pub fn train_graph_with_backend(
                 }
             }
             let avg_val_loss = val_loss_sum / val_dataset.len() as f32;
+            ensure_finite_scalar("forward", "epoch_validation_loss", avg_val_loss)?;
             final_val_loss_out = Some(avg_val_loss);
 
             if (epoch + 1) % 10 == 0 || epoch == config.epochs - 1 {
@@ -556,6 +610,17 @@ pub fn train_graph_with_backend(
                 for (value_id, tensor) in &raw_params {
                     arc_params.insert(*value_id, Arc::new(tensor.clone()));
                 }
+                ensure_finite_named_tensors(
+                    "early_stopping_restore",
+                    "parameter",
+                    &raw_params,
+                    &tracked_param_names,
+                )?;
+                ensure_finite_optimizer_state(
+                    "early_stopping_restore",
+                    &optimizer_state,
+                    &tracked_param_names,
+                )?;
             }
         }
     }
@@ -578,7 +643,9 @@ pub fn train_graph_with_backend(
                 message: "Forward graph produced no final loss output".to_string(),
             });
         };
-        scalar_from_runtime(loss_runtime).map_err(|e| TrainError { message: e })?
+        let loss = scalar_from_runtime(loss_runtime).map_err(|e| TrainError { message: e })?;
+        ensure_finite_scalar("forward", "final_loss", loss)?;
+        loss
     } else {
         0.0
     };
@@ -596,6 +663,95 @@ pub fn train_graph_with_backend(
         final_val_loss: final_val_loss_out,
         optimizer_state,
     })
+}
+
+fn ensure_finite_scalar(stage: &str, label: &str, value: f32) -> Result<(), TrainError> {
+    if value.is_finite() {
+        Ok(())
+    } else {
+        Err(TrainError {
+            message: format!("Non-finite {stage} {label}: {value}"),
+        })
+    }
+}
+
+fn ensure_finite_tensor(stage: &str, label: &str, tensor: &Tensor) -> Result<(), TrainError> {
+    let contiguous = tensor.make_contiguous().map_err(|err| TrainError {
+        message: format!("Invalid {stage} {label}: {}", err.message),
+    })?;
+    for (index, value) in contiguous
+        .data
+        .iter()
+        .take(contiguous.logical_len())
+        .enumerate()
+    {
+        if !value.is_finite() {
+            return Err(TrainError {
+                message: format!("Non-finite {stage} {label} at element {index}: {value}"),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn ensure_finite_named_tensors(
+    stage: &str,
+    tensor_kind: &str,
+    tensors: &HashMap<ValueId, Tensor>,
+    tracked_param_names: &HashMap<ValueId, String>,
+) -> Result<(), TrainError> {
+    for (value_id, tensor) in tensors {
+        let label = tracked_param_names
+            .get(value_id)
+            .map(|name| format!("{tensor_kind} '{name}' ({value_id})"))
+            .unwrap_or_else(|| format!("{tensor_kind} {value_id}"));
+        ensure_finite_tensor(stage, &label, tensor)?;
+    }
+    Ok(())
+}
+
+fn ensure_finite_optimizer_state(
+    stage: &str,
+    state: &OptimizerState,
+    tracked_param_names: &HashMap<ValueId, String>,
+) -> Result<(), TrainError> {
+    ensure_finite_named_tensors(
+        stage,
+        "optimizer_state.adam_m",
+        &state.adam_m,
+        tracked_param_names,
+    )?;
+    ensure_finite_named_tensors(
+        stage,
+        "optimizer_state.adam_v",
+        &state.adam_v,
+        tracked_param_names,
+    )?;
+    ensure_finite_named_tensors(
+        stage,
+        "optimizer_state.rms_v",
+        &state.rms_v,
+        tracked_param_names,
+    )?;
+    ensure_finite_named_tensors(
+        stage,
+        "optimizer_state.rms_buf",
+        &state.rms_buf,
+        tracked_param_names,
+    )?;
+    ensure_finite_named_tensors(
+        stage,
+        "optimizer_state.adagrad_acc",
+        &state.adagrad_acc,
+        tracked_param_names,
+    )?;
+    ensure_finite_named_tensors(
+        stage,
+        "optimizer_state.lars_vel",
+        &state.lars_vel,
+        tracked_param_names,
+    )?;
+    Ok(())
 }
 
 fn collect_parameter_values(graph: &Graph) -> HashMap<String, ValueId> {
@@ -950,6 +1106,69 @@ mod tests {
         assert!((result.final_loss - 1.0).abs() < 1e-6);
     }
 
+    #[test]
+    fn train_graph_rejects_non_finite_forward_loss() {
+        let (graph, loss) = build_linear_mse_graph();
+        let dataset = vec![sample(f32::NAN, 1.0)];
+
+        let err = train_graph(
+            &graph,
+            loss,
+            single_weight_params(0.0),
+            &dataset,
+            &[],
+            &TrainConfig::new(1, OptimizerConfig::Sgd { lr: 0.01 }),
+        )
+        .expect_err("non-finite forward loss must fail");
+
+        assert!(err.message.contains("Non-finite forward loss"));
+    }
+
+    #[test]
+    fn train_graph_rejects_non_finite_optimizer_parameters() {
+        let (graph, loss) = build_linear_mse_graph();
+        let dataset = vec![sample(1.0e10, 0.0)];
+
+        let err = train_graph(
+            &graph,
+            loss,
+            single_weight_params(1.0),
+            &dataset,
+            &[],
+            &TrainConfig::new(1, OptimizerConfig::Sgd { lr: 1.0e20 }),
+        )
+        .expect_err("non-finite optimizer output must fail");
+
+        assert!(err.message.contains("Non-finite optimizer parameter"));
+        assert!(err.message.contains("w"));
+    }
+
+    #[test]
+    fn train_graph_long_loop_sgd_is_deterministic() {
+        assert_long_loop_is_deterministic(OptimizerConfig::Sgd { lr: 0.01 });
+    }
+
+    #[test]
+    fn train_graph_long_loop_adam_is_deterministic() {
+        assert_long_loop_is_deterministic(OptimizerConfig::Adam {
+            lr: 0.03,
+            beta1: 0.9,
+            beta2: 0.999,
+            epsilon: 1e-8,
+        });
+    }
+
+    #[test]
+    fn train_graph_long_loop_adamw_is_deterministic() {
+        assert_long_loop_is_deterministic(OptimizerConfig::AdamW {
+            lr: 0.02,
+            beta1: 0.9,
+            beta2: 0.999,
+            epsilon: 1e-8,
+            weight_decay: 0.01,
+        });
+    }
+
     fn build_linear_mse_graph() -> (Graph, crate::ir::ValueId) {
         let mut graph = Graph::new();
         let block = graph.create_block();
@@ -988,6 +1207,59 @@ mod tests {
             Tensor::new(vec![1, 1], vec![y]).expect("valid tensor"),
         );
         TrainSample { inputs }
+    }
+
+    fn single_weight_params(weight: f32) -> HashMap<String, Tensor> {
+        let mut params = HashMap::new();
+        params.insert(
+            "w".to_string(),
+            Tensor::new(vec![1, 1], vec![weight]).expect("valid tensor"),
+        );
+        params
+    }
+
+    fn assert_long_loop_is_deterministic(optimizer: OptimizerConfig) {
+        let first = run_seeded_long_loop(0x5EED, optimizer.clone());
+        let second = run_seeded_long_loop(0x5EED, optimizer);
+
+        assert_eq!(first.final_loss.to_bits(), second.final_loss.to_bits());
+        assert_eq!(first.final_parameters, second.final_parameters);
+    }
+
+    fn run_seeded_long_loop(seed: u64, optimizer: OptimizerConfig) -> TrainResult {
+        let (graph, loss) = build_linear_mse_graph();
+        let config = TrainConfig::new(24, optimizer);
+        let params = single_weight_params(seeded_range(seed, -0.25, 0.25));
+        let dataset = seeded_linear_dataset(seed, 6);
+
+        let result = train_graph(&graph, loss, params, &dataset, &[], &config)
+            .expect("long-loop training should succeed");
+
+        assert!(result.final_loss.is_finite());
+        result
+    }
+
+    fn seeded_linear_dataset(seed: u64, len: usize) -> Vec<TrainSample> {
+        let mut state = seed;
+        let mut dataset = Vec::with_capacity(len);
+        for _ in 0..len {
+            let x = seeded_next(&mut state) * 2.0 - 1.0;
+            dataset.push(sample(x, x * 2.0));
+        }
+        dataset
+    }
+
+    fn seeded_range(seed: u64, min: f32, max: f32) -> f32 {
+        let mut state = seed ^ 0x9E37_79B9_7F4A_7C15;
+        min + (max - min) * seeded_next(&mut state)
+    }
+
+    fn seeded_next(state: &mut u64) -> f32 {
+        *state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        let bits = (*state >> 40) as u32;
+        bits as f32 / (1u32 << 24) as f32
     }
 
     fn weight_scalar(result: &TrainResult, name: &str) -> f32 {
