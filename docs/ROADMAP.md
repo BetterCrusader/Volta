@@ -9,15 +9,12 @@ Last updated: 2026-03-08
 - **Phase 3 — Reliability and Correctness**: MHA full backward pass, panic-free autograd, Tensor::PartialEq.
 - **Phase 4 — CPU Training Path Hardening**: Long-loop stability, fail-fast non-finite guards, compile-reuse regression gate.
 - **Phase 5 — End-to-End PyTorch Parity**: ConvNet and tiny-transformer parity against PyTorch. AOT training codegen confirmed MLP-only, with C path = SGD-only and Rust path limited to SGD/Adam/AdamW/Adagrad.
-
-## In Progress
-
 - **Phase 6 — Product Surface Hardening**: CLI/help/output, `doctor` capability matrix, and docs aligned with the real CPU portability contract: Tier 1 source/runtime CPU support is x86_64 + ARM64; everything else is best-effort.
-- **Phase 7 — Packaging and Install Story**: Release workflow and smoke tests aligned with what is actually shipped, without implying extra release artifacts that are not validated.
+- **Phase 7 — Packaging and Install Story**: Release workflow and smoke tests aligned with what is actually shipped, including Linux ARM64 validation on a native ARM64 runner.
 
 ## Planned
 
-- Linux ARM64 release artifact pipeline and validation
+- **Phase 8 — CPU Throughput Milestone**: measure portable vs native deltas, identify real bottlenecks, and prepare autotuning/calibration work without overpromising.
 - Broader packaged target coverage beyond the current shipped set
 
 ## Later / Unmapped

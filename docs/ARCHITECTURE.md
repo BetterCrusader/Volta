@@ -224,10 +224,9 @@ Read at startup via `CompilerFlags::from_env()` in `compiler_flags.rs`:
 | `VOLTA_DEBUG_VERIFY` | `0\|1\|true\|false` | `true` (debug), `false` (release) |
 | `VOLTA_UNSAFE_OPT` | `0\|1\|true\|false` | `false` |
 | `VOLTA_DETERMINISM` | `strict\|balanced\|fast` | `balanced` |
-| `VOLTA_CPU_TARGET` | `portable\|native` | `portable` |
 | `VOLTA_GPU_AVAILABLE` | `0\|1\|true\|false` | auto-detect |
 
-For AOT codegen, the explicit CLI flag `--cpu-target <portable|native>` is the contract that matters. The env var is just the ambient default seen by `CompilerFlags`/`doctor`.
+For AOT codegen, the explicit CLI flag `--cpu-target <portable|native>` is the supported contract. CPU target policy is not meant to hide behind ambient env hacks.
 
 ---
 

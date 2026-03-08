@@ -49,10 +49,9 @@ These release artifacts are the current packaged binaries, not the full CPU supp
 | Platform | File |
 |----------|------|
 | Linux x86-64 | `volta-vX.Y.Z-linux-x86_64.tar.gz` |
+| Linux ARM64 | `volta-vX.Y.Z-linux-arm64.tar.gz` |
 | macOS (Apple Silicon + Intel) | `volta-vX.Y.Z-macos-universal.tar.gz` |
 | Windows x86-64 | `volta-vX.Y.Z-windows-x86_64.zip` |
-
-There is currently **no shipped Linux ARM64 release artifact** in this workflow.
 
 Replace `vX.Y.Z` with the release version shown on the releases page.
 
@@ -185,7 +184,7 @@ train brain on bench_data
 
 - **Tier 1 source/runtime CPU support**: x86_64 + ARM64
 - **Other CPU architectures**: best-effort only
-- **Shipped release artifacts today**: Linux x86_64, macOS universal, Windows x86_64
+- **Shipped release artifacts today**: Linux x86_64, Linux ARM64, macOS universal, Windows x86_64
 - **`--cpu-target`**: `portable` is the default for `compile` and `compile-train`; `native` is explicit opt-in and may emit host-specific binaries
 - **`compile-train` coverage**: MLP-only today
 - **C `compile-train` path**: SGD only
@@ -202,8 +201,8 @@ See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full current state and next ste
 
 Short version:
 - **Done (Phases 1–5)**: interpreter, IR, codegen, optimizer coverage split made explicit, benchmark harness, end-to-end PyTorch parity for MLP/ConvNet/tiny-transformer
-- **In progress (Phases 6–7)**: product-surface hardening, truthful CPU portability docs, and release/workflow verification aligned with the actually shipped artifacts
-- **Later**: autotune tile sizes, broader model coverage beyond MLP, more packaged targets beyond current release artifacts
+- **Done (Phases 6–7)**: product-surface hardening, truthful CPU portability docs, and release/workflow verification aligned with the actually shipped artifacts on x86_64 and ARM64
+- **Later**: CPU throughput/autotuning, broader model coverage beyond MLP, more packaged targets beyond the current supported set
 
 ---
 
