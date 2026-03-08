@@ -56,3 +56,21 @@ jobs:
           components: rustfmt
       - name: cargo fmt check
         run: cargo fmt --all -- --check
+
+  smoke-cli:
+    name: Smoke CLI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: dtolnay/rust-toolchain@4f366e621dc8fa63f557ca04b8f4361824a35a45
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@9bdad043e88c75890e36ad3bbc8d27f0090dd609
+      - name: build release CLI
+        run: cargo build --release --locked
+      - name: help mentions cpu-target
+        run: ./target/release/volta help | grep -- "--cpu-target <portable|native>"
+      - name: doctor runs
+        run: ./target/release/volta doctor
+      - name: xor example runs
+        run: ./target/release/volta run examples/xor.vt
