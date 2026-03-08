@@ -3,17 +3,17 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-03-08T14:56:34.232Z"
+last_updated: "2026-03-08T15:01:28.480Z"
 progress:
   total_phases: 7
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 22
-  completed_plans: 20
+  completed_plans: 22
 ---
 
 # State: Volta
 
-**Останнє оновлення:** 2026-03-08T03:35:00+02:00
+**Останнє оновлення:** 2026-03-08T15:01:00Z
 
 ---
 
@@ -26,10 +26,10 @@ progress:
 
 ## Current Position
 
-**Фаза:** 7 — Packaging і install story for distributable releases (IN PROGRESS)
-**План:** 07-01 DONE — ARM build unblock + macOS universal binary pipeline
-**Статус:** 07-01 complete — x86-v4 removed from gemm; release.yml restructured with lipo merge; 20/22 plans complete
-**Прогрес:** [█████████░] 91% — 20/22 plans complete
+**Фаза:** 7 — Packaging і install story for distributable releases (COMPLETE)
+**План:** 07-03 DONE — README Install section + platform note update
+**Статус:** All 22/22 plans complete — Phase 7 fully done
+**Прогрес:** [██████████] 100% — 22/22 plans complete
 
 ```
 [x] Фаза 1 / 01-01: Remove x86-v4 from gemm features (DONE)
@@ -50,10 +50,10 @@ progress:
     [x] 06-02: README/USAGE/docs accuracy corrections (DONE)
     [x] 06-03: volta doctor rewrite — MKL/LLVM diagnostics + capability matrix (DONE)
     [x] 06-04: misleading example .vt comments corrected + cli_smoke tightened (DONE)
-[~] Фаза 7: Packaging і install story (IN PROGRESS)
+[x] Фаза 7: Packaging і install story (COMPLETE — 07-01..07-03 done)
     [x] 07-01: ARM build unblock + macOS universal binary via lipo (DONE)
-    [ ] 07-02: Smoke-test release artifact (PLANNED)
-    [ ] 07-03: README install section + download URLs (PLANNED)
+    [x] 07-02: Smoke-test release artifact (DONE)
+    [x] 07-03: README install section + download URLs (DONE)
 ```
 
 ---
@@ -70,6 +70,8 @@ progress:
 | Phase 06 P03 | 12 | 2 tasks | 2 files |
 | Phase 06 P04 | 5 | 2 tasks | 3 files |
 | Phase 07 P01 | 155 | 2 tasks | 2 files |
+| Phase 07 P03 | 2 | 1 tasks | 1 files |
+| Phase 07 P02 | 2 | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -104,6 +106,9 @@ progress:
 | Example file comments corrected in-place without touching model definitions | Only headers changed — layers/activation/optimizer lines untouched; files still parse and compile-train correctly |
 | Removed x86-v4 from gemm: runtime CPU detection provides AVX2/NEON | No compile-time AVX-512 hard-enable needed; enables AArch64 builds (07-01) |
 | macOS entries upload raw binaries (upload_raw:true); lipo merge in release job | lipo runs on ubuntu-latest release runner; 3 final artifacts: linux tar.gz, macos-universal tar.gz, windows zip (07-01) |
+| smoke needs: build (not release); macOS smoke uses aarch64 raw binary; doctor no --strict | Avoids circular dep; aarch64 runs natively on Apple Silicon runner; MKL absent on GHA so --strict would false-fail (07-02) |
+| Install section placed before Quickstart in README | First-time users see binary install path first, not build-from-source (07-03) |
+| Platform note renamed from 'Install / platform note' to 'Platform note' | Install is now a standalone section; platform note covers CI-tested Linux/macOS and MKL requirement (07-03) |
 
 ### Відомі ризики
 
@@ -132,8 +137,8 @@ progress:
 3. Читай `.planning/codebase/CONCERNS.md`
 4. Для наступного planning кроку враховуй summaries `05-01`, `05-02`, `05-03` і verification `05-VERIFICATION.md`
 
-**Наступний крок:** виконати 07-02 (smoke-test release artifact) та 07-03 (README install section)
+**Наступний крок:** All 22/22 plans complete. Milestone v1.0 roadmap fully executed.
 
 ---
 
-*State refreshed: 2026-03-08 after 07-01 execution — ARM build unblock + macOS universal binary pipeline*
+*State refreshed: 2026-03-08 after 07-03 execution — README install section + platform note update. All phases complete.*

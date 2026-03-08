@@ -125,7 +125,7 @@ Plans:
   1. Є задокументований release flow і artifacts для підтримуваної платформи
   2. Clean install story перевірений не з dev shell, а з чистого сценарію
   3. Shipped binary проходить базові smoke checks (`help`, `doctor`, compile/run path) після install
-**Plans:** 1/3 plans executed
+**Plans:** 3/3 plans complete
 
 Plans:
 - [ ] 07-01-PLAN.md — Wave 0: Remove x86-v4 from Cargo.toml + restructure release.yml matrix to 3 artifacts with lipo for macOS universal binary (PLAT-V2-01, PLAT-V2-02, DIST-V2-01)
@@ -144,7 +144,7 @@ Plans:
 | 4. CPU training path hardening and long-loop stability | 3/3 | Complete | 2026-03-08 |
 | 5. End-to-end PyTorch parity and real model training cases | 3/3 | Complete | 2026-03-08 |
 | 6. Product surface hardening for CLI doctor examples and docs | 4/4 | Complete   | 2026-03-08 |
-| 7. Packaging and install story for distributable releases | 1/3 | In Progress|  |
+| 7. Packaging and install story for distributable releases | 3/3 | Complete   | 2026-03-08 |
 
 ---
 
