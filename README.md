@@ -28,9 +28,49 @@ Volta bets on the opposite: a compiler approach where the model is compiled into
 - CPU performance advantage disappears at B≥128 — PyTorch MKL wins on large GEMMs
 - Adam optimizer is +25% faster than PyTorch on B≤64 MLP (4.3 ms vs 5.3 ms; SGD is 35-67% faster)
 - CUDA backend: files exist and compile behind `--features cuda`, but GPU perf is uncharted
-- No installer, no package, no Python bindings — build from source only
-- Not tested on macOS or Linux (developed on Windows 11 x86-64)
+- Prebuilt binaries available for Linux, macOS, and Windows — see Install section. No Python bindings.
 - Many high-level layer types (`LSTM`, `MultiHeadAttention`, `LayerNorm`) exist in IR but are not exercised by the codegen path — only dense MLP is benchmarked end-to-end
+
+---
+
+## Install
+
+Download the prebuilt binary for your platform from the
+[latest release](https://github.com/BetterCrusader/Volta/releases/latest):
+
+| Platform | File |
+|----------|------|
+| Linux x86-64 | `volta-vX.Y.Z-linux-x86_64.tar.gz` |
+| macOS (Apple Silicon + Intel) | `volta-vX.Y.Z-macos-universal.tar.gz` |
+| Windows x86-64 | `volta-vX.Y.Z-windows-x86_64.zip` |
+
+Replace `vX.Y.Z` with the release version shown on the releases page.
+
+**Linux / macOS:**
+
+```bash
+tar xzf volta-vX.Y.Z-*.tar.gz
+chmod +x volta
+mv volta /usr/local/bin/    # or any directory already on your PATH
+volta --help
+```
+
+**Windows:**
+Unzip `volta-vX.Y.Z-windows-x86_64.zip`, then move `volta.exe` to a
+directory on your `PATH` (or add its folder to `PATH`).
+
+**Verify the install:**
+
+```bash
+volta --help
+volta doctor
+volta run examples/xor.vt   # requires the examples/ directory from the repo
+```
+
+> `volta run` requires a `.vt` source file on disk. The binary is
+> self-contained; example files are in the repository.
+
+No Rust toolchain required to run prebuilt binaries.
 
 ---
 
@@ -129,11 +169,15 @@ train brain on bench_data
 
 ---
 
-## Install / platform note
+## Platform note
 
 - **Windows x86-64**: fully tested
-- **Linux/macOS**: not tested; should compile for the interpreter path, codegen path needs LLVM 21
-- **LLVM**: required only for `volta compile` (inference DLL). Path: set `LLVM_SYS_210_PREFIX` or put `clang.exe` next to the binary.
+- **Linux x86-64**: builds and interpreter path tested in CI (Ubuntu runner)
+- **macOS (Apple Silicon + Intel)**: universal binary tested in CI (macOS runner)
+- **LLVM**: required only for `volta compile` (inference DLL). Set `LLVM_SYS_210_PREFIX`
+  or place `clang` next to the binary.
+- **MKL**: required for `compile-train --rust`. `volta doctor` shows status and install
+  instructions if missing.
 - **CUDA**: build with `--features cuda`. GPU perf not benchmarked.
 
 ---
