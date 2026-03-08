@@ -1,15 +1,14 @@
 ---
 gsd_state_version: 1.0
-milestone: v2.0
-milestone_name: reliability-product-packaging
-status: planning
-last_updated: "2026-03-08T03:35:00+02:00"
+milestone: v1.0
+milestone_name: milestone
+status: unknown
+last_updated: "2026-03-08T09:45:46.650Z"
 progress:
   total_phases: 7
   completed_phases: 5
-  total_plans: 15
-  completed_plans: 15
-  percent: 100
+  total_plans: 19
+  completed_plans: 16
 ---
 
 # State: Volta
@@ -27,10 +26,10 @@ progress:
 
 ## Current Position
 
-**Фаза:** 6 — Product surface hardening for CLI doctor examples and docs (next)
-**План:** TBD
-**Статус:** Phase 5 complete on branch; compiled ConvNet parity, honest tiny-transformer parity, and the AOT truth-pass are landed
-**Прогрес:** [██████████] 5 phases complete, next step is Phase 6 planning
+**Фаза:** 6 — Product surface hardening for CLI doctor examples and docs (in progress)
+**План:** 06-01 DONE, next: 06-02
+**Статус:** 06-01 complete — CLI smoke scaffold landed (6 tests green); Wave 1 plans unblocked
+**Прогрес:** [████████░░] 84% — 16/19 plans complete
 
 ```
 [x] Фаза 1 / 01-01: Remove x86-v4 from gemm features (DONE)
@@ -46,7 +45,8 @@ progress:
 [x] Фаза 5 / 05-01: compiled-model ConvNet parity above `train_api` (DONE)
 [x] Фаза 5 / 05-02: honest tiny-transformer compiled-model parity (DONE)
 [x] Фаза 5 / 05-03: AOT model-coverage truth pass / unsupported regression gates (DONE)
-[ ] Фаза 6: Product surface hardening (PLANNED)
+[~] Фаза 6: Product surface hardening (IN PROGRESS — 06-01 done)
+    [x] 06-01: CLI smoke test scaffold — 6-function integration test (DONE)
 [ ] Фаза 7: Packaging і install story (PLANNED)
 ```
 
@@ -59,6 +59,7 @@ progress:
 | SGD B=64 MLP-512 median | 1.703 ms (Case 2 primary bench) | PASS — 1.703 ms < 2.10 ms gate; +43% faster than PyTorch (2.440 ms) |
 | Adam vs PyTorch ratio | 4.259 ms vs PyTorch 5.343 ms = 0.797× (+25% faster) | PASS — перевищує ціль ≤1.1× |
 | SGD vs PyTorch ratio | 0.33–0.65× | PASS — 35-67% faster |
+| Phase 06 P01 CLI smoke scaffold | 8 min | 1 task | 1 file |
 
 ---
 
@@ -86,6 +87,7 @@ progress:
 | Long-loop parity must mirror the exact Rust regression fixture | Один і той самий seed/dataset/model/loop depth у `train_api.rs` і PyTorch oracle знижує шанс false confidence |
 | Compile reuse треба доводити тестом, а не припускати | 04-03 показав, що existing `plan_cache` already covers CPU training loop; правильний хід — зафіксувати це regression test'ом |
 | Stable handles лишаються локальними для training path | `Arc<RwLock<Tensor>>` живе всередині training loop; runtime/backend ABI не ламались, а snapshot boundary лишився явним |
+| CLI smoke tests use CARGO_BIN_EXE_volta (not cargo run) | Zero-rebuild binary access; temp .vt with 'use fn' model syntax triggers MLP-only rejection in compile_first_model_to_train_dll |
 
 ### Відомі ризики
 
@@ -114,7 +116,7 @@ progress:
 3. Читай `.planning/codebase/CONCERNS.md`
 4. Для наступного planning кроку враховуй summaries `05-01`, `05-02`, `05-03` і verification `05-VERIFICATION.md`
 
-**Наступний крок:** планувати `Phase 6` для CLI/help/doctor/examples/docs hardening
+**Наступний крок:** виконати Wave 1 плани Phase 6 (06-02 doctor rewrite, 06-03 examples/CLI fixes)
 
 ---
 
