@@ -109,10 +109,13 @@ Plans:
   1. `--help`/usage/output для основних команд не суперечать реальній поведінці
   2. `doctor` показує capability matrix і actionable diagnostics замість сирого технічного шуму
   3. README/examples/docs smoke-перевіряються й не ведуть користувача в dead path
-**Plans:** 0/0 plans
+**Plans:** 4 plans
 
 Plans:
-- [ ] TBD (`$gsd-plan-phase 6`)
+- [ ] 06-01-PLAN.md — Wave 0: Create tests/cli_smoke.rs integration test scaffold (6 smoke test stubs, CARGO_BIN_EXE_volta pattern)
+- [ ] 06-02-PLAN.md — Wave 1: Fix stale README claims (Adam benchmark, roadmap snapshot) and USAGE/docs/ROADMAP.md sync (UX-V2-01)
+- [ ] 06-03-PLAN.md — Wave 1: Rewrite doctor — capability matrix table, MKL/LLVM env detection, Next Steps section (UX-V2-02)
+- [ ] 06-04-PLAN.md — Wave 2: Fix misleading example .vt comments and tighten cli_smoke assertions (UX-V2-03)
 
 ### Phase 7: Packaging and install story for distributable releases
 **Goal:** Volta можна не тільки запускати локально з репо, а й нормально зібрати, роздати і встановити на чисту машину
@@ -138,10 +141,10 @@ Plans:
 | 3. Надійність і коректність | 2/2 | Complete | 2026-03-07 |
 | 4. CPU training path hardening and long-loop stability | 3/3 | Complete | 2026-03-08 |
 | 5. End-to-end PyTorch parity and real model training cases | 3/3 | Complete | 2026-03-08 |
-| 6. Product surface hardening for CLI doctor examples and docs | 0/0 | Planned | - |
+| 6. Product surface hardening for CLI doctor examples and docs | 0/4 | In Progress | - |
 | 7. Packaging and install story for distributable releases | 0/0 | Planned | - |
 
 ---
 
 *Roadmap created: 2026-03-07*
-*Last updated: 2026-03-08 — Phase 5 complete: compiled ConvNet parity, honest tiny-transformer parity, and explicit MLP-only AOT truth-pass landed; `MODEL-V2-01` remains deferred*
+*Last updated: 2026-03-08 — Phase 6 planned: 4 plans across 3 waves for CLI/doctor/examples/docs hardening*
