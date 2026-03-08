@@ -20,9 +20,9 @@ const USAGE: &str = "Usage:
   volta run <file.vt> [--quiet]
   volta check <file.vt> [--quiet]
   volta info <file.vt>
-  volta extract <model_name>
+  volta extract <file.gguf|file.safetensors>  (GGUF/SafeTensors → .vt)
   volta export-py <file.vt>
-  volta compile <file.vt> [-o <output>]
+  volta compile <file.vt> [-o <output>]       (requires --features llvm-codegen)
   volta compile-train <file.vt> [-o <output.dll>] [--rust]   (MLP-only today)
   volta doctor [--json] [--strict]
   volta init [project_dir]
@@ -778,6 +778,10 @@ struct DoctorReport {
     backends: Vec<BackendDoctorEntry>,
     warnings: Vec<String>,
     healthy: bool,
+    mkl_lib_path: Option<String>,
+    llvm_info: Option<String>,
+    sgd_backend_env: Option<String>,
+    llvm_prefix_env: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -793,6 +797,10 @@ fn collect_doctor_report() -> DoctorReport {
     let gpu_env = parse_gpu_env_status();
     let onnx_import_enabled = cfg!(feature = "onnx-import");
     let backends = collect_backend_report();
+    let mkl_lib_path = check_mkl_available();
+    let llvm_info = check_llvm_available();
+    let sgd_backend_env = std::env::var("VOLTA_SGD_BACKEND").ok();
+    let llvm_prefix_env = std::env::var("LLVM_SYS_210_PREFIX").ok();
     let mut warnings = Vec::new();
     if let Some(warning) = &gpu_env.parse_warning {
         warnings.push(warning.clone());
@@ -802,6 +810,11 @@ fn collect_doctor_report() -> DoctorReport {
             warnings.push(format!("backend '{}' is marked experimental", backend.name));
         }
     }
+    if mkl_lib_path.is_none() {
+        warnings.push(
+            "MKL not found — Adam/AdamW --rust codegen will not link; run: conda install -c conda-forge mkl  OR  set MKL_LIB_DIR".to_string(),
+        );
+    }
     let healthy = warnings.is_empty();
     DoctorReport {
         cpu_threads,
@@ -810,6 +823,10 @@ fn collect_doctor_report() -> DoctorReport {
         backends,
         warnings,
         healthy,
+        mkl_lib_path,
+        llvm_info,
+        sgd_backend_env,
+        llvm_prefix_env,
     }
 }
 
@@ -838,8 +855,12 @@ fn print_doctor(report: &DoctorReport, json: bool) {
             })
             .collect::<Vec<_>>()
             .join(",");
+        let mkl_available = report.mkl_lib_path.is_some();
+        let mkl_lib_path = report.mkl_lib_path.clone().unwrap_or_default();
+        let llvm_available = report.llvm_info.is_some();
+        let llvm_info = report.llvm_info.clone().unwrap_or_default();
         println!(
-            "{{\"tool\":\"volta-doctor\",\"version\":\"{}\",\"os\":\"{}\",\"arch\":\"{}\",\"cpu_threads\":{},\"gpu_available\":{},\"gpu_env_raw\":\"{}\",\"gpu_env_valid\":{},\"feature_onnx_import\":{},\"backends\":[{}],\"warning_count\":{},\"warnings\":[{}],\"healthy\":{},\"strict_would_fail\":{}}}",
+            "{{\"tool\":\"volta-doctor\",\"version\":\"{}\",\"os\":\"{}\",\"arch\":\"{}\",\"cpu_threads\":{},\"gpu_available\":{},\"gpu_env_raw\":\"{}\",\"gpu_env_valid\":{},\"feature_onnx_import\":{},\"mkl_available\":{},\"mkl_lib_path\":\"{}\",\"llvm_available\":{},\"llvm_info\":\"{}\",\"backends\":[{}],\"warning_count\":{},\"warnings\":[{}],\"healthy\":{},\"strict_would_fail\":{}}}",
             env!("CARGO_PKG_VERSION"),
             std::env::consts::OS,
             std::env::consts::ARCH,
@@ -848,6 +869,10 @@ fn print_doctor(report: &DoctorReport, json: bool) {
             json_escape(&raw),
             report.gpu_env.parse_warning.is_none(),
             report.onnx_import_enabled,
+            mkl_available,
+            json_escape(&mkl_lib_path),
+            llvm_available,
+            json_escape(&llvm_info),
             backends_json,
             report.warnings.len(),
             report
@@ -862,61 +887,132 @@ fn print_doctor(report: &DoctorReport, json: bool) {
         return;
     }
 
-    println!("Volta doctor");
-    println!("  version: {}", env!("CARGO_PKG_VERSION"));
-    println!("  os: {}", std::env::consts::OS);
-    println!("  arch: {}", std::env::consts::ARCH);
-    println!("  cpu_threads: {}", report.cpu_threads);
+    // --- Text output: structured sections ---
+    println!("--- Volta Doctor ---");
+    println!();
+
+    // Environment section
+    println!("Environment");
     println!(
-        "  gpu_available: {} (from VOLTA_GPU_AVAILABLE)",
-        if report.gpu_env.available {
-            "yes"
-        } else {
-            "no"
-        }
+        "  os: {} / arch: {} / threads: {}",
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        report.cpu_threads
     );
-    if let Some(raw) = &report.gpu_env.raw {
-        println!("  gpu_env_raw: {raw}");
-    }
-    if report.warnings.is_empty() {
-        println!("  warning_count: 0");
-    } else {
-        println!("  warning_count: {}", report.warnings.len());
-        for warning in &report.warnings {
-            println!("  warning: {warning}");
-        }
-    }
-    println!("  healthy: {}", if report.healthy { "yes" } else { "no" });
+    println!();
+
+    // Capability Matrix
+    println!("Capability Matrix");
     println!(
-        "  strict_would_fail: {}",
-        if report.healthy { "no" } else { "yes" }
+        "  {:<8} {:<7} {:<11} {:<10} {:<9} {}",
+        "backend", "device", "maturity", "inference", "training", "determinism (default)"
     );
     println!(
-        "  feature_onnx_import: {}",
-        if report.onnx_import_enabled {
-            "enabled"
-        } else {
-            "disabled"
-        }
+        "  {:<8} {:<7} {:<11} {:<10} {:<9} {}",
+        "-------", "------", "----------", "---------", "--------", "---------------------"
     );
-    println!("  backends:");
     for backend in &report.backends {
+        let caps = &backend.capabilities;
+        let det_parts = {
+            let mut parts = Vec::new();
+            if caps.supports_strict_determinism {
+                parts.push("strict");
+            }
+            if caps.supports_balanced_determinism {
+                parts.push("balanced");
+            }
+            if caps.supports_fast_determinism {
+                parts.push("fast");
+            }
+            parts.join("/")
+        };
         println!(
-            "    - {}: device={}, vendor={}, maturity={}, phase=inference:{} training:{}, runtime={}, gradients={}, determinism=[strict:{} balanced:{} fast:{}], default={}",
+            "  {:<8} {:<7} {:<11} {:<10} {:<9} {} ({})",
             backend.name,
-            device_class_name(backend.capabilities.device_class),
-            backend_vendor_name(backend.capabilities.vendor),
-            backend_maturity_name(backend.capabilities.maturity),
-            yes_no(backend.capabilities.supports_inference),
-            yes_no(backend.capabilities.supports_training),
-            yes_no(backend.capabilities.supports_runtime_execution),
-            yes_no(backend.capabilities.supports_gradient_updates),
-            yes_no(backend.capabilities.supports_strict_determinism),
-            yes_no(backend.capabilities.supports_balanced_determinism),
-            yes_no(backend.capabilities.supports_fast_determinism),
-            determinism_name(backend.capabilities.default_determinism),
+            device_class_name(caps.device_class),
+            backend_maturity_name(caps.maturity),
+            yes_no(caps.supports_inference),
+            yes_no(caps.supports_training),
+            det_parts,
+            determinism_name(caps.default_determinism),
         );
     }
+    println!();
+
+    // AOT Codegen section
+    println!("AOT Codegen (compile-train)");
+    println!("  Rust path (--rust):  MLP-only — other architectures rejected at compile time");
+    println!("  C path (default):    MLP-only");
+    println!();
+
+    // Environment Variables section
+    println!("Environment Variables");
+    let mkl_lib_dir = std::env::var("MKL_LIB_DIR").unwrap_or_else(|_| "not set".to_string());
+    let mklroot = std::env::var("MKLROOT").unwrap_or_else(|_| "not set".to_string());
+    let conda_prefix = std::env::var("CONDA_PREFIX").unwrap_or_else(|_| "not set".to_string());
+    println!("  MKL_LIB_DIR:         {mkl_lib_dir}");
+    println!("  MKLROOT:             {mklroot}");
+    println!("  CONDA_PREFIX:        {conda_prefix}");
+    let mkl_resolution = match &report.mkl_lib_path {
+        Some(path) => format!("OK: {path}"),
+        None => "FAIL — Adam/AdamW --rust will not link".to_string(),
+    };
+    println!("  MKL resolution:      {mkl_resolution}");
+    let sgd_backend = report
+        .sgd_backend_env
+        .as_deref()
+        .unwrap_or("not set (default: mkl)");
+    println!("  VOLTA_SGD_BACKEND:   {sgd_backend}");
+    let llvm_prefix = report.llvm_prefix_env.as_deref().unwrap_or("not set");
+    println!("  LLVM_SYS_210_PREFIX: {llvm_prefix}");
+    let llvm_clang = match &report.llvm_info {
+        Some(desc) => format!("found: {desc}"),
+        None => "not found in PATH".to_string(),
+    };
+    println!("  LLVM (clang):        {llvm_clang}");
+    println!();
+
+    // Next Steps section
+    println!("Next Steps");
+    match &report.mkl_lib_path {
+        Some(path) => println!("  [OK] MKL found at {path} — Adam/AdamW --rust codegen available"),
+        None => println!(
+            "  [WARN] MKL not found — set MKL_LIB_DIR or run: conda install -c conda-forge mkl"
+        ),
+    }
+    match &report.llvm_info {
+        Some(_) => println!("  [OK] LLVM found — volta compile available"),
+        None => println!(
+            "  [WARN] LLVM not found — volta compile requires LLVM 21; set LLVM_SYS_210_PREFIX"
+        ),
+    }
+    // GPU env warnings
+    if let Some(warning) = &report.gpu_env.parse_warning {
+        println!("  [WARN] {warning}");
+    }
+    // Backend experimental warnings (excluding MKL warning already handled above)
+    for backend in &report.backends {
+        if backend.capabilities.maturity == BackendMaturity::Experimental {
+            println!(
+                "  [WARN] backend '{}' is marked experimental",
+                backend.name
+            );
+        }
+    }
+    // Only print "all good" line if there's nothing wrong (MKL and LLVM both found, no gpu warnings)
+    if report.mkl_lib_path.is_some()
+        && report.llvm_info.is_some()
+        && report.gpu_env.parse_warning.is_none()
+    {
+        println!("  [OK] Environment looks good for interpreter and CPU training paths");
+    }
+    println!();
+
+    println!(
+        "healthy: {}  |  warnings: {}",
+        if report.healthy { "yes" } else { "no" },
+        report.warnings.len()
+    );
 }
 
 fn collect_backend_report() -> Vec<BackendDoctorEntry> {
