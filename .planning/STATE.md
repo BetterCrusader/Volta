@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-03-08T09:45:46.650Z"
+last_updated: "2026-03-08T09:52:06.158Z"
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 19
-  completed_plans: 16
+  completed_plans: 17
 ---
 
 # State: Volta
@@ -27,9 +27,9 @@ progress:
 ## Current Position
 
 **Фаза:** 6 — Product surface hardening for CLI doctor examples and docs (in progress)
-**План:** 06-01 DONE, next: 06-02
-**Статус:** 06-01 complete — CLI smoke scaffold landed (6 tests green); Wave 1 plans unblocked
-**Прогрес:** [████████░░] 84% — 16/19 plans complete
+**План:** 06-02 DONE, next: 06-03
+**Статус:** 06-02 complete — README/USAGE/docs/ROADMAP.md corrected; 17/19 plans complete
+**Прогрес:** [█████████░] 89% — 17/19 plans complete
 
 ```
 [x] Фаза 1 / 01-01: Remove x86-v4 from gemm features (DONE)
@@ -47,6 +47,7 @@ progress:
 [x] Фаза 5 / 05-03: AOT model-coverage truth pass / unsupported regression gates (DONE)
 [~] Фаза 6: Product surface hardening (IN PROGRESS — 06-01 done)
     [x] 06-01: CLI smoke test scaffold — 6-function integration test (DONE)
+    [x] 06-02: README/USAGE/docs accuracy corrections (DONE)
 [ ] Фаза 7: Packaging і install story (PLANNED)
 ```
 
@@ -60,8 +61,7 @@ progress:
 | Adam vs PyTorch ratio | 4.259 ms vs PyTorch 5.343 ms = 0.797× (+25% faster) | PASS — перевищує ціль ≤1.1× |
 | SGD vs PyTorch ratio | 0.33–0.65× | PASS — 35-67% faster |
 | Phase 06 P01 CLI smoke scaffold | 8 min | 1 task | 1 file |
-
----
+| Phase 06 P02 README/USAGE/docs accuracy | 8 min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -88,6 +88,8 @@ progress:
 | Compile reuse треба доводити тестом, а не припускати | 04-03 показав, що existing `plan_cache` already covers CPU training loop; правильний хід — зафіксувати це regression test'ом |
 | Stable handles лишаються локальними для training path | `Arc<RwLock<Tensor>>` живе всередині training loop; runtime/backend ABI не ламались, а snapshot boundary лишився явним |
 | CLI smoke tests use CARGO_BIN_EXE_volta (not cargo run) | Zero-rebuild binary access; temp .vt with 'use fn' model syntax triggers MLP-only rejection in compile_first_model_to_train_dll |
+| README Adam claim reflects measured result, not aspirational goal | Changed from "1.9× slower" to "+25% faster at B≤64" — public text must match STATE.md metrics |
+| docs/ROADMAP.md rewritten to reflect executed phases | Old content referenced wrong internal phase names and stale next-steps throughout |
 
 ### Відомі ризики
 
@@ -116,8 +118,8 @@ progress:
 3. Читай `.planning/codebase/CONCERNS.md`
 4. Для наступного planning кроку враховуй summaries `05-01`, `05-02`, `05-03` і verification `05-VERIFICATION.md`
 
-**Наступний крок:** виконати Wave 1 плани Phase 6 (06-02 doctor rewrite, 06-03 examples/CLI fixes)
+**Наступний крок:** виконати Wave 1 плани Phase 6 (06-03 examples/CLI fixes)
 
 ---
 
-*State refreshed: 2026-03-08 after Phase 5 execution and verification*
+*State refreshed: 2026-03-08 after 06-02 execution — README/USAGE/docs accuracy corrections*
