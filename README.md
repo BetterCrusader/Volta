@@ -26,7 +26,7 @@ Volta bets on the opposite: a compiler approach where the model is compiled into
 
 **Limitations (honest):**
 - CPU performance advantage disappears at B≥128 — PyTorch MKL wins on large GEMMs
-- Adam optimizer is currently 1.9× slower than PyTorch (separate dW GEMM, no fusion)
+- Adam optimizer is +25% faster than PyTorch on B≤64 MLP (4.3 ms vs 5.3 ms; SGD is 35-67% faster)
 - CUDA backend: files exist and compile behind `--features cuda`, but GPU perf is uncharted
 - No installer, no package, no Python bindings — build from source only
 - Not tested on macOS or Linux (developed on Windows 11 x86-64)
@@ -68,7 +68,7 @@ All results: Windows 11, x86-64, 6-core CPU, 30 outer runs × 7 inner × 50 step
 | MLP 512→2048→2048→512→1 | 64 | **5.054 ms** | 8.457 ms | **+67%** |
 | MLP 512→1024→1024→512→256→1 | 128 | 3.659 ms | 3.628 ms | **~equal** |
 
-**Honest note**: Volta wins at B≤64. At B=128 the result is statistical parity. At B≥256 PyTorch MKL is faster. Adam optimizer is slower in Volta. See full tables, caveats, and reproduce instructions in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+**Honest note**: Volta wins at B≤64. At B=128 the result is statistical parity. At B≥256 PyTorch MKL is faster. Adam optimizer is +25% faster than PyTorch at B≤64. See full tables, caveats, and reproduce instructions in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
 ---
 
@@ -102,6 +102,7 @@ volta compile <file.vt>         # Compile inference DLL (requires LLVM)
 volta compile-train <file.vt>   # Compile training DLL
 volta compile-train <file.vt> --rust  # Rust-based training DLL (faster)
 volta doctor                    # Environment diagnostics
+volta export-py <file.vt>       # Export model as Python/PyTorch code
 volta extract <model_name>      # Reverse-engineer GGUF/SafeTensors to .vt
 volta init [dir]                # Initialize new project
 ```
@@ -142,9 +143,10 @@ train brain on bench_data
 See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full current state and next steps.
 
 Short version:
-- **Done**: interpreter, IR, codegen, SGD training DLL, AVX2 kernels, MKL hybrid, benchmark harness
-- **Next**: Adam fusion (close the 1.9× gap), autotune tile sizes, cross-platform build
-- **Later**: GPU (CUDA) perf measurement, broader model coverage beyond MLP
+- **Done (Phases 1–5)**: interpreter, IR, codegen, SGD + Adam training DLL, AVX2 kernels, MKL hybrid, benchmark harness, end-to-end PyTorch parity for MLP/ConvNet/tiny-transformer
+- **In progress (Phase 6)**: CLI/help/doctor/examples/docs aligned with real behaviour
+- **Planned (Phase 7)**: release artifacts, clean install story, smoke-tested shipped binary
+- **Later**: autotune tile sizes, cross-platform build, broader model coverage beyond MLP
 
 ---
 
