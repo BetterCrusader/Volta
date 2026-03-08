@@ -21,7 +21,7 @@ use inkwell::targets::{
 };
 use inkwell::values::PointerValue;
 
-use crate::ir::{Graph, NodeId, Op, ValueId, build_schedule};
+use crate::ir::{CpuTargetMode, Graph, NodeId, Op, ValueId, build_schedule};
 
 const GEMM_SHIM_C: &[u8] = include_bytes!("gemm_shim.c");
 
@@ -48,17 +48,13 @@ pub fn compile_graph_to_object(
     graph: &Graph,
     params: &HashMap<String, Vec<f32>>,
     out_obj: &Path,
+    cpu_target_mode: CpuTargetMode,
 ) -> Result<(), CodegenError> {
-    Target::initialize_x86(&InitializationConfig::default());
+    Target::initialize_all(&InitializationConfig::default());
     let triple = TargetMachine::get_default_triple();
     let target = Target::from_triple(&triple)
         .map_err(|e| cg_err!("Target from triple: {}", e.to_string()))?;
-    let cpu = TargetMachine::get_host_cpu_name();
-    let features = TargetMachine::get_host_cpu_features();
-    let cpu_str = cpu.to_str().unwrap_or("").to_string();
-    let feat_str = features.to_str().unwrap_or("").to_string();
-    std::mem::forget(cpu);
-    std::mem::forget(features);
+    let (cpu_str, feat_str) = llvm_target_spec(cpu_target_mode);
     let machine = target
         .create_target_machine(
             &triple,
@@ -109,7 +105,11 @@ pub fn compile_graph_to_object(
     Ok(())
 }
 
-pub fn link_object_to_exe(obj: &Path, exe: &Path) -> Result<(), CodegenError> {
+pub fn link_object_to_exe(
+    obj: &Path,
+    exe: &Path,
+    cpu_target_mode: CpuTargetMode,
+) -> Result<(), CodegenError> {
     let clang = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.join("clang.exe")))
@@ -122,10 +122,7 @@ pub fn link_object_to_exe(obj: &Path, exe: &Path) -> Result<(), CodegenError> {
     let shim_obj = obj.with_file_name("gemm_shim.o");
 
     let shim_status = std::process::Command::new(&clang)
-        .arg("-O3")
-        .arg("-march=native")
-        .arg("-ffast-math")
-        .arg("-funroll-loops")
+        .args(cpu_target_mode.clang_codegen_args())
         .arg("-c")
         .arg(&shim_src)
         .arg("-o")
@@ -141,8 +138,7 @@ pub fn link_object_to_exe(obj: &Path, exe: &Path) -> Result<(), CodegenError> {
     cmd.arg(obj)
         .arg(&shim_obj)
         .arg("-shared")
-        .arg("-O3")
-        .arg("-march=native")
+        .args(cpu_target_mode.clang_codegen_args())
         .arg("-o")
         .arg(exe);
     #[cfg(target_os = "windows")]
@@ -160,6 +156,26 @@ pub fn link_object_to_exe(obj: &Path, exe: &Path) -> Result<(), CodegenError> {
         return Err(cg_err!("link failed with status {}", status));
     }
     Ok(())
+}
+
+fn llvm_target_spec(cpu_target_mode: CpuTargetMode) -> (String, String) {
+    match cpu_target_mode {
+        CpuTargetMode::Native => {
+            let cpu = TargetMachine::get_host_cpu_name();
+            let features = TargetMachine::get_host_cpu_features();
+            let cpu_str = cpu.to_str().unwrap_or("").to_string();
+            let feat_str = features.to_str().unwrap_or("").to_string();
+            std::mem::forget(cpu);
+            std::mem::forget(features);
+            (cpu_str, feat_str)
+        }
+        CpuTargetMode::Portable => (
+            CpuTargetMode::Portable
+                .portable_llvm_cpu(std::env::consts::ARCH)
+                .to_string(),
+            String::new(),
+        ),
+    }
 }
 
 // ─── codegen core ────────────────────────────────────────────────────────────

@@ -121,7 +121,7 @@ impl BackendCapabilities {
             return Err(BackendValidationError {
                 message: format!(
                     "Backend {:?} does not support Adam optimizer. \
-                     Use SGD or enable MKL for Adam codegen.",
+                     Use SGD or a backend/path that explicitly supports Adam.",
                     self.backend
                 ),
             });

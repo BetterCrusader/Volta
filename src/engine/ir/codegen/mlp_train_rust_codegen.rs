@@ -12,6 +12,8 @@
 //! and compiles with the prebuilt gemm.rlib from the current cargo build.
 use std::path::Path;
 
+use crate::ir::CpuTargetMode;
+
 #[derive(Debug)]
 pub struct RustTrainCodegenError {
     pub message: String,
@@ -26,7 +28,7 @@ impl std::fmt::Display for RustTrainCodegenError {
 pub struct MlpTopology {
     pub layers: Vec<usize>,
     pub activation: String,
-    /// "sgd" (default), "adam", or "adamw"
+    /// Supported AOT optimizers: "sgd" (default), "adam", "adamw", "adagrad"
     pub optimizer: String,
     /// gradient clipping by global norm (0.0 = disabled)
     pub clip_grad: f32,
@@ -36,25 +38,55 @@ pub struct MlpTopology {
     pub use_layernorm: bool,
 }
 
-const TARGET_CPU_NATIVE_RUSTFLAG: &str = "-C target-cpu=native";
+fn merged_rustflags(existing: Option<&str>, cpu_target_mode: CpuTargetMode) -> String {
+    let existing = existing.map(str::trim).filter(|flags| !flags.is_empty());
+    let existing_without_target_cpu = existing.map(strip_target_cpu_flags);
 
-fn merged_rustflags(existing: Option<&str>) -> String {
-    let Some(existing) = existing.map(str::trim).filter(|flags| !flags.is_empty()) else {
-        return TARGET_CPU_NATIVE_RUSTFLAG.to_string();
+    let Some(target_cpu_flag) = cpu_target_mode.rustc_target_cpu_flag() else {
+        return existing_without_target_cpu.unwrap_or_default();
     };
 
-    if existing.contains("target-cpu=") {
-        return existing.to_string();
-    }
+    let Some(existing) = existing_without_target_cpu.filter(|flags| !flags.is_empty()) else {
+        return target_cpu_flag.to_string();
+    };
 
-    format!("{existing} {TARGET_CPU_NATIVE_RUSTFLAG}")
+    format!("{existing} {target_cpu_flag}")
 }
 
-/// Resolve MKL library path from environment variables.
-/// Priority: MKL_LIB_DIR > MKLROOT/lib > CONDA_PREFIX/Library/lib (only if mkl_rt exists).
-/// Returns Err with actionable instructions if MKL is not found.
-fn resolve_mkl_lib_path() -> Result<String, RustTrainCodegenError> {
-    resolve_mkl_lib_path_from(
+fn strip_target_cpu_flags(flags: &str) -> String {
+    let tokens: Vec<&str> = flags.split_whitespace().collect();
+    let mut kept = Vec::with_capacity(tokens.len());
+    let mut i = 0usize;
+    while i < tokens.len() {
+        let token = tokens[i];
+        if token == "-C"
+            && tokens
+                .get(i + 1)
+                .is_some_and(|next| next.starts_with("target-cpu="))
+        {
+            i += 2;
+            continue;
+        }
+        if token.starts_with("-Ctarget-cpu=") {
+            i += 1;
+            continue;
+        }
+        kept.push(token);
+        i += 1;
+    }
+    kept.join(" ")
+}
+
+fn optimizer_wants_mkl(optimizer: &str) -> bool {
+    let opt = optimizer.to_ascii_lowercase();
+    opt == "adam" || opt == "adamw"
+}
+
+/// Resolve an optional MKL library path from environment variables.
+/// Priority: MKL_LIB_DIR > MKLROOT/lib > CONDA_PREFIX/Library/lib.
+/// Missing MKL is acceptable; an explicitly bad MKL_LIB_DIR is treated as an error.
+fn resolve_optional_mkl_lib_path() -> Result<Option<String>, RustTrainCodegenError> {
+    resolve_optional_mkl_lib_path_from(
         std::env::var("MKL_LIB_DIR").ok().as_deref(),
         std::env::var("MKLROOT").ok().as_deref(),
         std::env::var("CONDA_PREFIX").ok().as_deref(),
@@ -62,11 +94,11 @@ fn resolve_mkl_lib_path() -> Result<String, RustTrainCodegenError> {
 }
 
 /// Inner implementation that accepts explicit env var values for testability.
-fn resolve_mkl_lib_path_from(
+fn resolve_optional_mkl_lib_path_from(
     mkl_lib_dir: Option<&str>,
     mklroot: Option<&str>,
     conda_prefix: Option<&str>,
-) -> Result<String, RustTrainCodegenError> {
+) -> Result<Option<String>, RustTrainCodegenError> {
     // Helper: check if mkl_rt exists in a lib dir
     let has_mkl = |p: &str| -> bool {
         let lib = if cfg!(windows) {
@@ -80,27 +112,30 @@ fn resolve_mkl_lib_path_from(
     if let Some(p) = mkl_lib_dir {
         let p = p.replace('\\', "/");
         if has_mkl(&p) {
-            return Ok(p);
+            return Ok(Some(p));
         }
+        let lib = if cfg!(windows) {
+            "mkl_rt.lib"
+        } else {
+            "libmkl_rt.so"
+        };
         return Err(RustTrainCodegenError {
-            message: format!("MKL_LIB_DIR set to '{}' but mkl_rt.lib not found there.", p),
+            message: format!("MKL_LIB_DIR set to '{p}' but {lib} was not found there."),
         });
     }
     if let Some(root) = mklroot {
         let p = format!("{}/lib", root.replace('\\', "/"));
         if has_mkl(&p) {
-            return Ok(p);
+            return Ok(Some(p));
         }
     }
     if let Some(conda) = conda_prefix {
         let p = format!("{}/Library/lib", conda.replace('\\', "/"));
         if has_mkl(&p) {
-            return Ok(p);
+            return Ok(Some(p));
         }
     }
-    Err(RustTrainCodegenError {
-        message: "MKL not found for Adam codegen.\nFix: conda install -c conda-forge mkl\n     or set MKL_LIB_DIR=/path/to/mkl/lib".into(),
-    })
+    Ok(None)
 }
 
 /// Compile a Rust-based training DLL using gemm crate.
@@ -109,6 +144,7 @@ pub fn compile_mlp_train_rust_dll(
     topology: &MlpTopology,
     init_weights: Option<&std::collections::HashMap<String, Vec<f32>>>,
     out_dll: &Path,
+    cpu_target_mode: CpuTargetMode,
 ) -> Result<(), RustTrainCodegenError> {
     // Create a temporary cargo crate directory next to out_dll
     let crate_dir = out_dll.with_extension("_rust_crate");
@@ -117,7 +153,14 @@ pub fn compile_mlp_train_rust_dll(
         message: format!("mkdir: {e}"),
     })?;
 
-    let code = generate_rust_source(topology, init_weights)?;
+    let opt_lower = topology.optimizer.to_ascii_lowercase();
+    let requested_mkl = cpu_target_mode == CpuTargetMode::Native && optimizer_wants_mkl(&opt_lower);
+    let mkl_lib_path = if requested_mkl {
+        resolve_optional_mkl_lib_path()?
+    } else {
+        None
+    };
+    let code = generate_rust_source(topology, init_weights, mkl_lib_path.is_some())?;
     std::fs::write(src_dir.join("lib.rs"), &code).map_err(|e| RustTrainCodegenError {
         message: format!("write lib.rs: {e}"),
     })?;
@@ -137,11 +180,8 @@ pub fn compile_mlp_train_rust_dll(
         }
     })?;
 
-    // Write build.rs to link MKL — only needed for Adam/AdamW optimizer
-    let opt_lower = topology.optimizer.to_lowercase();
-    let use_mkl = opt_lower == "adam" || opt_lower == "adamw";
-    if use_mkl {
-        let mkl_lib_path = resolve_mkl_lib_path()?;
+    // Write build.rs only when native Adam/AdamW can actually link MKL.
+    if let Some(mkl_lib_path) = mkl_lib_path {
         let build_rs = format!(
             "fn main() {{\n    println!(\"cargo:rustc-link-search=native={mkl_lib_path}\");\n    println!(\"cargo:rustc-link-lib=dylib=mkl_rt\");\n}}\n"
         );
@@ -150,25 +190,34 @@ pub fn compile_mlp_train_rust_dll(
                 message: format!("write build.rs: {e}"),
             }
         })?;
+    } else {
+        let build_rs = crate_dir.join("build.rs");
+        if build_rs.exists() {
+            std::fs::remove_file(&build_rs).map_err(|e| RustTrainCodegenError {
+                message: format!("remove stale build.rs: {e}"),
+            })?;
+        }
     }
 
     // Resolve crate_dir to absolute path for --target-dir
     let abs_crate_dir = std::fs::canonicalize(&crate_dir).unwrap_or_else(|_| crate_dir.clone());
     let target_dir = abs_crate_dir.join("target");
-    let rustflags = merged_rustflags(std::env::var("RUSTFLAGS").ok().as_deref());
+    let rustflags = merged_rustflags(std::env::var("RUSTFLAGS").ok().as_deref(), cpu_target_mode);
 
     // Run cargo build --release in the mini crate
-    let status = std::process::Command::new("cargo")
+    let mut cargo = std::process::Command::new("cargo");
+    cargo
         .arg("build")
         .arg("--release")
         .arg("--target-dir")
         .arg(&target_dir)
-        .current_dir(&crate_dir)
-        .env("RUSTFLAGS", rustflags)
-        .status()
-        .map_err(|e| RustTrainCodegenError {
-            message: format!("cargo: {e}"),
-        })?;
+        .current_dir(&crate_dir);
+    if !rustflags.is_empty() {
+        cargo.env("RUSTFLAGS", rustflags);
+    }
+    let status = cargo.status().map_err(|e| RustTrainCodegenError {
+        message: format!("cargo: {e}"),
+    })?;
     if !status.success() {
         return Err(RustTrainCodegenError {
             message: format!("cargo build failed in {}", crate_dir.display()),
@@ -200,6 +249,7 @@ pub fn compile_mlp_train_rust_dll(
 fn generate_rust_source(
     topology: &MlpTopology,
     _init_weights: Option<&std::collections::HashMap<String, Vec<f32>>>,
+    use_mkl_acceleration: bool,
 ) -> Result<String, RustTrainCodegenError> {
     let layers = &topology.layers;
     let nl = layers.len();
@@ -231,8 +281,8 @@ fn generate_rust_source(
     s.push_str("#![allow(non_snake_case, unused, private_interfaces)]\n");
     s.push_str("use std::alloc::{alloc_zeroed, dealloc, Layout};\n\n");
 
-    if use_adam_any {
-        // Adam/AdamW: all GEMM via MKL cblas_sgemm — better tile strategy for dW shapes
+    if use_mkl_acceleration {
+        // Native Adam/AdamW can optionally use MKL-backed GEMM when available.
         s.push_str("#[link(name = \"mkl_rt\", kind = \"dylib\")]\n");
         s.push_str("extern \"C\" {\n");
         s.push_str("    fn cblas_sgemm(order: i32, transa: i32, transb: i32, m: i32, n: i32, k: i32, alpha: f32, a: *const f32, lda: i32, b: *const f32, ldb: i32, beta: f32, c: *mut f32, ldc: i32);\n");
@@ -250,7 +300,7 @@ fn generate_rust_source(
         s.push_str("    unsafe { cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, m as i32, n as i32, k as i32, 1.0f32, A, k as i32, B, b_cols as i32, 0.0f32, C, n as i32); }\n");
         s.push_str("}\n\n");
     } else {
-        // SGD/Adagrad: gemm crate + Rayon — better for fused ops and parallel forward
+        // Portable baseline and MKL-free native path: gemm crate + Rayon.
         s.push_str("fn par(m: usize, k: usize, n: usize) -> gemm::Parallelism {\n");
         s.push_str("    let ops = 2*m*k*n;\n");
         s.push_str("    if ops < (1<<20) { gemm::Parallelism::None }\n");
@@ -915,22 +965,22 @@ fn generate_rust_source(
             // Bias update (no weight decay on biases, always wd=0)
             s.push_str(&format!("    adam_update((*h).b{i}, (*h).mb{i}, (*h).vb{i}, (*h).db{i} as *const f32, {c}, b1, b2, bc1, bc2, lr, eps, 0.0f32);\n"));
         } else if use_adagrad {
-            // Adagrad: G += g², p -= lr * g / sqrt(G + eps)
-            // Use sqrt(G + eps) instead of sqrt(G) + eps for numerical stability:
-            // prevents 1/eps explosion on first step when G=0.
+            // Adagrad: G += g², p -= lr * g / (sqrt(G) + eps)
+            // Match runtime/PyTorch semantics so portable/runtime and AOT paths
+            // do not silently diverge.
             s.push_str(&format!("    sgemm_tn((*h).dw{i}, (*h).act{i} as *const f32, (*h).delta{i} as *const f32, {r}, B, {c});\n"));
             s.push_str(&format!("    for k in 0..{r}*{c} {{\n"));
             s.push_str(&format!("        let g = *(*h).dw{i}.add(k);\n"));
             s.push_str(&format!("        *(*h).gw{i}.add(k) += g * g;\n"));
             s.push_str(&format!(
-                "        *(*h).w{i}.add(k) -= lr * g / ((*(*h).gw{i}.add(k) + eps).sqrt());\n"
+                "        *(*h).w{i}.add(k) -= lr * g / ((*(*h).gw{i}.add(k)).sqrt() + eps);\n"
             ));
             s.push_str("    }\n");
             s.push_str(&format!("    for k in 0..{c} {{\n"));
             s.push_str(&format!("        let g = *(*h).db{i}.add(k);\n"));
             s.push_str(&format!("        *(*h).gb{i}.add(k) += g * g;\n"));
             s.push_str(&format!(
-                "        *(*h).b{i}.add(k) -= lr * g / ((*(*h).gb{i}.add(k) + eps).sqrt());\n"
+                "        *(*h).b{i}.add(k) -= lr * g / ((*(*h).gb{i}.add(k)).sqrt() + eps);\n"
             ));
             s.push_str("    }\n");
         } else {
@@ -948,57 +998,78 @@ fn generate_rust_source(
 
 #[cfg(test)]
 mod tests {
-    use super::{merged_rustflags, resolve_mkl_lib_path_from};
+    use crate::ir::CpuTargetMode;
+
+    use super::{merged_rustflags, resolve_optional_mkl_lib_path_from};
 
     #[test]
-    fn merged_rustflags_defaults_to_target_cpu_native() {
-        assert_eq!(merged_rustflags(None), "-C target-cpu=native");
-        assert_eq!(merged_rustflags(Some("   ")), "-C target-cpu=native");
+    fn merged_rustflags_portable_defaults_to_empty() {
+        assert_eq!(merged_rustflags(None, CpuTargetMode::Portable), "");
+        assert_eq!(merged_rustflags(Some("   "), CpuTargetMode::Portable), "");
     }
 
     #[test]
-    fn merged_rustflags_appends_target_cpu_native_when_missing() {
+    fn merged_rustflags_native_defaults_to_target_cpu_native() {
         assert_eq!(
-            merged_rustflags(Some("-C opt-level=3")),
+            merged_rustflags(None, CpuTargetMode::Native),
+            "-C target-cpu=native"
+        );
+        assert_eq!(
+            merged_rustflags(Some("   "), CpuTargetMode::Native),
+            "-C target-cpu=native"
+        );
+    }
+
+    #[test]
+    fn merged_rustflags_portable_preserves_existing_flags() {
+        assert_eq!(
+            merged_rustflags(Some("-C opt-level=3"), CpuTargetMode::Portable),
+            "-C opt-level=3"
+        );
+    }
+
+    #[test]
+    fn merged_rustflags_portable_strips_existing_target_cpu() {
+        assert_eq!(
+            merged_rustflags(
+                Some("-C target-cpu=x86-64-v3 -C debuginfo=1"),
+                CpuTargetMode::Portable
+            ),
+            "-C debuginfo=1"
+        );
+    }
+
+    #[test]
+    fn merged_rustflags_native_appends_target_cpu_when_missing() {
+        assert_eq!(
+            merged_rustflags(Some("-C opt-level=3"), CpuTargetMode::Native),
             "-C opt-level=3 -C target-cpu=native"
         );
     }
 
     #[test]
-    fn merged_rustflags_respects_existing_target_cpu_setting() {
+    fn merged_rustflags_native_overrides_existing_target_cpu_setting() {
         assert_eq!(
-            merged_rustflags(Some("-C target-cpu=x86-64-v3 -C debuginfo=1")),
-            "-C target-cpu=x86-64-v3 -C debuginfo=1"
+            merged_rustflags(
+                Some("-C target-cpu=x86-64-v3 -C debuginfo=1"),
+                CpuTargetMode::Native
+            ),
+            "-C debuginfo=1 -C target-cpu=native"
         );
     }
 
     #[test]
-    fn mkl_not_found_returns_err_with_instructions() {
-        // Pass None for all env vars — simulates a clean machine with no MKL configured.
-        let result = resolve_mkl_lib_path_from(None, None, None);
-        let err = result.expect_err("should return Err when MKL is not found");
-        assert!(
-            err.message.contains("MKL not found for Adam codegen"),
-            "expected 'MKL not found for Adam codegen' in error, got: {}",
-            err.message
-        );
-        assert!(
-            err.message.contains("conda install"),
-            "expected 'conda install' in error, got: {}",
-            err.message
-        );
-        assert!(
-            err.message.contains("MKL_LIB_DIR"),
-            "expected 'MKL_LIB_DIR' in error, got: {}",
-            err.message
-        );
+    fn optional_mkl_lookup_returns_none_when_no_env_is_set() {
+        let result = resolve_optional_mkl_lib_path_from(None, None, None)
+            .expect("missing MKL should stay optional");
+        assert!(result.is_none());
     }
 
     #[test]
-    fn mkl_lib_dir_bad_path_returns_specific_err() {
+    fn optional_mkl_lookup_returns_err_for_bad_explicit_mkl_lib_dir() {
         // Provide a path that exists as a directory but contains no mkl_rt.lib.
         let bad_path = std::env::temp_dir().to_string_lossy().replace('\\', "/");
-        let result = resolve_mkl_lib_path_from(Some(&bad_path), None, None);
+        let result = resolve_optional_mkl_lib_path_from(Some(&bad_path), None, None);
         let err = result.expect_err("should return Err when MKL_LIB_DIR has no mkl_rt");
         assert!(
             err.message.contains("MKL_LIB_DIR set to"),
@@ -1014,35 +1085,41 @@ mod tests {
     }
 
     #[test]
-    fn merged_rustflags_injects_native_when_empty() {
-        assert_eq!(merged_rustflags(None), "-C target-cpu=native");
-    }
-
-    #[test]
-    fn merged_rustflags_injects_native_when_blank() {
-        assert_eq!(merged_rustflags(Some("  ")), "-C target-cpu=native");
-    }
-
-    #[test]
-    fn merged_rustflags_no_duplicate_when_already_set() {
-        let result = merged_rustflags(Some("-C target-cpu=native"));
+    fn merged_rustflags_native_no_duplicate_when_already_set() {
+        let result = merged_rustflags(Some("-C target-cpu=native"), CpuTargetMode::Native);
         assert_eq!(result, "-C target-cpu=native");
     }
 
     #[test]
-    fn merged_rustflags_no_duplicate_when_different_cpu() {
-        let result = merged_rustflags(Some("-C target-cpu=haswell"));
-        assert_eq!(result, "-C target-cpu=haswell");
-        assert!(!result.contains("target-cpu=native"));
+    fn merged_rustflags_native_no_duplicate_when_different_cpu() {
+        let result = merged_rustflags(Some("-C target-cpu=haswell"), CpuTargetMode::Native);
+        assert_eq!(result, "-C target-cpu=native");
     }
 
     #[test]
-    fn merged_rustflags_appends_when_other_flags_present() {
-        let result = merged_rustflags(Some("-C opt-level=3"));
-        assert!(result.contains("-C opt-level=3"), "must keep existing flag");
-        assert!(
-            result.contains("-C target-cpu=native"),
-            "must inject native"
-        );
+    fn optional_mkl_lookup_uses_detected_mklroot() {
+        use std::fs;
+
+        let tmp = std::env::temp_dir().join("volta_mkl_root_lookup");
+        let lib_dir = tmp.join("lib");
+        let _ = fs::create_dir_all(&lib_dir);
+        let lib_name = if cfg!(windows) {
+            "mkl_rt.lib"
+        } else {
+            "libmkl_rt.so"
+        };
+        let lib_file = lib_dir.join(lib_name);
+        let _ = fs::write(&lib_file, b"stub");
+        let tmp_str = tmp.to_string_lossy().replace('\\', "/");
+
+        let result = resolve_optional_mkl_lib_path_from(None, Some(&tmp_str), None)
+            .expect("MKLROOT lookup should not fail");
+        let expected = format!("{tmp_str}/lib");
+
+        let _ = fs::remove_file(&lib_file);
+        let _ = fs::remove_dir(&lib_dir);
+        let _ = fs::remove_dir(&tmp);
+
+        assert_eq!(result.as_deref(), Some(expected.as_str()));
     }
 }

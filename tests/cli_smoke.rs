@@ -12,6 +12,8 @@ use std::fs;
 use std::io::Write;
 use std::process::Command;
 
+use serde_json::Value;
+
 fn volta_bin() -> &'static str {
     env!("CARGO_BIN_EXE_volta")
 }
@@ -69,7 +71,13 @@ fn smoke_doctor() {
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    for section in &["Volta Doctor", "Capability Matrix", "AOT Codegen", "Environment Variables", "Next Steps"] {
+    for section in &[
+        "Volta Doctor",
+        "Capability Matrix",
+        "AOT Codegen",
+        "Environment Variables",
+        "Next Steps",
+    ] {
         assert!(
             stdout.contains(section),
             "expected '{section}' in volta doctor output, got: {stdout}"
@@ -102,19 +110,34 @@ fn doctor_json_fields() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let trimmed = stdout.trim();
 
-    // Must look like a JSON object (basic structure check)
+    let payload: Value =
+        serde_json::from_str(trimmed).expect("volta doctor --json must produce valid JSON");
+    assert_eq!(payload["tool"], "volta-doctor");
     assert!(
-        trimmed.starts_with('{') && trimmed.ends_with('}'),
-        "volta doctor --json did not produce a JSON object, got: {trimmed}"
+        payload.get("healthy").is_some(),
+        "missing healthy field: {trimmed}"
     );
-
-    // Required top-level keys present as JSON string keys
-    for key in &["\"tool\"", "\"healthy\"", "\"backends\"", "\"mkl_available\"", "\"llvm_available\""] {
-        assert!(
-            trimmed.contains(key),
-            "volta doctor --json missing key {key} in output: {trimmed}"
-        );
-    }
+    assert!(
+        payload["backends"].is_array(),
+        "backends must be an array: {trimmed}"
+    );
+    assert_eq!(payload["cpu_target_mode"], "portable");
+    assert!(
+        payload["cpu_support_tier"].is_string(),
+        "missing cpu_support_tier: {trimmed}"
+    );
+    assert!(
+        payload["cpu_isa"].is_array(),
+        "missing cpu_isa array: {trimmed}"
+    );
+    assert!(
+        payload.get("mkl_available").is_some(),
+        "missing mkl_available: {trimmed}"
+    );
+    assert!(
+        payload.get("llvm_available").is_some(),
+        "missing llvm_available: {trimmed}"
+    );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -243,5 +266,114 @@ train tiny_enc on tiny_data
     );
 
     // Clean up temp file (best-effort)
+    let _ = fs::remove_file(&tmp_path);
+}
+
+#[test]
+fn smoke_compile_train_c_path_rejects_adam_optimizer() {
+    let vt_source = r#"model demo
+    layers 2 4 1
+    activation relu
+    optimizer adam
+
+dataset tiny_data
+    type synthetic
+    batch 2
+
+train demo on tiny_data
+    epochs 1
+    optimizer adam
+    lr 0.001
+    device cpu
+"#;
+
+    let mut tmp_path = std::env::temp_dir();
+    tmp_path.push("volta_smoke_adam_c_path_test.vt");
+    fs::write(&tmp_path, vt_source).expect("failed to write temp .vt file");
+
+    let output = Command::new(volta_bin())
+        .args([
+            "compile-train",
+            tmp_path.to_str().expect("temp path is valid UTF-8"),
+            "--cpu-target",
+            "portable",
+        ])
+        .current_dir(manifest_dir())
+        .output()
+        .expect("failed to spawn volta");
+
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !output.status.success(),
+        "C path should reject Adam, got: {combined}"
+    );
+    assert!(
+        combined.contains("supports only SGD today"),
+        "unexpected output: {combined}"
+    );
+    assert!(
+        !combined.contains("panicked"),
+        "unexpected panic: {combined}"
+    );
+
+    let _ = fs::remove_file(&tmp_path);
+}
+
+#[test]
+fn smoke_compile_train_rust_path_rejects_rmsprop_optimizer() {
+    let vt_source = r#"model demo
+    layers 2 4 1
+    activation relu
+    optimizer rmsprop
+
+dataset tiny_data
+    type synthetic
+    batch 2
+
+train demo on tiny_data
+    epochs 1
+    optimizer rmsprop
+    lr 0.001
+    device cpu
+"#;
+
+    let mut tmp_path = std::env::temp_dir();
+    tmp_path.push("volta_smoke_rust_optimizer_test.vt");
+    fs::write(&tmp_path, vt_source).expect("failed to write temp .vt file");
+
+    let output = Command::new(volta_bin())
+        .args([
+            "compile-train",
+            tmp_path.to_str().expect("temp path is valid UTF-8"),
+            "--rust",
+            "--cpu-target",
+            "portable",
+        ])
+        .current_dir(manifest_dir())
+        .output()
+        .expect("failed to spawn volta");
+
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !output.status.success(),
+        "Rust path should reject unsupported RMSProp, got: {combined}"
+    );
+    assert!(
+        combined.contains("supports only SGD, Adam, AdamW, and Adagrad"),
+        "unexpected output: {combined}"
+    );
+    assert!(
+        !combined.contains("panicked"),
+        "unexpected panic: {combined}"
+    );
+
     let _ = fs::remove_file(&tmp_path);
 }

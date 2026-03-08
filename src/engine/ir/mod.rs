@@ -7,6 +7,7 @@ pub mod block;
 pub mod codegen;
 pub mod compiler_flags;
 pub mod constant_folding;
+pub mod cpu_target;
 pub mod cse;
 #[cfg(feature = "cuda")]
 pub mod cuda;
@@ -62,6 +63,10 @@ pub use backend_capabilities::{
 pub use block::{BasicBlock, BasicBlockId};
 pub use compiler_flags::CompilerFlags;
 pub use constant_folding::ConstantFoldingPass;
+pub use cpu_target::{
+    CpuSupportTier, CpuTargetMode, HostCpuCapabilities, detect_host_cpu_capabilities,
+    support_tier_for_arch,
+};
 pub use cse::CsePass;
 pub use dce::DcePass;
 pub use dead_tensor_elimination::DeadTensorEliminationPass;

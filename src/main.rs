@@ -9,8 +9,8 @@ use volta::executor::Executor;
 #[cfg(feature = "cuda")]
 use volta::ir::CudaBackend;
 use volta::ir::{
-    Backend, BackendCapabilities, BackendMaturity, BackendVendor, CpuBackend, DeterminismLevel,
-    DeviceClass,
+    Backend, BackendCapabilities, BackendMaturity, BackendVendor, CpuBackend, CpuSupportTier,
+    CpuTargetMode, DeterminismLevel, DeviceClass, detect_host_cpu_capabilities,
 };
 use volta::lexer::Lexer;
 use volta::parser::Parser;
@@ -22,8 +22,8 @@ const USAGE: &str = "Usage:
   volta info <file.vt>
   volta extract <file.gguf|file.safetensors>  (GGUF/SafeTensors → .vt)
   volta export-py <file.vt>
-  volta compile <file.vt> [-o <output>]       (requires --features llvm-codegen)
-  volta compile-train <file.vt> [-o <output.dll>] [--rust]   (MLP-only today)
+  volta compile <file.vt> [-o <output>] [--cpu-target <portable|native>]       (requires --features llvm-codegen)
+  volta compile-train <file.vt> [-o <output.dll>] [--rust] [--cpu-target <portable|native>]   (MLP-only today)
   volta doctor [--json] [--strict]
   volta init [project_dir]
   volta version
@@ -66,6 +66,7 @@ struct CommandSpec {
     kind: CommandKind,
     path: Option<String>,
     output_path: Option<String>,
+    cpu_target_mode: CpuTargetMode,
     doctor_json: bool,
     doctor_strict: bool,
     quiet: bool,
@@ -188,9 +189,16 @@ fn main() -> ExitCode {
                         return ExitCode::from(1);
                     }
                 }
-                match executor.compile_first_model_to_object(path, command.output_path.as_deref()) {
+                match executor.compile_first_model_to_object(
+                    path,
+                    command.output_path.as_deref(),
+                    command.cpu_target_mode,
+                ) {
                     Ok(exe_path) => {
-                        println!("Compiled: {exe_path}");
+                        println!(
+                            "Compiled: {exe_path} (cpu-target={})",
+                            command.cpu_target_mode.as_str()
+                        );
                         ExitCode::SUCCESS
                     }
                     Err(e) => {
@@ -238,13 +246,24 @@ fn main() -> ExitCode {
                 }
             }
             let result = if command.use_rust {
-                executor.compile_first_model_to_train_rust_dll(path, command.output_path.as_deref())
+                executor.compile_first_model_to_train_rust_dll(
+                    path,
+                    command.output_path.as_deref(),
+                    command.cpu_target_mode,
+                )
             } else {
-                executor.compile_first_model_to_train_dll(path, command.output_path.as_deref())
+                executor.compile_first_model_to_train_dll(
+                    path,
+                    command.output_path.as_deref(),
+                    command.cpu_target_mode,
+                )
             };
             match result {
                 Ok(dll_path) => {
-                    println!("Training DLL compiled: {dll_path}");
+                    println!(
+                        "Training DLL compiled: {dll_path} (cpu-target={})",
+                        command.cpu_target_mode.as_str()
+                    );
                     ExitCode::SUCCESS
                 }
                 Err(e) => {
@@ -371,6 +390,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
             kind: CommandKind::Help,
             path: None,
             output_path: None,
+            cpu_target_mode: CpuTargetMode::Portable,
             doctor_json: false,
             doctor_strict: false,
             quiet: false,
@@ -384,6 +404,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
             kind: CommandKind::LegacyBenchInfer,
             path: None,
             output_path: None,
+            cpu_target_mode: CpuTargetMode::Portable,
             doctor_json: false,
             doctor_strict: false,
             quiet: false,
@@ -395,6 +416,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
             kind: CommandKind::LegacyTuneMatmul,
             path: None,
             output_path: None,
+            cpu_target_mode: CpuTargetMode::Portable,
             doctor_json: false,
             doctor_strict: false,
             quiet: false,
@@ -417,6 +439,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
                 kind: CommandKind::Surgeon,
                 path: Some(args[1].clone()),
                 output_path: None,
+                cpu_target_mode: CpuTargetMode::Portable,
                 doctor_json: false,
                 doctor_strict: false,
                 quiet: false,
@@ -451,6 +474,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
                 kind: CommandKind::Doctor,
                 path: None,
                 output_path: None,
+                cpu_target_mode: CpuTargetMode::Portable,
                 doctor_json,
                 doctor_strict,
                 quiet: false,
@@ -466,6 +490,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
                 kind: CommandKind::Version,
                 path: None,
                 output_path: None,
+                cpu_target_mode: CpuTargetMode::Portable,
                 doctor_json: false,
                 doctor_strict: false,
                 quiet: false,
@@ -480,6 +505,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
                 kind: CommandKind::Help,
                 path: None,
                 output_path: None,
+                cpu_target_mode: CpuTargetMode::Portable,
                 doctor_json: false,
                 doctor_strict: false,
                 quiet: false,
@@ -499,6 +525,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
                     kind: CommandKind::Run,
                     path: Some(args[0].clone()),
                     output_path: None,
+                    cpu_target_mode: CpuTargetMode::Portable,
                     doctor_json: false,
                     doctor_strict: false,
                     quiet: false,
@@ -515,6 +542,7 @@ fn parse_command(args: &[String]) -> Result<CommandSpec, String> {
 fn parse_compile_command(args: &[String]) -> Result<CommandSpec, String> {
     let mut path: Option<String> = None;
     let mut output_path: Option<String> = None;
+    let mut cpu_target_mode = CpuTargetMode::Portable;
     let mut i = 1usize;
     while i < args.len() {
         if args[i] == "-o" {
@@ -529,6 +557,12 @@ fn parse_compile_command(args: &[String]) -> Result<CommandSpec, String> {
             }
             output_path = Some(output.clone());
             i += 2;
+            continue;
+        }
+        if args[i] == "--cpu-target" || args[i].starts_with("--cpu-target=") {
+            let (mode, next_i) = parse_cpu_target_arg(args, i, "compile")?;
+            cpu_target_mode = mode;
+            i = next_i;
             continue;
         }
         if args[i].starts_with('-') {
@@ -547,6 +581,7 @@ fn parse_compile_command(args: &[String]) -> Result<CommandSpec, String> {
         kind: CommandKind::Compile,
         path: Some(path),
         output_path,
+        cpu_target_mode,
         doctor_json: false,
         doctor_strict: false,
         quiet: false,
@@ -558,6 +593,7 @@ fn parse_compile_command_kind(kind: CommandKind, args: &[String]) -> Result<Comm
     let cmd_name = &args[0];
     let mut path: Option<String> = None;
     let mut output_path: Option<String> = None;
+    let mut cpu_target_mode = CpuTargetMode::Portable;
     let mut use_rust = false;
     let mut i = 1usize;
     while i < args.len() {
@@ -573,6 +609,12 @@ fn parse_compile_command_kind(kind: CommandKind, args: &[String]) -> Result<Comm
             }
             output_path = Some(output.clone());
             i += 2;
+            continue;
+        }
+        if args[i] == "--cpu-target" || args[i].starts_with("--cpu-target=") {
+            let (mode, next_i) = parse_cpu_target_arg(args, i, cmd_name)?;
+            cpu_target_mode = mode;
+            i = next_i;
             continue;
         }
         if args[i] == "--rust" {
@@ -599,11 +641,39 @@ fn parse_compile_command_kind(kind: CommandKind, args: &[String]) -> Result<Comm
         kind,
         path: Some(path),
         output_path,
+        cpu_target_mode,
         doctor_json: false,
         doctor_strict: false,
         quiet: false,
         use_rust,
     })
+}
+
+fn parse_cpu_target_arg(
+    args: &[String],
+    index: usize,
+    cmd_name: &str,
+) -> Result<(CpuTargetMode, usize), String> {
+    let raw_value = if args[index] == "--cpu-target" {
+        args.get(index + 1)
+            .ok_or_else(|| format!("'{cmd_name} --cpu-target' requires 'portable' or 'native'"))?
+            .as_str()
+    } else {
+        args[index]
+            .split_once('=')
+            .map(|(_, value)| value)
+            .ok_or_else(|| format!("'{cmd_name} --cpu-target' requires 'portable' or 'native'"))?
+    };
+
+    let mode = CpuTargetMode::parse(raw_value).ok_or_else(|| {
+        format!("'{cmd_name} --cpu-target' accepts only 'portable' or 'native', got '{raw_value}'")
+    })?;
+    let next_i = if args[index] == "--cpu-target" {
+        index + 2
+    } else {
+        index + 1
+    };
+    Ok((mode, next_i))
 }
 
 fn parse_init_command(args: &[String]) -> Result<CommandSpec, String> {
@@ -628,6 +698,7 @@ fn parse_init_command(args: &[String]) -> Result<CommandSpec, String> {
         kind: CommandKind::Init,
         path: Some(target_dir),
         output_path: None,
+        cpu_target_mode: CpuTargetMode::Portable,
         doctor_json: false,
         doctor_strict: false,
         quiet: false,
@@ -710,6 +781,7 @@ fn parse_file_command(
         kind,
         path: Some(path.to_string()),
         output_path: None,
+        cpu_target_mode: CpuTargetMode::Portable,
         doctor_json: false,
         doctor_strict: false,
         quiet,
@@ -772,6 +844,7 @@ fn init_project(target_dir: &str) -> Result<String, String> {
 
 #[derive(Debug, Clone)]
 struct DoctorReport {
+    host_cpu: volta::ir::HostCpuCapabilities,
     cpu_threads: usize,
     onnx_import_enabled: bool,
     gpu_env: GpuEnvStatus,
@@ -780,7 +853,6 @@ struct DoctorReport {
     healthy: bool,
     mkl_lib_path: Option<String>,
     llvm_info: Option<String>,
-    sgd_backend_env: Option<String>,
     llvm_prefix_env: Option<String>,
 }
 
@@ -791,6 +863,7 @@ struct BackendDoctorEntry {
 }
 
 fn collect_doctor_report() -> DoctorReport {
+    let host_cpu = detect_host_cpu_capabilities(CpuTargetMode::Portable);
     let cpu_threads = std::thread::available_parallelism()
         .map(std::num::NonZero::get)
         .unwrap_or(1);
@@ -799,9 +872,14 @@ fn collect_doctor_report() -> DoctorReport {
     let backends = collect_backend_report();
     let mkl_lib_path = check_mkl_available();
     let llvm_info = check_llvm_available();
-    let sgd_backend_env = std::env::var("VOLTA_SGD_BACKEND").ok();
     let llvm_prefix_env = std::env::var("LLVM_SYS_210_PREFIX").ok();
     let mut warnings = Vec::new();
+    if host_cpu.support_tier == CpuSupportTier::BestEffort {
+        warnings.push(format!(
+            "arch '{}' is best-effort only — Tier 1 CPU portability currently covers x86_64 and ARM64",
+            host_cpu.arch
+        ));
+    }
     if let Some(warning) = &gpu_env.parse_warning {
         warnings.push(warning.clone());
     }
@@ -810,13 +888,9 @@ fn collect_doctor_report() -> DoctorReport {
             warnings.push(format!("backend '{}' is marked experimental", backend.name));
         }
     }
-    if mkl_lib_path.is_none() {
-        warnings.push(
-            "MKL not found — Adam/AdamW --rust codegen will not link; run: conda install -c conda-forge mkl  OR  set MKL_LIB_DIR".to_string(),
-        );
-    }
     let healthy = warnings.is_empty();
     DoctorReport {
+        host_cpu,
         cpu_threads,
         onnx_import_enabled,
         gpu_env,
@@ -825,7 +899,6 @@ fn collect_doctor_report() -> DoctorReport {
         healthy,
         mkl_lib_path,
         llvm_info,
-        sgd_backend_env,
         llvm_prefix_env,
     }
 }
@@ -837,52 +910,48 @@ fn print_doctor(report: &DoctorReport, json: bool) {
             .backends
             .iter()
             .map(|backend| {
-                format!(
-                    "{{\"name\":\"{}\",\"device_class\":\"{}\",\"vendor\":\"{}\",\"maturity\":\"{}\",\"supports_inference\":{},\"supports_training\":{},\"supports_runtime_execution\":{},\"supports_gradient_updates\":{},\"supports_strict_determinism\":{},\"supports_balanced_determinism\":{},\"supports_fast_determinism\":{},\"default_determinism\":\"{}\"}}",
-                    json_escape(&backend.name),
-                    device_class_name(backend.capabilities.device_class),
-                    backend_vendor_name(backend.capabilities.vendor),
-                    backend_maturity_name(backend.capabilities.maturity),
-                    backend.capabilities.supports_inference,
-                    backend.capabilities.supports_training,
-                    backend.capabilities.supports_runtime_execution,
-                    backend.capabilities.supports_gradient_updates,
-                    backend.capabilities.supports_strict_determinism,
-                    backend.capabilities.supports_balanced_determinism,
-                    backend.capabilities.supports_fast_determinism,
-                    determinism_name(backend.capabilities.default_determinism),
-                )
+                serde_json::json!({
+                    "name": backend.name,
+                    "device_class": device_class_name(backend.capabilities.device_class),
+                    "vendor": backend_vendor_name(backend.capabilities.vendor),
+                    "maturity": backend_maturity_name(backend.capabilities.maturity),
+                    "supports_inference": backend.capabilities.supports_inference,
+                    "supports_training": backend.capabilities.supports_training,
+                    "supports_runtime_execution": backend.capabilities.supports_runtime_execution,
+                    "supports_gradient_updates": backend.capabilities.supports_gradient_updates,
+                    "supports_strict_determinism": backend.capabilities.supports_strict_determinism,
+                    "supports_balanced_determinism": backend.capabilities.supports_balanced_determinism,
+                    "supports_fast_determinism": backend.capabilities.supports_fast_determinism,
+                    "default_determinism": determinism_name(backend.capabilities.default_determinism),
+                })
             })
-            .collect::<Vec<_>>()
-            .join(",");
-        let mkl_available = report.mkl_lib_path.is_some();
-        let mkl_lib_path = report.mkl_lib_path.clone().unwrap_or_default();
-        let llvm_available = report.llvm_info.is_some();
-        let llvm_info = report.llvm_info.clone().unwrap_or_default();
+            .collect::<Vec<_>>();
+        let payload = serde_json::json!({
+            "tool": "volta-doctor",
+            "version": env!("CARGO_PKG_VERSION"),
+            "os": std::env::consts::OS,
+            "arch": &report.host_cpu.arch,
+            "cpu_threads": report.cpu_threads,
+            "cpu_support_tier": report.host_cpu.support_tier.as_str(),
+            "cpu_target_mode": report.host_cpu.target_mode.as_str(),
+            "cpu_isa": &report.host_cpu.isa,
+            "gpu_available": report.gpu_env.available,
+            "gpu_env_raw": raw,
+            "gpu_env_valid": report.gpu_env.parse_warning.is_none(),
+            "feature_onnx_import": report.onnx_import_enabled,
+            "mkl_available": report.mkl_lib_path.is_some(),
+            "mkl_lib_path": &report.mkl_lib_path,
+            "llvm_available": report.llvm_info.is_some(),
+            "llvm_info": &report.llvm_info,
+            "backends": backends_json,
+            "warning_count": report.warnings.len(),
+            "warnings": &report.warnings,
+            "healthy": report.healthy,
+            "strict_would_fail": !report.healthy,
+        });
         println!(
-            "{{\"tool\":\"volta-doctor\",\"version\":\"{}\",\"os\":\"{}\",\"arch\":\"{}\",\"cpu_threads\":{},\"gpu_available\":{},\"gpu_env_raw\":\"{}\",\"gpu_env_valid\":{},\"feature_onnx_import\":{},\"mkl_available\":{},\"mkl_lib_path\":\"{}\",\"llvm_available\":{},\"llvm_info\":\"{}\",\"backends\":[{}],\"warning_count\":{},\"warnings\":[{}],\"healthy\":{},\"strict_would_fail\":{}}}",
-            env!("CARGO_PKG_VERSION"),
-            std::env::consts::OS,
-            std::env::consts::ARCH,
-            report.cpu_threads,
-            report.gpu_env.available,
-            json_escape(&raw),
-            report.gpu_env.parse_warning.is_none(),
-            report.onnx_import_enabled,
-            mkl_available,
-            json_escape(&mkl_lib_path),
-            llvm_available,
-            json_escape(&llvm_info),
-            backends_json,
-            report.warnings.len(),
-            report
-                .warnings
-                .iter()
-                .map(|w| format!("\"{}\"", json_escape(w)))
-                .collect::<Vec<_>>()
-                .join(","),
-            report.healthy,
-            !report.healthy
+            "{}",
+            serde_json::to_string(&payload).expect("doctor json must serialize")
         );
         return;
     }
@@ -896,20 +965,26 @@ fn print_doctor(report: &DoctorReport, json: bool) {
     println!(
         "  os: {} / arch: {} / threads: {}",
         std::env::consts::OS,
-        std::env::consts::ARCH,
+        report.host_cpu.arch,
         report.cpu_threads
     );
+    println!(
+        "  support tier: {} / cpu-target default: {}",
+        report.host_cpu.support_tier.as_str(),
+        report.host_cpu.target_mode.as_str()
+    );
+    println!("  ISA: {}", report.host_cpu.isa.join(", "));
     println!();
 
     // Capability Matrix
     println!("Capability Matrix");
     println!(
-        "  {:<8} {:<7} {:<11} {:<10} {:<9} {}",
-        "backend", "device", "maturity", "inference", "training", "determinism (default)"
+        "  {:<8} {:<7} {:<11} {:<10} {:<9} determinism (default)",
+        "backend", "device", "maturity", "inference", "training"
     );
     println!(
-        "  {:<8} {:<7} {:<11} {:<10} {:<9} {}",
-        "-------", "------", "----------", "---------", "--------", "---------------------"
+        "  {:<8} {:<7} {:<11} {:<10} {:<9} ---------------------",
+        "-------", "------", "----------", "---------", "--------"
     );
     for backend in &report.backends {
         let caps = &backend.capabilities;
@@ -941,8 +1016,10 @@ fn print_doctor(report: &DoctorReport, json: bool) {
 
     // AOT Codegen section
     println!("AOT Codegen (compile-train)");
-    println!("  Rust path (--rust):  MLP-only — other architectures rejected at compile time");
-    println!("  C path (default):    MLP-only");
+    println!("  Rust path (--rust):  MLP-only; optimizers = SGD/Adam/AdamW/Adagrad");
+    println!("  C path (default):    MLP-only; optimizer = SGD only");
+    println!("  CPU target mode:     portable default, native opt-in via --cpu-target");
+    println!("  MKL acceleration:    optional for native Adam/AdamW; not required baseline");
     println!();
 
     // Environment Variables section
@@ -955,14 +1032,9 @@ fn print_doctor(report: &DoctorReport, json: bool) {
     println!("  CONDA_PREFIX:        {conda_prefix}");
     let mkl_resolution = match &report.mkl_lib_path {
         Some(path) => format!("OK: {path}"),
-        None => "FAIL — Adam/AdamW --rust will not link".to_string(),
+        None => "not found (portable baseline still works)".to_string(),
     };
     println!("  MKL resolution:      {mkl_resolution}");
-    let sgd_backend = report
-        .sgd_backend_env
-        .as_deref()
-        .unwrap_or("not set (default: mkl)");
-    println!("  VOLTA_SGD_BACKEND:   {sgd_backend}");
     let llvm_prefix = report.llvm_prefix_env.as_deref().unwrap_or("not set");
     println!("  LLVM_SYS_210_PREFIX: {llvm_prefix}");
     let llvm_clang = match &report.llvm_info {
@@ -975,9 +1047,11 @@ fn print_doctor(report: &DoctorReport, json: bool) {
     // Next Steps section
     println!("Next Steps");
     match &report.mkl_lib_path {
-        Some(path) => println!("  [OK] MKL found at {path} — Adam/AdamW --rust codegen available"),
+        Some(path) => {
+            println!("  [OK] MKL found at {path} — native Adam/AdamW can use accelerated GEMM")
+        }
         None => println!(
-            "  [WARN] MKL not found — set MKL_LIB_DIR or run: conda install -c conda-forge mkl"
+            "  [INFO] MKL not found — portable CPU training still works; native Adam/AdamW stays on fallback GEMM"
         ),
     }
     match &report.llvm_info {
@@ -990,20 +1064,19 @@ fn print_doctor(report: &DoctorReport, json: bool) {
     if let Some(warning) = &report.gpu_env.parse_warning {
         println!("  [WARN] {warning}");
     }
-    // Backend experimental warnings (excluding MKL warning already handled above)
+    if report.host_cpu.support_tier == CpuSupportTier::BestEffort {
+        println!(
+            "  [WARN] current arch '{}' is best-effort only; Tier 1 portability target is x86_64 + ARM64",
+            report.host_cpu.arch
+        );
+    }
+    // Backend experimental warnings
     for backend in &report.backends {
         if backend.capabilities.maturity == BackendMaturity::Experimental {
-            println!(
-                "  [WARN] backend '{}' is marked experimental",
-                backend.name
-            );
+            println!("  [WARN] backend '{}' is marked experimental", backend.name);
         }
     }
-    // Only print "all good" line if there's nothing wrong (MKL and LLVM both found, no gpu warnings)
-    if report.mkl_lib_path.is_some()
-        && report.llvm_info.is_some()
-        && report.gpu_env.parse_warning.is_none()
-    {
+    if report.healthy {
         println!("  [OK] Environment looks good for interpreter and CPU training paths");
     }
     println!();
@@ -1110,7 +1183,11 @@ fn check_mkl_from(
 /// Returns Some(resolved_lib_path) if MKL is reachable, None otherwise.
 /// Checks file existence (mkl_rt.lib / libmkl_rt.so) — not just env var presence.
 fn check_mkl_available() -> Option<String> {
-    let mkl_lib = if cfg!(windows) { "mkl_rt.lib" } else { "libmkl_rt.so" };
+    let mkl_lib = if cfg!(windows) {
+        "mkl_rt.lib"
+    } else {
+        "libmkl_rt.so"
+    };
     check_mkl_from(
         std::env::var("MKL_LIB_DIR").ok().as_deref(),
         std::env::var("MKLROOT").ok().as_deref(),
@@ -1124,13 +1201,15 @@ fn check_llvm_available() -> Option<String> {
     if let Ok(prefix) = std::env::var("LLVM_SYS_210_PREFIX") {
         return Some(format!("via LLVM_SYS_210_PREFIX={prefix}"));
     }
-    let result = std::process::Command::new("clang").arg("--version").output();
-    if let Ok(out) = result {
-        if out.status.success() {
-            let ver = String::from_utf8_lossy(&out.stdout);
-            let first_line = ver.lines().next().unwrap_or("clang").to_string();
-            return Some(format!("clang in PATH: {first_line}"));
-        }
+    let result = std::process::Command::new("clang")
+        .arg("--version")
+        .output();
+    if let Ok(out) = result
+        && out.status.success()
+    {
+        let ver = String::from_utf8_lossy(&out.stdout);
+        let first_line = ver.lines().next().unwrap_or("clang").to_string();
+        return Some(format!("clang in PATH: {first_line}"));
     }
     None
 }
@@ -1168,15 +1247,6 @@ fn parse_gpu_env_status() -> GpuEnvStatus {
             "VOLTA_GPU_AVAILABLE has invalid value; expected one of: 1, true, 0, false".to_string(),
         ),
     }
-}
-
-fn json_escape(input: &str) -> String {
-    input
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('\t', "\\t")
 }
 
 fn print_info(path: &str, program: &Program, warning_count: usize) {
@@ -1268,6 +1338,7 @@ fn collect_stats(stmt: &Stmt, stats: &mut ProgramStats) {
 #[cfg(test)]
 mod tests {
     use super::{CommandKind, parse_command};
+    use volta::ir::CpuTargetMode;
 
     #[test]
     fn parse_command_accepts_run_with_file() {
@@ -1523,6 +1594,31 @@ mod tests {
     }
 
     #[test]
+    fn parse_compile_accepts_cpu_target_flag() {
+        let args = vec![
+            "compile".to_string(),
+            "example.vt".to_string(),
+            "--cpu-target".to_string(),
+            "native".to_string(),
+        ];
+        let command = parse_command(&args).expect("compile --cpu-target should parse");
+        assert_eq!(command.kind, CommandKind::Compile);
+        assert_eq!(command.cpu_target_mode, CpuTargetMode::Native);
+    }
+
+    #[test]
+    fn parse_compile_rejects_invalid_cpu_target_flag() {
+        let args = vec![
+            "compile".to_string(),
+            "example.vt".to_string(),
+            "--cpu-target".to_string(),
+            "fast".to_string(),
+        ];
+        let err = parse_command(&args).expect_err("invalid cpu target must fail");
+        assert!(err.contains("accepts only 'portable' or 'native'"));
+    }
+
+    #[test]
     fn parse_compile_rejects_missing_output_path() {
         let args = vec![
             "compile".to_string(),
@@ -1550,6 +1646,32 @@ mod tests {
     }
 
     #[test]
+    fn parse_compile_train_accepts_cpu_target_equals_form() {
+        let args = vec![
+            "compile-train".to_string(),
+            "example.vt".to_string(),
+            "--rust".to_string(),
+            "--cpu-target=portable".to_string(),
+        ];
+        let command =
+            parse_command(&args).expect("compile-train --cpu-target=portable should parse");
+        assert_eq!(command.kind, CommandKind::CompileTrain);
+        assert_eq!(command.cpu_target_mode, CpuTargetMode::Portable);
+        assert!(command.use_rust);
+    }
+
+    #[test]
+    fn parse_compile_train_rejects_missing_cpu_target_value() {
+        let args = vec![
+            "compile-train".to_string(),
+            "example.vt".to_string(),
+            "--cpu-target".to_string(),
+        ];
+        let err = parse_command(&args).expect_err("missing cpu-target value must fail");
+        assert!(err.contains("requires 'portable' or 'native'"));
+    }
+
+    #[test]
     fn parse_compile_train_rejects_missing_output_path() {
         let args = vec![
             "compile-train".to_string(),
@@ -1559,12 +1681,6 @@ mod tests {
         ];
         let err = parse_command(&args).expect_err("missing -o value must fail");
         assert!(err.contains("requires an output path"));
-    }
-
-    #[test]
-    fn json_escape_escapes_quotes_and_backslashes() {
-        let escaped = super::json_escape("a\"b\\c");
-        assert_eq!(escaped, "a\\\"b\\\\c");
     }
 
     #[test]
@@ -1584,7 +1700,10 @@ mod tests {
             None,
             "mkl_rt_nonexistent_sentinel_2847.lib",
         );
-        assert!(result.is_none(), "expected None when file not present in dir");
+        assert!(
+            result.is_none(),
+            "expected None when file not present in dir"
+        );
     }
 
     #[test]
@@ -1599,7 +1718,10 @@ mod tests {
         // Cleanup
         let _ = fs::remove_file(&lib_file);
         let _ = fs::remove_dir(&tmp);
-        assert!(result.is_some(), "expected Some path when file exists in MKL_LIB_DIR");
+        assert!(
+            result.is_some(),
+            "expected Some path when file exists in MKL_LIB_DIR"
+        );
     }
 
     #[test]
@@ -1616,7 +1738,10 @@ mod tests {
         let _ = fs::remove_file(&lib_file);
         let _ = fs::remove_dir(&lib_dir);
         let _ = fs::remove_dir(&tmp);
-        assert!(result.is_some(), "expected Some path when file exists via MKLROOT/lib");
+        assert!(
+            result.is_some(),
+            "expected Some path when file exists via MKLROOT/lib"
+        );
     }
 
     #[test]
@@ -1632,12 +1757,8 @@ mod tests {
         // MKLROOT/lib doesn't have the file
         let dir_str = tmp_dir.to_string_lossy().replace('\\', "/");
         let root_str = tmp_root.to_string_lossy().replace('\\', "/");
-        let result = super::check_mkl_from(
-            Some(&dir_str),
-            Some(&root_str),
-            None,
-            "mkl_rt_prio.lib",
-        );
+        let result =
+            super::check_mkl_from(Some(&dir_str), Some(&root_str), None, "mkl_rt_prio.lib");
         // Cleanup
         let _ = fs::remove_file(&lib_file);
         let _ = fs::remove_dir(&tmp_dir);

@@ -2,16 +2,17 @@
  * volta_gemm_f32 — high-performance GEMM shim.
  *
  * Implements C[m×n] = A[m×k] @ B[k×n]  (row-major, no transpose, C zeroed first).
- * Compiled with: clang -O3 -march=native -ffast-math -funroll-loops
+ * Build flags come from Volta CPU target policy:
+ * - portable: clang -O3 -ffast-math -funroll-loops
+ * - native:   clang -O3 -march=native -ffast-math -funroll-loops
  *
  * Two code paths:
- *  1. m==1 (single-sample inference): GEMV — no packing, AVX-512 dot product
- *     over rows of B. Optimal for online inference.
+ *  1. m==1 (single-sample inference): GEMV — no packing, scalar/vectorized by
+ *     the compiler for the active target. Optimal for online inference.
  *  2. m>1 (batched): cache-blocked tiled GEMM with packed sub-tiles.
  *     Tile sizes for Zen4 / Skylake-X L2=512KB, L3=32MB.
  *
- * For the 512→1024→1024→512→256→1 model at batch=64 this delivers
- * ~90% of theoretical AVX-512 throughput.
+ * On tuned native x86_64 builds this can get very close to the host ISA limit.
  */
 #include <stdint.h>
 #include <string.h>
