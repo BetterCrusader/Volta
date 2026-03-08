@@ -188,8 +188,7 @@ See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full current state and next ste
 
 Short version:
 - **Done (Phases 1–5)**: interpreter, IR, codegen, SGD + Adam training DLL, AVX2 kernels, MKL hybrid, benchmark harness, end-to-end PyTorch parity for MLP/ConvNet/tiny-transformer
-- **In progress (Phase 6)**: CLI/help/doctor/examples/docs aligned with real behaviour
-- **Planned (Phase 7)**: release artifacts, clean install story, smoke-tested shipped binary
+- **Done (Phases 6–7)**: CLI/help/doctor/examples/docs aligned with real behaviour; release artifacts, clean install story, smoke-tested shipped binary
 - **Later**: autotune tile sizes, cross-platform build, broader model coverage beyond MLP
 
 ---
