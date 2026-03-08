@@ -125,10 +125,12 @@ Plans:
   1. Є задокументований release flow і artifacts для підтримуваної платформи
   2. Clean install story перевірений не з dev shell, а з чистого сценарію
   3. Shipped binary проходить базові smoke checks (`help`, `doctor`, compile/run path) після install
-**Plans:** 0/0 plans
+**Plans:** 3 plans
 
 Plans:
-- [ ] TBD (`$gsd-plan-phase 7`)
+- [ ] 07-01-PLAN.md — Wave 0: Remove x86-v4 from Cargo.toml + restructure release.yml matrix to 3 artifacts with lipo for macOS universal binary (PLAT-V2-01, PLAT-V2-02, DIST-V2-01)
+- [ ] 07-02-PLAN.md — Wave 1: Add smoke check job to release.yml — downloads artifact, runs volta --help/doctor/run on fresh GHA runners (DIST-V2-02, DIST-V2-03)
+- [ ] 07-03-PLAN.md — Wave 1: Add Install section to README.md — prebuilt binary download, unpack, PATH, verify steps (DIST-V2-02)
 
 ---
 
@@ -142,9 +144,9 @@ Plans:
 | 4. CPU training path hardening and long-loop stability | 3/3 | Complete | 2026-03-08 |
 | 5. End-to-end PyTorch parity and real model training cases | 3/3 | Complete | 2026-03-08 |
 | 6. Product surface hardening for CLI doctor examples and docs | 4/4 | Complete   | 2026-03-08 |
-| 7. Packaging and install story for distributable releases | 0/0 | Planned | - |
+| 7. Packaging and install story for distributable releases | 0/3 | In Progress | - |
 
 ---
 
 *Roadmap created: 2026-03-07*
-*Last updated: 2026-03-08 — Phase 6 planned: 4 plans across 3 waves for CLI/doctor/examples/docs hardening*
+*Last updated: 2026-03-08 — Phase 7 planned: 3 plans across 2 waves for release artifacts, lipo universal binary, smoke check CI, and README install section*
