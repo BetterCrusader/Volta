@@ -108,9 +108,9 @@
 | UX-V2-01 | Phase 6 | Planned |
 | UX-V2-02 | Phase 6 | Complete |
 | UX-V2-03 | Phase 6 | Planned |
-| PLAT-V2-01 | Phase 7 | Planned |
-| PLAT-V2-02 | Phase 7 | Planned |
-| DIST-V2-01 | Phase 7 | Planned |
+| PLAT-V2-01 | Phase 7 | Complete |
+| PLAT-V2-02 | Phase 7 | Complete |
+| DIST-V2-01 | Phase 7 | Complete |
 | DIST-V2-02 | Phase 7 | Planned |
 | DIST-V2-03 | Phase 7 | Planned |
 

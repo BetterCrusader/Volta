@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-03-08T09:58:24.269Z"
+last_updated: "2026-03-08T14:56:34.232Z"
 progress:
   total_phases: 7
   completed_phases: 6
-  total_plans: 19
-  completed_plans: 19
+  total_plans: 22
+  completed_plans: 20
 ---
 
 # State: Volta
@@ -26,10 +26,10 @@ progress:
 
 ## Current Position
 
-**Фаза:** 6 — Product surface hardening for CLI doctor examples and docs (COMPLETE)
-**План:** 06-04 DONE — Phase 6 complete
-**Статус:** 06-04 complete — misleading .vt example comments corrected; all 6 cli_smoke tests pass; 19/19 plans complete
-**Прогрес:** [██████████] 100% — 19/19 plans complete
+**Фаза:** 7 — Packaging і install story for distributable releases (IN PROGRESS)
+**План:** 07-01 DONE — ARM build unblock + macOS universal binary pipeline
+**Статус:** 07-01 complete — x86-v4 removed from gemm; release.yml restructured with lipo merge; 20/22 plans complete
+**Прогрес:** [█████████░] 91% — 20/22 plans complete
 
 ```
 [x] Фаза 1 / 01-01: Remove x86-v4 from gemm features (DONE)
@@ -50,7 +50,10 @@ progress:
     [x] 06-02: README/USAGE/docs accuracy corrections (DONE)
     [x] 06-03: volta doctor rewrite — MKL/LLVM diagnostics + capability matrix (DONE)
     [x] 06-04: misleading example .vt comments corrected + cli_smoke tightened (DONE)
-[ ] Фаза 7: Packaging і install story (PLANNED)
+[~] Фаза 7: Packaging і install story (IN PROGRESS)
+    [x] 07-01: ARM build unblock + macOS universal binary via lipo (DONE)
+    [ ] 07-02: Smoke-test release artifact (PLANNED)
+    [ ] 07-03: README install section + download URLs (PLANNED)
 ```
 
 ---
@@ -66,6 +69,7 @@ progress:
 | Phase 06 P02 README/USAGE/docs accuracy | 8 min | 2 tasks | 3 files |
 | Phase 06 P03 | 12 | 2 tasks | 2 files |
 | Phase 06 P04 | 5 | 2 tasks | 3 files |
+| Phase 07 P01 | 155 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -98,6 +102,8 @@ progress:
 | MKL-not-found adds actionable warning making healthy:false | Correct behaviour — Adam/AdamW --rust will not link without MKL; user needs actionable guidance |
 | cli_smoke.rs Task 2 was already complete from plan 06-03 | 06-03 auto-fixed smoke_doctor and doctor_json_fields assertions when rewriting print_doctor output; no 06-04 changes needed |
 | Example file comments corrected in-place without touching model definitions | Only headers changed — layers/activation/optimizer lines untouched; files still parse and compile-train correctly |
+| Removed x86-v4 from gemm: runtime CPU detection provides AVX2/NEON | No compile-time AVX-512 hard-enable needed; enables AArch64 builds (07-01) |
+| macOS entries upload raw binaries (upload_raw:true); lipo merge in release job | lipo runs on ubuntu-latest release runner; 3 final artifacts: linux tar.gz, macos-universal tar.gz, windows zip (07-01) |
 
 ### Відомі ризики
 
@@ -126,8 +132,8 @@ progress:
 3. Читай `.planning/codebase/CONCERNS.md`
 4. Для наступного planning кроку враховуй summaries `05-01`, `05-02`, `05-03` і verification `05-VERIFICATION.md`
 
-**Наступний крок:** виконати Wave 1 плани Phase 6 (06-03 examples/CLI fixes)
+**Наступний крок:** виконати 07-02 (smoke-test release artifact) та 07-03 (README install section)
 
 ---
 
-*State refreshed: 2026-03-08 after 06-02 execution — README/USAGE/docs accuracy corrections*
+*State refreshed: 2026-03-08 after 07-01 execution — ARM build unblock + macOS universal binary pipeline*
