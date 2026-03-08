@@ -1,7 +1,6 @@
-// Transformer FFN block: the feed-forward sublayer used inside each Transformer layer.
-// Standard ratio: hidden_dim = 4 * model_dim
-// Here: model_dim=256, hidden_dim=1024, output=256
-// This is the compute-intensive part of GPT/BERT-style models.
+// Dense MLP with GELU activation (256->1024->256)
+// Note: despite the filename, this is a dense feedforward network, not a transformer.
+// It does not use MultiHeadAttention. It runs correctly with volta compile-train (MLP path).
 
 model transformer_ffn
     layers 256 1024 256
