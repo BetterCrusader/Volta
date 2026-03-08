@@ -462,6 +462,48 @@ fn infer_shape_for_op(
             }
         }
         Op::Removed => Ok(ShapeFact::Unknown),
+        Op::MultiHeadAttentionBackward {
+            q_input,
+            k_input,
+            v_input,
+            w_q,
+            bias_q,
+            output_idx,
+            ..
+        } => match output_idx {
+            0 => match shape_of(*q_input, shapes) {
+                ShapeFact::Tensor(s) if s.len() == 3 => Ok(ShapeFact::Tensor(s)),
+                ShapeFact::Unknown => Ok(ShapeFact::Unknown),
+                _ => Err("MultiHeadAttentionBackward dq: expected rank-3 q_input".to_string()),
+            },
+            1 => match shape_of(*k_input, shapes) {
+                ShapeFact::Tensor(s) if s.len() == 3 => Ok(ShapeFact::Tensor(s)),
+                ShapeFact::Unknown => Ok(ShapeFact::Unknown),
+                _ => Err("MultiHeadAttentionBackward dk: expected rank-3 k_input".to_string()),
+            },
+            2 => match shape_of(*v_input, shapes) {
+                ShapeFact::Tensor(s) if s.len() == 3 => Ok(ShapeFact::Tensor(s)),
+                ShapeFact::Unknown => Ok(ShapeFact::Unknown),
+                _ => Err("MultiHeadAttentionBackward dv: expected rank-3 v_input".to_string()),
+            },
+            3..=6 => match shape_of(*w_q, shapes) {
+                ShapeFact::Tensor(s) if s.len() == 2 => Ok(ShapeFact::Tensor(s)),
+                ShapeFact::Unknown => Ok(ShapeFact::Unknown),
+                _ => Err(
+                    "MultiHeadAttentionBackward dW: expected rank-2 projection weight".to_string(),
+                ),
+            },
+            7..=10 => match shape_of(*bias_q, shapes) {
+                ShapeFact::Tensor(s) if s.len() == 1 => Ok(ShapeFact::Tensor(s)),
+                ShapeFact::Unknown => Ok(ShapeFact::Unknown),
+                _ => Err(
+                    "MultiHeadAttentionBackward db: expected rank-1 projection bias".to_string(),
+                ),
+            },
+            _ => Err(format!(
+                "MultiHeadAttentionBackward invalid output_idx={output_idx}"
+            )),
+        },
         Op::SoftmaxCrossEntropyLossFromLogits { logits, targets } => {
             let log_shape = shape_of(*logits, shapes);
             let target_shape = shape_of(*targets, shapes);

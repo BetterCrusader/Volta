@@ -56,3 +56,78 @@ jobs:
           components: rustfmt
       - name: cargo fmt check
         run: cargo fmt --all -- --check
+
+  smoke-cli:
+    name: Smoke CLI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: dtolnay/rust-toolchain@4f366e621dc8fa63f557ca04b8f4361824a35a45
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@9bdad043e88c75890e36ad3bbc8d27f0090dd609
+      - name: build release CLI
+        run: cargo build --release --locked
+      - name: help mentions cpu-target
+        run: ./target/release/volta help | grep -- "--cpu-target <portable|native>"
+      - name: doctor runs
+        run: ./target/release/volta doctor
+      - name: xor example runs
+        run: ./target/release/volta run examples/xor.vt
+
+  arm64-portability:
+    name: ARM64 portability
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: dtolnay/rust-toolchain@4f366e621dc8fa63f557ca04b8f4361824a35a45
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@9bdad043e88c75890e36ad3bbc8d27f0090dd609
+      - name: cargo test on native ARM64 runner
+        run: cargo test --locked --workspace
+      - name: build release CLI
+        run: cargo build --release --locked
+      - name: help mentions cpu-target
+        run: ./target/release/volta help | grep -- "--cpu-target <portable|native>"
+      - name: doctor runs
+        run: ./target/release/volta doctor
+      - name: xor example runs
+        run: ./target/release/volta run examples/xor.vt
+      - name: portable rust compile-train smoke
+        run: |
+          cat > arm64_portable_smoke.vt <<'EOF'
+          model smoke
+              layers 2 4 1
+              activation sigmoid
+
+          dataset smoke_data
+              type xor
+              batch 4
+
+          train smoke on smoke_data
+              epochs 1
+              optimizer sgd
+              lr 0.1
+              device cpu
+          EOF
+          ./target/release/volta compile-train arm64_portable_smoke.vt --rust --cpu-target portable -o arm64_portable_train.so
+      - name: native adam compile-train smoke without MKL requirement
+        run: |
+          cat > arm64_native_adam_smoke.vt <<'EOF'
+          model smoke
+              layers 2 4 1
+              activation sigmoid
+              optimizer adam
+
+          dataset smoke_data
+              type xor
+              batch 4
+
+          train smoke on smoke_data
+              epochs 1
+              optimizer adam
+              lr 0.01
+              device cpu
+          EOF
+          ./target/release/volta compile-train arm64_native_adam_smoke.vt --rust --cpu-target native -o arm64_native_adam_train.so

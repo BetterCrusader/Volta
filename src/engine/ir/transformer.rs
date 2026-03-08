@@ -73,26 +73,34 @@ pub fn add_transformer_encoder_block(
     ln2_b: ValueId,
     config: &TransformerConfig,
 ) -> Result<ValueId, GraphError> {
-    // 1. Self-attention (output_idx=0 = final MHA output)
-    let (_, attn_out) = graph.add_op(
-        block,
-        Op::MultiHeadAttention {
-            q_input: x,
-            k_input: x,
-            v_input: x,
-            w_q,
-            w_k,
-            w_v,
-            w_o,
-            bias_q: bq,
-            bias_k: bk,
-            bias_v: bv,
-            bias_o: bo,
-            num_heads: config.num_heads,
-            causal: config.causal,
-            output_idx: 0,
-        },
-    )?;
+    // 1. Self-attention. Emit the full MHA output family so autograd can find the
+    // saved sibling tensors (`attn_weights`, projections, context) during backward.
+    let mut attn_out = None;
+    for output_idx in 0..6 {
+        let (_, value) = graph.add_op(
+            block,
+            Op::MultiHeadAttention {
+                q_input: x,
+                k_input: x,
+                v_input: x,
+                w_q,
+                w_k,
+                w_v,
+                w_o,
+                bias_q: bq,
+                bias_k: bk,
+                bias_v: bv,
+                bias_o: bo,
+                num_heads: config.num_heads,
+                causal: config.causal,
+                output_idx,
+            },
+        )?;
+        if output_idx == 0 {
+            attn_out = Some(value);
+        }
+    }
+    let attn_out = attn_out.expect("MHA primary output must exist");
 
     // 2. Residual + LayerNorm 1
     // Note: For LN to work on 3D tensors [batch, seq, d_model], we need to reshape.
@@ -100,12 +108,14 @@ pub fn add_transformer_encoder_block(
     // (Reshape back at the end)
     let (_, residual1) = graph.add_op(block, Op::Add(x, attn_out))?;
 
-    // Reshape to [batch*seq, d_model] for LayerNorm
+    // Flatten [batch, seq, d_model] -> [batch*seq, d_model] for LayerNorm.
+    // Using Reshape with a synthetic 0 "dynamic" dimension is not executable in the
+    // interpreter/runtime today; Flatten(axis=2) gives the exact shape we need.
     let (_, ln1_in) = graph.add_op(
         block,
-        Op::Reshape {
+        Op::Flatten {
             input: residual1,
-            shape: vec![0, config.d_model], // 0 = dynamic (batch*seq)
+            axis: 2,
         },
     )?;
     let (_, ln1_out) = graph.add_op(

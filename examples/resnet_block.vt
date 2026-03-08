@@ -1,6 +1,6 @@
-// ResNet-style block: two linear projections with same in/out dimension.
-// The residual connection is approximated here as the linear path only.
-// Topology: 512 -> 512 -> 512 (bottleneck variant)
+// Dense MLP (512->512->512)
+// Note: despite the filename, this has no residual connections -- it is a standard MLP.
+// It runs correctly with volta compile-train (MLP path).
 
 model resnet_block
     layers 512 512 512

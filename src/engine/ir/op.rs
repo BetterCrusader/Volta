@@ -347,6 +347,27 @@ pub enum Op {
         causal: bool,
         output_idx: usize,
     },
+    /// MHA backward — output_idx selects which gradient to compute:
+    /// 0=dq_input, 1=dk_input, 2=dv_input, 3=dw_q, 4=dw_k, 5=dw_v, 6=dw_o,
+    /// 7=db_q, 8=db_k, 9=db_v, 10=db_o
+    MultiHeadAttentionBackward {
+        q_input: ValueId,
+        k_input: ValueId,
+        v_input: ValueId,
+        w_q: ValueId,
+        w_k: ValueId,
+        w_v: ValueId,
+        w_o: ValueId,
+        bias_q: ValueId,
+        bias_k: ValueId,
+        bias_v: ValueId,
+        bias_o: ValueId,
+        attn_weights: ValueId, // saved from forward (output_idx=1 node)
+        context: ValueId,      // saved from forward (output_idx=5 node)
+        upstream: ValueId,     // upstream gradient (d_loss/d_output)
+        num_heads: usize,
+        output_idx: usize,
+    },
     Dropout {
         input: ValueId,
         ratio: f32,
@@ -635,6 +656,40 @@ impl Op {
                 vec![
                     *q_input, *k_input, *v_input, *w_q, *w_k, *w_v, *w_o, *bias_q, *bias_k,
                     *bias_v, *bias_o,
+                ]
+            }
+            Op::MultiHeadAttentionBackward {
+                q_input,
+                k_input,
+                v_input,
+                w_q,
+                w_k,
+                w_v,
+                w_o,
+                bias_q,
+                bias_k,
+                bias_v,
+                bias_o,
+                attn_weights,
+                context,
+                upstream,
+                ..
+            } => {
+                vec![
+                    *q_input,
+                    *k_input,
+                    *v_input,
+                    *w_q,
+                    *w_k,
+                    *w_v,
+                    *w_o,
+                    *bias_q,
+                    *bias_k,
+                    *bias_v,
+                    *bias_o,
+                    *attn_weights,
+                    *context,
+                    *upstream,
                 ]
             }
             Op::BatchNorm {
@@ -987,6 +1042,38 @@ impl Op {
                 *bias_k = remap(*bias_k);
                 *bias_v = remap(*bias_v);
                 *bias_o = remap(*bias_o);
+            }
+            Op::MultiHeadAttentionBackward {
+                q_input,
+                k_input,
+                v_input,
+                w_q,
+                w_k,
+                w_v,
+                w_o,
+                bias_q,
+                bias_k,
+                bias_v,
+                bias_o,
+                attn_weights,
+                context,
+                upstream,
+                ..
+            } => {
+                *q_input = remap(*q_input);
+                *k_input = remap(*k_input);
+                *v_input = remap(*v_input);
+                *w_q = remap(*w_q);
+                *w_k = remap(*w_k);
+                *w_v = remap(*w_v);
+                *w_o = remap(*w_o);
+                *bias_q = remap(*bias_q);
+                *bias_k = remap(*bias_k);
+                *bias_v = remap(*bias_v);
+                *bias_o = remap(*bias_o);
+                *attn_weights = remap(*attn_weights);
+                *context = remap(*context);
+                *upstream = remap(*upstream);
             }
             Op::BatchNorm {
                 input,

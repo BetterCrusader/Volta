@@ -1678,13 +1678,14 @@ impl Executor {
         Ok(batches)
     }
 
-    /// Build a native object + exe from the first trained model in this executor.
+    /// Build a portable or native CPU object + shared library from the first trained model.
     /// Requires the `llvm-codegen` feature. Returns the path to the compiled exe.
     #[cfg(feature = "llvm-codegen")]
     pub fn compile_first_model_to_object(
         &self,
         source_path: &str,
         output_path: Option<&str>,
+        cpu_target_mode: crate::ir::CpuTargetMode,
     ) -> Result<String, String> {
         use crate::ir::Op;
         use crate::ir::codegen::{compile_graph_to_object, link_object_to_exe};
@@ -1741,19 +1742,21 @@ impl Executor {
             .unwrap_or_else(|| std::path::Path::new(source_path).with_extension(lib_ext));
         let obj = exe.with_extension("o");
 
-        compile_graph_to_object(&graph, &params, &obj).map_err(|e| e.to_string())?;
-        link_object_to_exe(&obj, &exe).map_err(|e| e.to_string())?;
+        compile_graph_to_object(&graph, &params, &obj, cpu_target_mode)
+            .map_err(|e| e.to_string())?;
+        link_object_to_exe(&obj, &exe, cpu_target_mode).map_err(|e| e.to_string())?;
 
         Ok(exe.display().to_string())
     }
 
     /// Compile the first trained model into a training DLL using MLP training codegen.
-    /// Generates C source for a training step (forward + backward + SGD update),
-    /// compiles with clang -O3 -march=native, links with gemm_shim.c.
+    /// Generates C source for a training step (forward + backward + SGD update)
+    /// and compiles it in portable or native CPU mode.
     pub fn compile_first_model_to_train_dll(
         &self,
         source_path: &str,
         output_path: Option<&str>,
+        cpu_target_mode: crate::ir::CpuTargetMode,
     ) -> Result<String, String> {
         use crate::ir::codegen::{MlpTopology, compile_mlp_train_dll};
 
@@ -1763,6 +1766,9 @@ impl Executor {
             .iter()
             .next()
             .ok_or_else(|| "No models found — declare a model first".to_string())?;
+
+        ensure_model_supports_aot_train_codegen(model_name, model_state)?;
+        ensure_model_supports_c_train_codegen_optimizer(model_name, model_state)?;
 
         let weights = model_state.weights.as_ref();
 
@@ -1791,7 +1797,7 @@ impl Executor {
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| std::path::Path::new(source_path).with_extension(lib_ext));
 
-        compile_mlp_train_dll(&topology, init_weights.as_ref(), &dll_path)
+        compile_mlp_train_dll(&topology, init_weights.as_ref(), &dll_path, cpu_target_mode)
             .map_err(|e| e.to_string())?;
 
         Ok(dll_path.display().to_string())
@@ -1801,6 +1807,7 @@ impl Executor {
         &self,
         source_path: &str,
         output_path: Option<&str>,
+        cpu_target_mode: crate::ir::CpuTargetMode,
     ) -> Result<String, String> {
         use crate::ir::codegen::compile_mlp_train_rust_dll;
         use crate::ir::codegen::mlp_train_rust_codegen::MlpTopology as RustMlpTopology;
@@ -1811,6 +1818,9 @@ impl Executor {
             .iter()
             .next()
             .ok_or_else(|| "No models found — declare a model first".to_string())?;
+
+        ensure_model_supports_aot_train_codegen(model_name, model_state)?;
+        ensure_model_supports_rust_train_codegen_optimizer(model_name, model_state)?;
 
         let weights = model_state.weights.as_ref();
 
@@ -1846,7 +1856,7 @@ impl Executor {
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| std::path::Path::new(source_path).with_extension(lib_ext));
 
-        compile_mlp_train_rust_dll(&topology, init_weights.as_ref(), &dll_path)
+        compile_mlp_train_rust_dll(&topology, init_weights.as_ref(), &dll_path, cpu_target_mode)
             .map_err(|e| e.to_string())?;
 
         Ok(dll_path.display().to_string())
@@ -2457,8 +2467,7 @@ impl Executor {
             Expr::Str { value, .. } => Ok(Value::Str(value.clone())),
             Expr::Symbol { name, .. } => Ok(Value::Str(name.clone())),
             Expr::Call { callee, args, span } => {
-                if self.runtime.structs.contains_key(callee) {
-                    let field_names = self.runtime.structs.get(callee).cloned().unwrap();
+                if let Some(field_names) = self.runtime.structs.get(callee).cloned() {
                     let mut fields = HashMap::new();
                     for (name, arg_expr) in field_names.into_iter().zip(args.iter()) {
                         fields.insert(name, self.eval_expr(arg_expr)?);
@@ -3135,6 +3144,50 @@ enum CmpOp {
     LessEq,
 }
 
+fn ensure_model_supports_aot_train_codegen(
+    model_name: &str,
+    model_state: &ModelState,
+) -> Result<(), String> {
+    if let Some(template) = &model_state.use_fn {
+        return Err(format!(
+            "Model '{model_name}' uses template '{template}'. `compile-train` is MLP-only today and does not support function-backed/custom training graphs yet (for example Conv2D, generic LayerNorm, or attention/MHA models). Use runtime `train` instead."
+        ));
+    }
+
+    Ok(())
+}
+
+fn ensure_model_supports_c_train_codegen_optimizer(
+    model_name: &str,
+    model_state: &ModelState,
+) -> Result<(), String> {
+    let optimizer = model_state.optimizer.as_deref().unwrap_or("sgd");
+    if optimizer.eq_ignore_ascii_case("sgd") {
+        return Ok(());
+    }
+
+    Err(format!(
+        "Model '{model_name}' requests optimizer '{optimizer}', but the default C compile-train path supports only SGD today. Use `compile-train --rust` for Adam/AdamW/Adagrad, or use runtime `train`."
+    ))
+}
+
+fn ensure_model_supports_rust_train_codegen_optimizer(
+    model_name: &str,
+    model_state: &ModelState,
+) -> Result<(), String> {
+    let optimizer = model_state.optimizer.as_deref().unwrap_or("sgd");
+    if matches!(
+        optimizer.to_ascii_lowercase().as_str(),
+        "sgd" | "adam" | "adamw" | "adagrad"
+    ) {
+        return Ok(());
+    }
+
+    Err(format!(
+        "Model '{model_name}' requests optimizer '{optimizer}', but `compile-train --rust` supports only SGD, Adam, AdamW, and Adagrad today. Use runtime `train` for RMSProp or other optimizers."
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3500,5 +3553,92 @@ mod tests {
         let err = Executor::decode_checkpoint_bytes(&buf, "trail.vt", Span::unknown())
             .expect_err("trailing bytes must fail");
         assert!(err.message.contains("trailing bytes"));
+    }
+
+    #[test]
+    fn compile_train_rejects_non_mlp_model_templates() {
+        let mut ex = Executor::new();
+        ex.runtime.models.insert(
+            "encoder".to_string(),
+            ModelState {
+                layers: vec![4, 8, 4],
+                activation: "relu".to_string(),
+                optimizer: Some("adam".to_string()),
+                optimizer_lr: Some(0.001),
+                precision: None,
+                memory: None,
+                seed: None,
+                clip_grad: None,
+                dropout_p: None,
+                use_layernorm: false,
+                use_fn: Some("tiny_transformer_block".to_string()),
+                weights: None,
+                trained_epochs: 0,
+            },
+        );
+
+        let err = ex
+            .compile_first_model_to_train_dll(
+                "example.vt",
+                None,
+                crate::ir::CpuTargetMode::Portable,
+            )
+            .expect_err("compile-train must reject function-backed non-MLP models");
+        assert!(
+            err.contains("MLP-only today"),
+            "expected MLP-only message, got: {err}"
+        );
+        assert!(
+            err.contains("Conv2D") && err.contains("attention/MHA"),
+            "expected actionable unsupported-model examples, got: {err}"
+        );
+    }
+
+    #[test]
+    fn compile_train_c_path_rejects_non_sgd_optimizer() {
+        let model = ModelState {
+            layers: vec![2, 3, 1],
+            activation: "relu".to_string(),
+            optimizer: Some("adam".to_string()),
+            optimizer_lr: Some(0.001),
+            precision: None,
+            memory: None,
+            seed: None,
+            clip_grad: None,
+            dropout_p: None,
+            use_layernorm: false,
+            use_fn: None,
+            weights: None,
+            trained_epochs: 0,
+        };
+
+        let err = ensure_model_supports_c_train_codegen_optimizer("demo", &model)
+            .expect_err("C AOT path must reject Adam");
+        assert!(err.contains("supports only SGD today"));
+        assert!(err.contains("--rust"));
+    }
+
+    #[test]
+    fn compile_train_rust_path_rejects_unsupported_optimizer() {
+        let model = ModelState {
+            layers: vec![2, 3, 1],
+            activation: "relu".to_string(),
+            optimizer: Some("rmsprop".to_string()),
+            optimizer_lr: Some(0.001),
+            precision: None,
+            memory: None,
+            seed: None,
+            clip_grad: None,
+            dropout_p: None,
+            use_layernorm: false,
+            use_fn: None,
+            weights: None,
+            trained_epochs: 0,
+        };
+
+        let err = ensure_model_supports_rust_train_codegen_optimizer("demo", &model)
+            .expect_err("Rust AOT path must reject RMSProp");
+        assert!(err.contains("supports only SGD, Adam, AdamW, and Adagrad"));
+        assert!(err.contains("runtime `train`"));
     }
 }

@@ -329,7 +329,8 @@ mod tests {
                 | Op::QuantizeLinear { .. }
                 | Op::DequantizeLinear { .. }
                 | Op::DepthwiseSeparableConv { .. }
-                | Op::CustomCall { .. } => {}
+                | Op::CustomCall { .. }
+                | Op::MultiHeadAttentionBackward { .. } => {}
             }
         }
     }

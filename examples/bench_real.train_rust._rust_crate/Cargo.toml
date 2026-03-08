@@ -10,6 +10,23 @@ crate-type = ["cdylib"]
 panic = "abort"
 opt-level = 3
 
+[features]
+default = []
+mkl = []
+
 [dependencies]
-gemm = { version = "0.19", features = ["rayon", "x86-v4"] }
+gemm = { version = "0.19", features = ["rayon"] }
 rayon = "1"
+faer = { version = "0.21", default-features = false, features = ["rayon"] }
+
+[[example]]
+name = "bench_b128"
+required-features = ["mkl"]
+
+[[example]]
+name = "bench_mlp256"
+required-features = ["mkl"]
+
+[[example]]
+name = "bench_mlp2048"
+required-features = ["mkl"]

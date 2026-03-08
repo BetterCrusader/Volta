@@ -2,6 +2,8 @@
 
 Volta is an experimental ML compiler and runtime written in Rust. It has its own language (`.vt` files), its own IR, its own codegen pipeline, and a CPU training backend that outperforms PyTorch eager mode on a range of MLP workloads.
 
+Tier 1 source/runtime CPU support today is **x86_64 + ARM64**. Everything else is **best-effort**. That CPU support statement is separate from which prebuilt release artifacts are currently shipped.
+
 This is not a framework. It is not production-ready globally. It is a focused engineering project with a determinism-first design and a codegen path that produces verifiably fast native training code.
 
 ---
@@ -20,17 +22,64 @@ Volta bets on the opposite: a compiler approach where the model is compiled into
 - CPU training codegen outperforms PyTorch eager (6 threads, MKL) by 35–67% on MLP workloads at B≤64
 - Deterministic execution by design: same inputs → identical outputs, bit-for-bit
 - Full codegen pipeline: `.vt` file → IR → Rust/LLVM → native `.dll` → benchmark
-- AVX2 transpose kernels, fused SGD-GEMM, MKL hybrid backend for SGD weight updates
+- Explicit CPU target selection for AOT codegen: portable default, native opt-in
+- AVX2 transpose kernels and optional MKL acceleration for native Adam/AdamW on the Rust training path
 - Working `.vt` language: lexer, parser, semantic analysis, interpreter
 - IR with graph optimizations: constant folding, DCE, CSE, algebraic simplification, autograd
 
 **Limitations (honest):**
 - CPU performance advantage disappears at B≥128 — PyTorch MKL wins on large GEMMs
-- Adam optimizer is currently 1.9× slower than PyTorch (separate dW GEMM, no fusion)
+- Adam optimizer is +25% faster than PyTorch on B≤64 MLP (4.3 ms vs 5.3 ms; SGD is 35-67% faster)
 - CUDA backend: files exist and compile behind `--features cuda`, but GPU perf is uncharted
-- No installer, no package, no Python bindings — build from source only
-- Not tested on macOS or Linux (developed on Windows 11 x86-64)
+- `compile-train` is still **MLP-only**
+- Default C `compile-train` path is **SGD-only**; `compile-train --rust` supports only **SGD, Adam, AdamW, Adagrad**
+- Tier 1 source/runtime CPU support is x86_64 + ARM64; shipped release artifacts are narrower than that
+- Prebuilt binaries are currently shipped for Linux x86_64, macOS universal, and Windows x86_64. No Python bindings.
 - Many high-level layer types (`LSTM`, `MultiHeadAttention`, `LayerNorm`) exist in IR but are not exercised by the codegen path — only dense MLP is benchmarked end-to-end
+
+---
+
+## Install
+
+Download the prebuilt binary for your platform from the
+[latest release](https://github.com/BetterCrusader/Volta/releases/latest):
+
+These release artifacts are the current packaged binaries, not the full CPU support matrix.
+
+| Platform | File |
+|----------|------|
+| Linux x86-64 | `volta-vX.Y.Z-linux-x86_64.tar.gz` |
+| Linux ARM64 | `volta-vX.Y.Z-linux-arm64.tar.gz` |
+| macOS (Apple Silicon + Intel) | `volta-vX.Y.Z-macos-universal.tar.gz` |
+| Windows x86-64 | `volta-vX.Y.Z-windows-x86_64.zip` |
+
+Replace `vX.Y.Z` with the release version shown on the releases page.
+
+**Linux / macOS:**
+
+```bash
+tar xzf volta-vX.Y.Z-*.tar.gz
+chmod +x volta
+mv volta /usr/local/bin/    # or any directory already on your PATH
+volta --help
+```
+
+**Windows:**
+Unzip `volta-vX.Y.Z-windows-x86_64.zip`, then move `volta.exe` to a
+directory on your `PATH` (or add its folder to `PATH`).
+
+**Verify the install:**
+
+```bash
+volta --help
+volta doctor
+volta run examples/xor.vt   # requires the examples/ directory from the repo
+```
+
+> `volta run` requires a `.vt` source file on disk. The binary is
+> self-contained; example files are in the repository.
+
+No Rust toolchain required to run prebuilt binaries.
 
 ---
 
@@ -59,6 +108,8 @@ cargo test --workspace
 
 ## Benchmark highlights
 
+These numbers are from the measured **Windows x86_64 native-path MLP benchmarks**. They are not portable-baseline numbers, and they are not ARM64 benchmark claims.
+
 All results: Windows 11, x86-64, 6-core CPU, 30 outer runs × 7 inner × 50 steps, 90s cooldown. No trimming.
 
 | Architecture | B | Volta | PyTorch 6T | Volta faster by |
@@ -68,7 +119,7 @@ All results: Windows 11, x86-64, 6-core CPU, 30 outer runs × 7 inner × 50 step
 | MLP 512→2048→2048→512→1 | 64 | **5.054 ms** | 8.457 ms | **+67%** |
 | MLP 512→1024→1024→512→256→1 | 128 | 3.659 ms | 3.628 ms | **~equal** |
 
-**Honest note**: Volta wins at B≤64. At B=128 the result is statistical parity. At B≥256 PyTorch MKL is faster. Adam optimizer is slower in Volta. See full tables, caveats, and reproduce instructions in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+**Honest note**: Volta wins at B≤64. At B=128 the result is statistical parity. At B≥256 PyTorch MKL is faster. Adam optimizer is +25% faster than PyTorch at B≤64. See full tables, caveats, and reproduce instructions in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
 ---
 
@@ -85,7 +136,7 @@ All results: Windows 11, x86-64, 6-core CPU, 30 outer runs × 7 inner × 50 step
                                             └─ Codegen
                                                 ├─ LLVM IR → .o → .dll  (inference)
                                                 └─ Rust source → cargo  (training DLL)
-                                                        └─ gemm crate + MKL hybrid + AVX2
+                                                        └─ gemm crate + optional MKL accel + AVX2
 ```
 
 Full architecture details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
@@ -98,10 +149,11 @@ Full architecture details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 volta run <file.vt>             # Interpret and execute
 volta check <file.vt>           # Syntax + semantic check, no execution
 volta info <file.vt>            # Show model topology info
-volta compile <file.vt>         # Compile inference DLL (requires LLVM)
-volta compile-train <file.vt>   # Compile training DLL
-volta compile-train <file.vt> --rust  # Rust-based training DLL (faster)
+volta compile <file.vt> [--cpu-target portable|native]         # Compile inference DLL (requires LLVM)
+volta compile-train <file.vt> [--cpu-target portable|native]   # MLP-only training DLL, C path = SGD only
+volta compile-train <file.vt> --rust [--cpu-target portable|native]  # MLP-only Rust path = SGD/Adam/AdamW/Adagrad
 volta doctor                    # Environment diagnostics
+volta export-py <file.vt>       # Export model as Python/PyTorch code
 volta extract <model_name>      # Reverse-engineer GGUF/SafeTensors to .vt
 volta init [dir]                # Initialize new project
 ```
@@ -128,11 +180,17 @@ train brain on bench_data
 
 ---
 
-## Install / platform note
+## CPU and artifact scope
 
-- **Windows x86-64**: fully tested
-- **Linux/macOS**: not tested; should compile for the interpreter path, codegen path needs LLVM 21
-- **LLVM**: required only for `volta compile` (inference DLL). Path: set `LLVM_SYS_210_PREFIX` or put `clang.exe` next to the binary.
+- **Tier 1 source/runtime CPU support**: x86_64 + ARM64
+- **Other CPU architectures**: best-effort only
+- **Shipped release artifacts today**: Linux x86_64, Linux ARM64, macOS universal, Windows x86_64
+- **`--cpu-target`**: `portable` is the default for `compile` and `compile-train`; `native` is explicit opt-in and may emit host-specific binaries
+- **`compile-train` coverage**: MLP-only today
+- **C `compile-train` path**: SGD only
+- **Rust `compile-train --rust` path**: SGD, Adam, AdamW, Adagrad
+- **MKL**: optional accelerator for native Adam/AdamW on the Rust path, not a baseline requirement
+- **LLVM**: required only for `volta compile` (inference DLL). Set `LLVM_SYS_210_PREFIX` or place `clang` next to the binary.
 - **CUDA**: build with `--features cuda`. GPU perf not benchmarked.
 
 ---
@@ -142,9 +200,9 @@ train brain on bench_data
 See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full current state and next steps.
 
 Short version:
-- **Done**: interpreter, IR, codegen, SGD training DLL, AVX2 kernels, MKL hybrid, benchmark harness
-- **Next**: Adam fusion (close the 1.9× gap), autotune tile sizes, cross-platform build
-- **Later**: GPU (CUDA) perf measurement, broader model coverage beyond MLP
+- **Done (Phases 1–5)**: interpreter, IR, codegen, optimizer coverage split made explicit, benchmark harness, end-to-end PyTorch parity for MLP/ConvNet/tiny-transformer
+- **Done (Phases 6–7)**: product-surface hardening, truthful CPU portability docs, and release/workflow verification aligned with the actually shipped artifacts on x86_64 and ARM64
+- **Later**: CPU throughput/autotuning, broader model coverage beyond MLP, more packaged targets beyond the current supported set
 
 ---
 

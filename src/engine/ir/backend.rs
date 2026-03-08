@@ -3,9 +3,10 @@ use std::hash::{Hash, Hasher};
 
 use crate::ir::ExecutionPlan;
 use crate::ir::{
-    BackendCapabilities, BackendKind, DeterminismLevel, ExecutionContext, Graph, NodeId,
-    OptimizerConfig, OptimizerState, RuntimeValue, Tensor, ValueId, apply_gradients,
-    execute_value_with_schedule_context, execute_with_schedule_context,
+    BackendCapabilities, BackendKind, BackendMaturity, BackendVendor, DeterminismLevel,
+    DeviceClass, ExecutionContext, Graph, NodeId, OptimizerConfig, OptimizerState, RuntimeValue,
+    Tensor, ValueId, apply_gradients, execute_value_with_schedule_context,
+    execute_with_schedule_context,
 };
 
 #[derive(Debug, Clone)]
@@ -74,15 +75,23 @@ impl Backend for CpuBackend {
     fn capabilities(&self) -> BackendCapabilities {
         BackendCapabilities {
             backend: BackendKind::Cpu,
+            device_class: DeviceClass::Cpu,
+            vendor: BackendVendor::GenericCpu,
+            maturity: BackendMaturity::Validated,
             supports_inference: true,
             supports_training: true,
+            supports_runtime_execution: true,
+            supports_gradient_updates: true,
+            supports_adam: true,
             supports_strict_determinism: true,
+            supports_balanced_determinism: true,
+            supports_fast_determinism: true,
             default_determinism: DeterminismLevel::Strict,
         }
     }
 
     fn compile(&self, plan: &ExecutionPlan) -> Result<CompiledProgram, BackendError> {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let mut hasher = siphasher::sip::SipHasher13::new_with_keys(0, 0);
         plan.schedule.ordered_nodes.hash(&mut hasher);
         plan.allocation.peak_bytes.hash(&mut hasher);
 
@@ -107,9 +116,17 @@ mod cuda_backend {
         fn capabilities(&self) -> BackendCapabilities {
             BackendCapabilities {
                 backend: BackendKind::Cuda,
+                device_class: DeviceClass::Gpu,
+                vendor: BackendVendor::Nvidia,
+                maturity: BackendMaturity::Experimental,
                 supports_inference: true,
                 supports_training: true,
+                supports_runtime_execution: true,
+                supports_gradient_updates: true,
+                supports_adam: false,
                 supports_strict_determinism: true,
+                supports_balanced_determinism: true,
+                supports_fast_determinism: true,
                 default_determinism: DeterminismLevel::Balanced,
             }
         }
@@ -125,7 +142,7 @@ mod cuda_backend {
                 message: err.message,
             })?;
 
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            let mut hasher = siphasher::sip::SipHasher13::new_with_keys(0, 0);
             plan.schedule.ordered_nodes.hash(&mut hasher);
             plan.allocation.peak_bytes.hash(&mut hasher);
             lowered.executable_nodes.hash(&mut hasher);

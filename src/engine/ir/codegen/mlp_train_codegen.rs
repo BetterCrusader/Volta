@@ -1,5 +1,5 @@
 //! MLP training codegen — generates C source for a specific MLP topology,
-//! compiles with clang -O3 -march=native.
+//! then compiles it in either portable or native CPU mode.
 //!
 //! Strategy: ALL matrix multiplications (forward + backward dW + backward dX)
 //! use volta_gemm_f32 (the existing tiled GEMM that is already fast).
@@ -15,6 +15,10 @@
 //! Zero heap allocs per step; all buffers pre-allocated in init.
 //! volta_transpose_f32 is exported from gemm_shim.c.
 use std::path::Path;
+
+use crate::ir::CpuTargetMode;
+
+const GEMM_SHIM_C: &[u8] = include_bytes!("gemm_shim.c");
 
 #[derive(Debug)]
 pub struct MlpTrainCodegenError {
@@ -36,10 +40,14 @@ pub fn compile_mlp_train_dll(
     topology: &MlpTopology,
     init_weights: Option<&std::collections::HashMap<String, Vec<f32>>>,
     out_dll: &Path,
+    cpu_target_mode: CpuTargetMode,
 ) -> Result<(), MlpTrainCodegenError> {
     let c_src = out_dll.with_extension("train.c");
     let c_obj = out_dll.with_extension("train.o");
-    let shim_src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/engine/ir/codegen/gemm_shim.c");
+    let shim_src = out_dll.with_extension("shim.c");
+    std::fs::write(&shim_src, GEMM_SHIM_C).map_err(|e| MlpTrainCodegenError {
+        message: format!("write gemm_shim.c: {e}"),
+    })?;
     let shim_obj = out_dll.with_extension("shim.o");
 
     let code = generate_c_source(topology, init_weights)?;
@@ -50,7 +58,7 @@ pub fn compile_mlp_train_dll(
     let clang = find_clang();
 
     let s1 = std::process::Command::new(&clang)
-        .args(["-O3", "-march=native", "-ffast-math", "-funroll-loops"])
+        .args(cpu_target_mode.clang_codegen_args())
         .arg("-c")
         .arg(&c_src)
         .arg("-o")
@@ -67,7 +75,7 @@ pub fn compile_mlp_train_dll(
 
     let omp_lib = find_omp_lib();
 
-    let mut shim_args = vec!["-O3", "-march=native", "-ffast-math", "-funroll-loops"];
+    let mut shim_args = cpu_target_mode.clang_codegen_args().to_vec();
     if omp_lib.is_some() {
         shim_args.push("-fopenmp");
     }
@@ -91,8 +99,7 @@ pub fn compile_mlp_train_dll(
     cmd.arg(&c_obj)
         .arg(&shim_obj)
         .arg("-shared")
-        .arg("-O3")
-        .arg("-march=native")
+        .args(cpu_target_mode.clang_codegen_args())
         .arg("-o")
         .arg(out_dll);
     if let Some(ref omp) = omp_lib {
@@ -406,4 +413,17 @@ fn generate_c_source(
     }
 
     Ok(s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GEMM_SHIM_C;
+
+    #[test]
+    fn gemm_shim_bytes_not_empty() {
+        assert!(
+            !GEMM_SHIM_C.is_empty(),
+            "GEMM_SHIM_C must be non-empty (include_bytes! embed check)"
+        );
+    }
 }

@@ -4,8 +4,8 @@ use crate::ir::interpreter::{
     execute_terminal_with_buffer,
 };
 use crate::ir::{
-    Backend, CompilerFlags, DeterminismLevel, ExecutionContext, ExecutionPlan, Graph, NodeId,
-    RuntimeValue, ValueId, compile_or_get_cached, verify_allocation,
+    Backend, CompilerFlags, DeterminismLevel, ExecutionContext, ExecutionPhase, ExecutionPlan,
+    Graph, NodeId, RuntimeValue, ValueId, compile_or_get_cached, verify_allocation,
     verify_no_undecomposed_backward_ops, verify_schedule,
 };
 use std::collections::HashMap;
@@ -168,14 +168,10 @@ fn compile_plan_for_backend(
 
     let flags = CompilerFlags::from_env();
     let caps = backend.capabilities();
-    if flags.determinism == DeterminismLevel::Strict && !caps.supports_strict_determinism {
-        return Err(RuntimeGatewayError {
-            message: format!(
-                "Backend {:?} does not support strict determinism",
-                caps.backend
-            ),
-        });
-    }
+    caps.validate(ExecutionPhase::Inference, flags.determinism)
+        .map_err(|err| RuntimeGatewayError {
+            message: err.message,
+        })?;
 
     compile_or_get_cached(plan, backend, flags.determinism)
         .map(|_| flags.determinism)

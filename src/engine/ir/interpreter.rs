@@ -1354,6 +1354,335 @@ fn evaluate_op(
         }
         Op::Identity(value) => read_value(values, *value, Some(node_id)),
         Op::Dropout { input, .. } => read_value(values, *input, Some(node_id)),
+        Op::MultiHeadAttentionBackward {
+            q_input,
+            k_input,
+            v_input,
+            w_q,
+            w_k,
+            w_v,
+            w_o,
+            bias_q,
+            bias_k,
+            bias_v,
+            bias_o: _,
+            attn_weights,
+            context,
+            upstream,
+            num_heads,
+            output_idx,
+        } => {
+            use crate::engine::ir::kernels::attention::scaled_dot_product_attention_backward;
+            use crate::ir::tensor::Tensor;
+
+            let qt = read_tensor(values, *q_input, node_id)?;
+            let kt = read_tensor(values, *k_input, node_id)?;
+            let vt = read_tensor(values, *v_input, node_id)?;
+            let wqt = read_tensor(values, *w_q, node_id)?;
+            let wkt = read_tensor(values, *w_k, node_id)?;
+            let wvt = read_tensor(values, *w_v, node_id)?;
+            let wot = read_tensor(values, *w_o, node_id)?;
+            let bqt = read_tensor(values, *bias_q, node_id)?;
+            let bkt = read_tensor(values, *bias_k, node_id)?;
+            let bvt = read_tensor(values, *bias_v, node_id)?;
+            let aw = read_tensor(values, *attn_weights, node_id)?;
+            let ctx = read_tensor(values, *context, node_id)?;
+            let up = read_tensor(values, *upstream, node_id)?;
+
+            let err = |msg: String| error(msg, Some(node_id));
+
+            // Derive shapes
+            let qt_c = qt.make_contiguous().map_err(|e| err(e.message))?;
+            let kt_c = kt.make_contiguous().map_err(|e| err(e.message))?;
+            let (batch, seq_q, d_model) = (qt_c.shape[0], qt_c.shape[1], qt_c.shape[2]);
+            let seq_k = kt_c.shape[1];
+            let num_heads = *num_heads;
+            let head_dim = d_model / num_heads;
+            let scale = 1.0_f32 / (head_dim as f32).sqrt();
+
+            // Helper: 3D linear projection [B,S,D] @ [D_out, D_in]^T + bias -> [B,S,D_out]
+            // (same math as multi_head_attention's `linear` closure)
+            let proj3d = |input: &Tensor, w: &Tensor, b: &Tensor| -> Result<Tensor, _> {
+                let inp = input
+                    .make_contiguous()
+                    .map_err(|e| err(e.message.clone()))?;
+                let wc = w.make_contiguous().map_err(|e| err(e.message.clone()))?;
+                let bc = b.make_contiguous().map_err(|e| err(e.message.clone()))?;
+                let (bs, sq, d_in) = (inp.shape[0], inp.shape[1], inp.shape[2]);
+                let d_out = wc.shape[0];
+                let mut out = vec![0.0_f32; bs * sq * d_out];
+                for n in 0..bs {
+                    for s in 0..sq {
+                        for o in 0..d_out {
+                            let mut v = bc.data[o] as f64;
+                            for k in 0..d_in {
+                                v += inp.data[(n * sq + s) * d_in + k] as f64
+                                    * wc.data[o * d_in + k] as f64;
+                            }
+                            out[(n * sq + s) * d_out + o] = v as f32;
+                        }
+                    }
+                }
+                Tensor::new(vec![bs, sq, d_out], out).map_err(|e| err(e.message))
+            };
+
+            // Recompute projections
+            let q_proj = proj3d(&qt, &wqt, &bqt)?;
+            let k_proj = proj3d(&kt, &wkt, &bkt)?;
+            let v_proj = proj3d(&vt, &wvt, &bvt)?;
+
+            // reshape_heads: [B, S, D] -> [B*H, S, head_dim]
+            let reshape_heads = |t: &Tensor, sq: usize| -> Result<Tensor, _> {
+                let tc = t.make_contiguous().map_err(|e| err(e.message.clone()))?;
+                let mut out = vec![0.0_f32; batch * num_heads * sq * head_dim];
+                for b in 0..batch {
+                    for s in 0..sq {
+                        for h in 0..num_heads {
+                            for d in 0..head_dim {
+                                out[(b * num_heads + h) * sq * head_dim + s * head_dim + d] =
+                                    tc.data[(b * sq + s) * d_model + h * head_dim + d];
+                            }
+                        }
+                    }
+                }
+                Tensor::new(vec![batch * num_heads, sq, head_dim], out).map_err(|e| err(e.message))
+            };
+
+            // unreshape_heads: [B*H, S, head_dim] -> [B, S, D]
+            let unreshape_heads = |t: &Tensor, sq: usize| -> Result<Tensor, _> {
+                let tc = t.make_contiguous().map_err(|e| err(e.message.clone()))?;
+                let mut out = vec![0.0_f32; batch * sq * d_model];
+                for b in 0..batch {
+                    for s in 0..sq {
+                        for h in 0..num_heads {
+                            for d in 0..head_dim {
+                                out[(b * sq + s) * d_model + h * head_dim + d] =
+                                    tc.data[(b * num_heads + h) * sq * head_dim + s * head_dim + d];
+                            }
+                        }
+                    }
+                }
+                Tensor::new(vec![batch, sq, d_model], out).map_err(|e| err(e.message))
+            };
+
+            let q_heads = reshape_heads(&q_proj, seq_q)?;
+            let k_heads = reshape_heads(&k_proj, seq_k)?;
+            let v_heads = reshape_heads(&v_proj, seq_k)?;
+
+            // d_context = upstream @ w_o^T   [B, S, D] @ [D, D]
+            // w_o is [D, D], w_o^T is [D, D] too. The forward was context @ w_o^T + bias_o.
+            // upstream: [B, seq_q, D], flatten to [B*seq_q, D], matmul with w_o ([D,D]) to get d_context_flat [B*seq_q, D]
+            let up_c = up.make_contiguous().map_err(|e| err(e.message))?;
+            let up_flat = Tensor::new(vec![batch * seq_q, d_model], up_c.data.to_vec())
+                .map_err(|e| err(e.message))?;
+            // forward: output = context @ w_o^T → d_context = upstream @ w_o
+            let d_context_flat = math::matmul(&up_flat, &wot).map_err(|e| err(e.message))?;
+            let d_context = Tensor::new(
+                vec![batch, seq_q, d_model],
+                d_context_flat
+                    .make_contiguous()
+                    .map_err(|e| err(e.message))?
+                    .data
+                    .to_vec(),
+            )
+            .map_err(|e| err(e.message))?;
+
+            // d_w_o = upstream^T @ context summed over batch.
+            // Forward is output = context @ w_o^T + b_o, so for y = x @ W^T:
+            // dW = dy^T @ x.
+            let ctx_c = ctx.make_contiguous().map_err(|e| err(e.message))?;
+            let mut dwo_data = vec![0.0_f32; d_model * d_model];
+            for b in 0..batch {
+                let ctx_b = Tensor::new(
+                    vec![seq_q, d_model],
+                    ctx_c.data[b * seq_q * d_model..(b + 1) * seq_q * d_model].to_vec(),
+                )
+                .map_err(|e| err(e.message))?;
+                let up_b = Tensor::new(
+                    vec![seq_q, d_model],
+                    up_c.data[b * seq_q * d_model..(b + 1) * seq_q * d_model].to_vec(),
+                )
+                .map_err(|e| err(e.message))?;
+                let up_b_t = up_b.transpose_2d().map_err(|e| err(e.message))?;
+                let contrib = math::matmul(&up_b_t, &ctx_b).map_err(|e| err(e.message))?;
+                let contrib_c = contrib.make_contiguous().map_err(|e| err(e.message))?;
+                for i in 0..d_model * d_model {
+                    dwo_data[i] += contrib_c.data[i];
+                }
+            }
+            let d_w_o =
+                Tensor::new(vec![d_model, d_model], dwo_data).map_err(|e| err(e.message))?;
+
+            // SDPA backward: d_context_heads [B*H, seq_q, head_dim]
+            let d_context_heads = reshape_heads(&d_context, seq_q)?;
+            let sdpa_grads = scaled_dot_product_attention_backward(
+                &q_heads,
+                &k_heads,
+                &v_heads,
+                &aw,
+                &d_context_heads,
+                scale,
+            )
+            .map_err(|e| err(e.message))?;
+
+            // Recombine: [B*H, S, head_dim] -> [B, S, D]
+            let dq_proj = unreshape_heads(&sdpa_grads.dq, seq_q)?;
+            let dk_proj = unreshape_heads(&sdpa_grads.dk, seq_k)?;
+            let dv_proj = unreshape_heads(&sdpa_grads.dv, seq_k)?;
+
+            // d_q_input = dq_proj [B,S,D] @ w_q [D,D]
+            // forward was q_proj = q_input @ w_q^T, so d_q_input = dq_proj @ w_q
+            let dq_proj_flat_c = dq_proj.make_contiguous().map_err(|e| err(e.message))?;
+            let dk_proj_flat_c = dk_proj.make_contiguous().map_err(|e| err(e.message))?;
+            let dv_proj_flat_c = dv_proj.make_contiguous().map_err(|e| err(e.message))?;
+            let dq_proj_flat =
+                Tensor::new(vec![batch * seq_q, d_model], dq_proj_flat_c.data.to_vec())
+                    .map_err(|e| err(e.message))?;
+            let dk_proj_flat =
+                Tensor::new(vec![batch * seq_k, d_model], dk_proj_flat_c.data.to_vec())
+                    .map_err(|e| err(e.message))?;
+            let dv_proj_flat =
+                Tensor::new(vec![batch * seq_k, d_model], dv_proj_flat_c.data.to_vec())
+                    .map_err(|e| err(e.message))?;
+
+            let dq_input_flat = math::matmul(&dq_proj_flat, &wqt).map_err(|e| err(e.message))?;
+            let dk_input_flat = math::matmul(&dk_proj_flat, &wkt).map_err(|e| err(e.message))?;
+            let dv_input_flat = math::matmul(&dv_proj_flat, &wvt).map_err(|e| err(e.message))?;
+
+            let dq_input = Tensor::new(
+                vec![batch, seq_q, d_model],
+                dq_input_flat
+                    .make_contiguous()
+                    .map_err(|e| err(e.message))?
+                    .data
+                    .to_vec(),
+            )
+            .map_err(|e| err(e.message))?;
+            let dk_input = Tensor::new(
+                vec![batch, seq_k, d_model],
+                dk_input_flat
+                    .make_contiguous()
+                    .map_err(|e| err(e.message))?
+                    .data
+                    .to_vec(),
+            )
+            .map_err(|e| err(e.message))?;
+            let dv_input = Tensor::new(
+                vec![batch, seq_k, d_model],
+                dv_input_flat
+                    .make_contiguous()
+                    .map_err(|e| err(e.message))?
+                    .data
+                    .to_vec(),
+            )
+            .map_err(|e| err(e.message))?;
+
+            // d_w_q/d_w_k/d_w_v use the same convention as the forward projection:
+            // proj = input @ W^T + b, so dW = dproj^T @ input.
+            let qt_c2 = qt.make_contiguous().map_err(|e| err(e.message))?;
+            let kt_c2 = kt.make_contiguous().map_err(|e| err(e.message))?;
+            let vt_c = vt.make_contiguous().map_err(|e| err(e.message))?;
+            let mut dwq_data = vec![0.0_f32; d_model * d_model];
+            let mut dwk_data = vec![0.0_f32; d_model * d_model];
+            let mut dwv_data = vec![0.0_f32; d_model * d_model];
+            for b in 0..batch {
+                let q_b = Tensor::new(
+                    vec![seq_q, d_model],
+                    qt_c2.data[b * seq_q * d_model..(b + 1) * seq_q * d_model].to_vec(),
+                )
+                .map_err(|e| err(e.message))?;
+                let dqp_b = Tensor::new(
+                    vec![seq_q, d_model],
+                    dq_proj_flat_c.data[b * seq_q * d_model..(b + 1) * seq_q * d_model].to_vec(),
+                )
+                .map_err(|e| err(e.message))?;
+                let dqp_b_t = dqp_b.transpose_2d().map_err(|e| err(e.message))?;
+                let c = math::matmul(&dqp_b_t, &q_b).map_err(|e| err(e.message))?;
+                let cc = c.make_contiguous().map_err(|e| err(e.message))?;
+                for i in 0..d_model * d_model {
+                    dwq_data[i] += cc.data[i];
+                }
+
+                let k_b = Tensor::new(
+                    vec![seq_k, d_model],
+                    kt_c2.data[b * seq_k * d_model..(b + 1) * seq_k * d_model].to_vec(),
+                )
+                .map_err(|e| err(e.message))?;
+                let dkp_b = Tensor::new(
+                    vec![seq_k, d_model],
+                    dk_proj_flat_c.data[b * seq_k * d_model..(b + 1) * seq_k * d_model].to_vec(),
+                )
+                .map_err(|e| err(e.message))?;
+                let dkp_b_t = dkp_b.transpose_2d().map_err(|e| err(e.message))?;
+                let c = math::matmul(&dkp_b_t, &k_b).map_err(|e| err(e.message))?;
+                let cc = c.make_contiguous().map_err(|e| err(e.message))?;
+                for i in 0..d_model * d_model {
+                    dwk_data[i] += cc.data[i];
+                }
+
+                let v_b = Tensor::new(
+                    vec![seq_k, d_model],
+                    vt_c.data[b * seq_k * d_model..(b + 1) * seq_k * d_model].to_vec(),
+                )
+                .map_err(|e| err(e.message))?;
+                let dvp_b = Tensor::new(
+                    vec![seq_k, d_model],
+                    dv_proj_flat_c.data[b * seq_k * d_model..(b + 1) * seq_k * d_model].to_vec(),
+                )
+                .map_err(|e| err(e.message))?;
+                let dvp_b_t = dvp_b.transpose_2d().map_err(|e| err(e.message))?;
+                let c = math::matmul(&dvp_b_t, &v_b).map_err(|e| err(e.message))?;
+                let cc = c.make_contiguous().map_err(|e| err(e.message))?;
+                for i in 0..d_model * d_model {
+                    dwv_data[i] += cc.data[i];
+                }
+            }
+            let d_w_q =
+                Tensor::new(vec![d_model, d_model], dwq_data).map_err(|e| err(e.message))?;
+            let d_w_k =
+                Tensor::new(vec![d_model, d_model], dwk_data).map_err(|e| err(e.message))?;
+            let d_w_v =
+                Tensor::new(vec![d_model, d_model], dwv_data).map_err(|e| err(e.message))?;
+
+            let sum_bias_grad = |grad: &Tensor, seq: usize| -> Result<Tensor, InterpreterError> {
+                let gc = grad.make_contiguous().map_err(|e| err(e.message))?;
+                let mut out = vec![0.0_f32; d_model];
+                for b in 0..batch {
+                    for s in 0..seq {
+                        let base = (b * seq + s) * d_model;
+                        for d in 0..d_model {
+                            out[d] += gc.data[base + d];
+                        }
+                    }
+                }
+                Tensor::new(vec![d_model], out).map_err(|e| err(e.message))
+            };
+
+            let d_b_q = sum_bias_grad(&dq_proj, seq_q)?;
+            let d_b_k = sum_bias_grad(&dk_proj, seq_k)?;
+            let d_b_v = sum_bias_grad(&dv_proj, seq_k)?;
+            let d_b_o = sum_bias_grad(&up_c, seq_q)?;
+
+            let result = match output_idx {
+                0 => dq_input,
+                1 => dk_input,
+                2 => dv_input,
+                3 => d_w_q,
+                4 => d_w_k,
+                5 => d_w_v,
+                6 => d_w_o,
+                7 => d_b_q,
+                8 => d_b_k,
+                9 => d_b_v,
+                10 => d_b_o,
+                _ => {
+                    return Err(err(
+                        "MultiHeadAttentionBackward: invalid output_idx".to_string()
+                    ));
+                }
+            };
+            Ok(runtime_from_tensor(result))
+        }
     }
 }
 

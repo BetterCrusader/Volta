@@ -1,6 +1,7 @@
-// CNN-style classifier: convolutional feature extraction followed by MLP head.
-// Topology: 784 (28x28 flattened) -> 512 -> 256 -> 128 -> 10
-// Simulates a LeNet-style classification head on MNIST-sized inputs.
+// Dense MLP classifier (784->512->256->128->10)
+// Note: despite the filename, this uses dense `layers` (fully-connected), not Conv2D.
+// Conv2D is not supported in compile-train today.
+// This file runs correctly with: volta run / volta compile-train (MLP path)
 
 model cnn_classifier
     layers 784 512 256 128 10

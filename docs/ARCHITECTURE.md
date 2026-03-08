@@ -4,6 +4,13 @@
 
 Volta is structured as three layers: a frontend language pipeline, a core IR engine, and a codegen backend that produces native DLLs.
 
+CPU portability contract, at the source/runtime level:
+
+- Tier 1: `x86_64`, `aarch64` / ARM64
+- Everything else: best-effort
+
+That is not the same thing as shipped release artifacts. Packaging coverage is narrower and is tracked separately in the release workflow/docs.
+
 ```
 .vt source
     └─ Lexer (lexer.rs)
@@ -86,6 +93,19 @@ All passes are wrapped with a verifier guard (`pass_utils::run_with_verifier_gua
 ### Backend abstraction (`backend.rs`)
 `Backend` trait with `CpuBackend` (always available) and `CudaBackend` (behind `cuda` feature). CPU backend executes fully sequentially for determinism.
 
+Backends also expose explicit capability metadata through `backend_capabilities.rs`:
+
+- backend kind
+- device class (`Cpu` vs `Gpu`)
+- vendor (`GenericCpu`, `Nvidia`, ...)
+- maturity (`Validated` vs `Experimental`)
+- phase coverage (`Inference`, `Training`)
+- runtime execution support
+- gradient-update support
+- determinism coverage (`Strict`, `Balanced`, `Fast`)
+
+`runtime.rs` validates requested execution mode against those capabilities before compiling or dispatching the plan. This keeps backend growth honest: adding a new backend now requires declaring what it can actually do instead of inheriting optimistic defaults.
+
 ### CUDA backend (`cuda/`, feature-gated)
 Exists behind `--features cuda`. Device management, memory profiling, kernel lowering, determinism policy enforcement. Status: compiles, GPU performance has not been benchmarked.
 
@@ -95,9 +115,21 @@ Exists behind `--features cuda`. Device management, memory profiling, kernel low
 
 This is the path that produces the performance numbers in the benchmarks.
 
+Both `volta compile` and `volta compile-train` now take an explicit CPU mode:
+
+- `--cpu-target portable` = default
+- `--cpu-target native` = opt-in, host-specific tuning
+
+Portable is the baseline contract. Native is for machine-specific binaries and benchmark chasing.
+
 ### Inference DLL (`inner.rs`)
 
 `volta compile model.vt` → trains interpreter-side → extracts weights → generates LLVM IR → `.o` → `.dll`.
+
+CPU target mode:
+
+- `portable`: generic LLVM CPU target (`x86-64` on x86_64, `generic` on ARM64/other)
+- `native`: LLVM `native`
 
 Key decisions:
 - Weights embedded as constant `[N x i8]` globals in LLVM IR
@@ -110,7 +142,17 @@ Exported symbol: `volta_infer(input_ptr, in_n, output_ptr, out_n)`
 
 ### Training DLL — C path (`mlp_train_codegen.rs`)
 
-`volta compile-train model.vt` → generates C source → compiles with `clang -O3 -march=native -ffast-math`.
+`volta compile-train model.vt` → generates C source → compiles with clang.
+
+Scope:
+
+- MLP-only
+- SGD-only
+
+CPU target mode:
+
+- `portable`: `clang -O3 -ffast-math -funroll-loops`
+- `native`: adds `-march=native`
 
 - All buffers pre-allocated in `VoltaTrainHandle`, reused between steps
 - GEMM via `volta_gemm_f32` from `gemm_shim.c` (tiled GEMM, GEMV fast path)
@@ -120,7 +162,12 @@ Exported symbol: `volta_infer(input_ptr, in_n, output_ptr, out_n)`
 
 `volta compile-train model.vt --rust` → creates a temporary Cargo crate → generates `lib.rs` → `cargo build --release`.
 
-This is the path used for all CPU benchmarks. Performance details:
+Scope:
+
+- MLP-only
+- Optimizers supported today: `SGD`, `Adam`, `AdamW`, `Adagrad`
+
+This is the path used for the published CPU benchmarks. Performance details:
 
 **Forward pass**: `gemm` crate (Rayon-based, ~80% of MKL throughput)
 
@@ -130,16 +177,24 @@ This is the path used for all CPU benchmarks. Performance details:
 - Alternative dX: avoids large W^T buffer
 
 **Weight update**:
-- `sgd_fused_tn`: W update fused with dW computation via `cblas_sgemm` (MKL, `CblasTrans×CblasNoTrans`, alpha=-lr, beta=1). Eliminates the dW buffer entirely.
-- Fallback to `gemm` crate via `VOLTA_SGD_BACKEND=gemm` env var
+- `SGD`: `sgd_fused_tn` fuses W update with dW computation on the baseline `gemm` path
+- `Adam` / `AdamW`: native builds can link MKL as an optional accelerator when it is found
+- `Adagrad`: stays on the baseline `gemm` path
 
 **Threading**: `Rayon(5)` for ops < 33M flops, `Rayon(0)` (all cores) for ≥ 33M flops. Rayon(5) is optimal on a 6-core CPU — Rayon(6) adds OS scheduling overhead.
+
+CPU target mode:
+
+- `portable`: default, no `target-cpu=native`
+- `native`: opt-in, injects `-C target-cpu=native` unless the user already set a different `target-cpu`
+
+MKL is not a baseline requirement. If it is absent, portable training still works and native Adam/AdamW stay on the fallback GEMM path.
 
 **Windows note**: Rayon thread pool teardown calls `abort()` on `FreeLibrary`. Benchmark executables use `ExitProcess(0)` to bypass this. Output is written via `std::fs::write` to a temp file before `ExitProcess` (bypasses CRT buffer flush issue).
 
 ### GEMM shim (`gemm_shim.c`)
 
-Compiled with `clang -O3 -march=native -ffast-math -funroll-loops`. Used by the C training path.
+Compiled with the same portable/native clang policy as the C training path. Used by the C training path.
 
 - GEMV fast path (m=1): 4-row unrolled, `C[j] += a0*B0[j] + a1*B1[j] + ...`
 - Tiled GEMM (m>1): MC=64, KC=256, NC=1024 with pack_A/pack_B
@@ -170,7 +225,8 @@ Read at startup via `CompilerFlags::from_env()` in `compiler_flags.rs`:
 | `VOLTA_UNSAFE_OPT` | `0\|1\|true\|false` | `false` |
 | `VOLTA_DETERMINISM` | `strict\|balanced\|fast` | `balanced` |
 | `VOLTA_GPU_AVAILABLE` | `0\|1\|true\|false` | auto-detect |
-| `VOLTA_SGD_BACKEND` | `mkl\|gemm` | `mkl` |
+
+For AOT codegen, the explicit CLI flag `--cpu-target <portable|native>` is the supported contract. CPU target policy is not meant to hide behind ambient env hacks.
 
 ---
 

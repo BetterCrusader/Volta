@@ -132,6 +132,7 @@ fn simplify_op(op: &Op, known: &[Option<NumericConst>]) -> Option<Op> {
         | Op::Upsample2D { .. }
         | Op::Upsample2DBackward { .. }
         | Op::MultiHeadAttention { .. }
+        | Op::MultiHeadAttentionBackward { .. }
         | Op::SinusoidalPE { .. }
         | Op::RoPE { .. }
         | Op::RoPEBackward { .. }
