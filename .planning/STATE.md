@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-03-08T09:53:38.067Z"
+last_updated: "2026-03-08T09:58:24.269Z"
 progress:
   total_phases: 7
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 19
-  completed_plans: 18
+  completed_plans: 19
 ---
 
 # State: Volta
@@ -26,10 +26,10 @@ progress:
 
 ## Current Position
 
-**Фаза:** 6 — Product surface hardening for CLI doctor examples and docs (in progress)
-**План:** 06-03 DONE, next: 06-04
-**Статус:** 06-03 complete — volta doctor rewritten with MKL/LLVM diagnostics, capability matrix, actionable next steps; 18/19 plans complete
-**Прогрес:** [██████████] 95% — 18/19 plans complete
+**Фаза:** 6 — Product surface hardening for CLI doctor examples and docs (COMPLETE)
+**План:** 06-04 DONE — Phase 6 complete
+**Статус:** 06-04 complete — misleading .vt example comments corrected; all 6 cli_smoke tests pass; 19/19 plans complete
+**Прогрес:** [██████████] 100% — 19/19 plans complete
 
 ```
 [x] Фаза 1 / 01-01: Remove x86-v4 from gemm features (DONE)
@@ -45,10 +45,11 @@ progress:
 [x] Фаза 5 / 05-01: compiled-model ConvNet parity above `train_api` (DONE)
 [x] Фаза 5 / 05-02: honest tiny-transformer compiled-model parity (DONE)
 [x] Фаза 5 / 05-03: AOT model-coverage truth pass / unsupported regression gates (DONE)
-[~] Фаза 6: Product surface hardening (IN PROGRESS — 06-01..06-03 done)
+[x] Фаза 6: Product surface hardening (COMPLETE — 06-01..06-04 done)
     [x] 06-01: CLI smoke test scaffold — 6-function integration test (DONE)
     [x] 06-02: README/USAGE/docs accuracy corrections (DONE)
     [x] 06-03: volta doctor rewrite — MKL/LLVM diagnostics + capability matrix (DONE)
+    [x] 06-04: misleading example .vt comments corrected + cli_smoke tightened (DONE)
 [ ] Фаза 7: Packaging і install story (PLANNED)
 ```
 
@@ -64,6 +65,7 @@ progress:
 | Phase 06 P01 CLI smoke scaffold | 8 min | 1 task | 1 file |
 | Phase 06 P02 README/USAGE/docs accuracy | 8 min | 2 tasks | 3 files |
 | Phase 06 P03 | 12 | 2 tasks | 2 files |
+| Phase 06 P04 | 5 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -94,6 +96,8 @@ progress:
 | docs/ROADMAP.md rewritten to reflect executed phases | Old content referenced wrong internal phase names and stale next-steps throughout |
 | check_mkl_from() duplicated inline (not calling private mlp_train_rust_codegen fn) | Plan explicitly forbade calling private fn; duplicate is ~10 lines and testable via injection |
 | MKL-not-found adds actionable warning making healthy:false | Correct behaviour — Adam/AdamW --rust will not link without MKL; user needs actionable guidance |
+| cli_smoke.rs Task 2 was already complete from plan 06-03 | 06-03 auto-fixed smoke_doctor and doctor_json_fields assertions when rewriting print_doctor output; no 06-04 changes needed |
+| Example file comments corrected in-place without touching model definitions | Only headers changed — layers/activation/optimizer lines untouched; files still parse and compile-train correctly |
 
 ### Відомі ризики
 
