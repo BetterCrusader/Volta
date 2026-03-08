@@ -53,7 +53,7 @@ fn smoke_version() {
     );
 }
 
-/// `volta doctor` exits 0 and stdout contains "Volta doctor".
+/// `volta doctor` exits 0 and stdout contains the structured sections.
 #[test]
 fn smoke_doctor() {
     let output = Command::new(volta_bin())
@@ -69,10 +69,12 @@ fn smoke_doctor() {
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("Volta doctor"),
-        "expected 'Volta doctor' in output, got: {stdout}"
-    );
+    for section in &["Volta Doctor", "Capability Matrix", "AOT Codegen", "Environment Variables", "Next Steps"] {
+        assert!(
+            stdout.contains(section),
+            "expected '{section}' in volta doctor output, got: {stdout}"
+        );
+    }
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -107,7 +109,7 @@ fn doctor_json_fields() {
     );
 
     // Required top-level keys present as JSON string keys
-    for key in &["\"tool\"", "\"healthy\"", "\"backends\""] {
+    for key in &["\"tool\"", "\"healthy\"", "\"backends\"", "\"mkl_available\"", "\"llvm_available\""] {
         assert!(
             trimmed.contains(key),
             "volta doctor --json missing key {key} in output: {trimmed}"
