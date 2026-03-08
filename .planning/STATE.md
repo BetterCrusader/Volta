@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-03-08T09:52:06.158Z"
+last_updated: "2026-03-08T09:53:38.067Z"
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 19
-  completed_plans: 17
+  completed_plans: 18
 ---
 
 # State: Volta
@@ -27,9 +27,9 @@ progress:
 ## Current Position
 
 **Фаза:** 6 — Product surface hardening for CLI doctor examples and docs (in progress)
-**План:** 06-02 DONE, next: 06-03
-**Статус:** 06-02 complete — README/USAGE/docs/ROADMAP.md corrected; 17/19 plans complete
-**Прогрес:** [█████████░] 89% — 17/19 plans complete
+**План:** 06-03 DONE, next: 06-04
+**Статус:** 06-03 complete — volta doctor rewritten with MKL/LLVM diagnostics, capability matrix, actionable next steps; 18/19 plans complete
+**Прогрес:** [██████████] 95% — 18/19 plans complete
 
 ```
 [x] Фаза 1 / 01-01: Remove x86-v4 from gemm features (DONE)
@@ -45,9 +45,10 @@ progress:
 [x] Фаза 5 / 05-01: compiled-model ConvNet parity above `train_api` (DONE)
 [x] Фаза 5 / 05-02: honest tiny-transformer compiled-model parity (DONE)
 [x] Фаза 5 / 05-03: AOT model-coverage truth pass / unsupported regression gates (DONE)
-[~] Фаза 6: Product surface hardening (IN PROGRESS — 06-01 done)
+[~] Фаза 6: Product surface hardening (IN PROGRESS — 06-01..06-03 done)
     [x] 06-01: CLI smoke test scaffold — 6-function integration test (DONE)
     [x] 06-02: README/USAGE/docs accuracy corrections (DONE)
+    [x] 06-03: volta doctor rewrite — MKL/LLVM diagnostics + capability matrix (DONE)
 [ ] Фаза 7: Packaging і install story (PLANNED)
 ```
 
@@ -62,6 +63,7 @@ progress:
 | SGD vs PyTorch ratio | 0.33–0.65× | PASS — 35-67% faster |
 | Phase 06 P01 CLI smoke scaffold | 8 min | 1 task | 1 file |
 | Phase 06 P02 README/USAGE/docs accuracy | 8 min | 2 tasks | 3 files |
+| Phase 06 P03 | 12 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -90,6 +92,8 @@ progress:
 | CLI smoke tests use CARGO_BIN_EXE_volta (not cargo run) | Zero-rebuild binary access; temp .vt with 'use fn' model syntax triggers MLP-only rejection in compile_first_model_to_train_dll |
 | README Adam claim reflects measured result, not aspirational goal | Changed from "1.9× slower" to "+25% faster at B≤64" — public text must match STATE.md metrics |
 | docs/ROADMAP.md rewritten to reflect executed phases | Old content referenced wrong internal phase names and stale next-steps throughout |
+| check_mkl_from() duplicated inline (not calling private mlp_train_rust_codegen fn) | Plan explicitly forbade calling private fn; duplicate is ~10 lines and testable via injection |
+| MKL-not-found adds actionable warning making healthy:false | Correct behaviour — Adam/AdamW --rust will not link without MKL; user needs actionable guidance |
 
 ### Відомі ризики
 

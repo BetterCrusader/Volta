@@ -109,7 +109,7 @@ Plans:
   1. `--help`/usage/output для основних команд не суперечать реальній поведінці
   2. `doctor` показує capability matrix і actionable diagnostics замість сирого технічного шуму
   3. README/examples/docs smoke-перевіряються й не ведуть користувача в dead path
-**Plans:** 2/4 plans executed
+**Plans:** 3/4 plans executed
 
 Plans:
 - [ ] 06-01-PLAN.md — Wave 0: Create tests/cli_smoke.rs integration test scaffold (6 smoke test stubs, CARGO_BIN_EXE_volta pattern)
@@ -141,7 +141,7 @@ Plans:
 | 3. Надійність і коректність | 2/2 | Complete | 2026-03-07 |
 | 4. CPU training path hardening and long-loop stability | 3/3 | Complete | 2026-03-08 |
 | 5. End-to-end PyTorch parity and real model training cases | 3/3 | Complete | 2026-03-08 |
-| 6. Product surface hardening for CLI doctor examples and docs | 2/4 | In Progress|  |
+| 6. Product surface hardening for CLI doctor examples and docs | 3/4 | In Progress|  |
 | 7. Packaging and install story for distributable releases | 0/0 | Planned | - |
 
 ---
