@@ -119,3 +119,62 @@ jobs:
             artifacts/volta-${{ github.ref_name }}-linux-x86_64.tar.gz/volta-${{ github.ref_name }}-linux-x86_64.tar.gz
             volta-${{ github.ref_name }}-macos-universal.tar.gz
             artifacts/volta-${{ github.ref_name }}-windows-x86_64.zip/volta-${{ github.ref_name }}-windows-x86_64.zip
+
+  smoke:
+    name: Smoke check ${{ matrix.os }}
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: volta-${{ github.ref_name }}-linux-x86_64.tar.gz
+            binary: volta
+            unpack: tar
+
+          - os: macos-latest
+            artifact: volta-macos-arm64
+            binary: volta
+            unpack: raw
+
+          - os: windows-latest
+            artifact: volta-${{ github.ref_name }}-windows-x86_64.zip
+            binary: volta.exe
+            unpack: zip
+
+    steps:
+      # actions/checkout @ v4.2.2 — needed for examples/xor.vt
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Download artifact
+        # actions/download-artifact @ v4.3.0
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/
+
+      - name: Unpack (tar)
+        if: matrix.unpack == 'tar'
+        run: |
+          tar xzf dist/${{ matrix.artifact }} -C dist/
+          chmod +x dist/${{ matrix.binary }}
+
+      - name: Unpack (raw binary)
+        if: matrix.unpack == 'raw'
+        run: chmod +x dist/${{ matrix.binary }}
+
+      - name: Unpack (zip)
+        if: matrix.unpack == 'zip'
+        shell: pwsh
+        run: |
+          Expand-Archive -Path dist/${{ matrix.artifact }} -DestinationPath dist/
+
+      - name: Smoke — volta --help
+        run: ./dist/${{ matrix.binary }} --help
+
+      - name: Smoke — volta doctor
+        run: ./dist/${{ matrix.binary }} doctor
+
+      - name: Smoke — volta run examples/xor.vt
+        run: ./dist/${{ matrix.binary }} run examples/xor.vt
