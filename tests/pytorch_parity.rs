@@ -8,6 +8,11 @@ use volta::ir::{
     TrainConfig, TrainSample, TransformerConfig, ValueId, add_transformer_encoder_block,
     apply_gradients, build_reverse_graph, execute_value_with_context, train_graph,
 };
+use volta::model::{
+    CompiledModel, Conv2DLayer, Dataset, Example, LinearLayer, ModelBuilder, Parameter, ReLULayer,
+    ReproducibilityMode, Sequential, TensorShape, TrainApiConfig,
+    build_tiny_transformer_fixture_for_tests, train,
+};
 
 fn require_pytorch() -> bool {
     std::env::var("VOLTA_REQUIRE_PYTORCH_PARITY")
@@ -292,6 +297,241 @@ fn assert_mlp_loss_trace_is_finite(expected: &Value, label: &str) {
         assert!(
             value.is_finite(),
             "{label}.loss_trace[{index}] is non-finite: {value}"
+        );
+    }
+}
+
+#[derive(Debug, Clone)]
+struct TensorDataset {
+    examples: Vec<Example>,
+}
+
+impl Dataset for TensorDataset {
+    fn len(&self) -> usize {
+        self.examples.len()
+    }
+
+    fn example(&self, index: usize) -> Result<Example, volta::model::TrainApiError> {
+        Ok(self.examples[index].clone())
+    }
+}
+
+fn build_convnet_training_fixture() -> (CompiledModel, TensorDataset, TrainApiConfig) {
+    let mut builder = ModelBuilder::new();
+    let x = builder
+        .input_with_shape("x", vec![3, 3])
+        .expect("ConvNet input should build");
+    let target = builder
+        .input_with_shape("target", vec![2, 1])
+        .expect("ConvNet target should build");
+
+    let mut seq = Sequential::new();
+    seq.push(Conv2DLayer {
+        name: "conv".to_string(),
+        kernel: Tensor::new(vec![2, 2], vec![0.35, -0.05, 0.1, 0.2]).expect("valid kernel"),
+    });
+    seq.push(ReLULayer);
+    seq.push(LinearLayer {
+        name: "proj".to_string(),
+        weight: Tensor::new(vec![2, 1], vec![0.15, -0.05]).expect("valid projection"),
+    });
+
+    let (pred, pred_shape) = seq
+        .build(&mut builder, x, TensorShape(vec![3, 3]))
+        .expect("ConvNet body should build");
+    let proj_bias = builder
+        .add_parameter(Parameter::new(
+            "proj.bias",
+            Tensor::new(vec![1], vec![0.02]).expect("valid bias"),
+            true,
+        ))
+        .expect("ConvNet bias should build");
+    let pred = builder
+        .add_op(Op::Add(pred, proj_bias))
+        .expect("ConvNet bias add should build");
+
+    let diff = builder
+        .add_op(Op::Sub(pred, target))
+        .expect("ConvNet diff should build");
+    let sq = builder
+        .add_op(Op::Mul(diff, diff))
+        .expect("ConvNet square should build");
+    let loss = builder
+        .add_op(Op::ReduceMean {
+            input: sq,
+            axis: None,
+            keepdims: false,
+        })
+        .expect("ConvNet loss should build");
+
+    let model = builder
+        .finalize(pred, pred_shape, Some(loss))
+        .expect("ConvNet model should finalize");
+
+    let dataset = TensorDataset {
+        examples: vec![
+            Example {
+                inputs: HashMap::from([
+                    (
+                        "x".to_string(),
+                        Tensor::new(
+                            vec![3, 3],
+                            vec![1.0, 0.0, 2.0, 0.0, 1.0, 1.0, 2.0, 1.0, 0.0],
+                        )
+                        .expect("valid tensor"),
+                    ),
+                    (
+                        "target".to_string(),
+                        Tensor::new(vec![2, 1], vec![0.87, 0.14]).expect("valid tensor"),
+                    ),
+                ]),
+            },
+            Example {
+                inputs: HashMap::from([
+                    (
+                        "x".to_string(),
+                        Tensor::new(
+                            vec![3, 3],
+                            vec![0.0, 1.0, 0.0, 2.0, 1.0, 1.0, 1.0, 0.0, 2.0],
+                        )
+                        .expect("valid tensor"),
+                    ),
+                    (
+                        "target".to_string(),
+                        Tensor::new(vec![2, 1], vec![-0.18, 0.45]).expect("valid tensor"),
+                    ),
+                ]),
+            },
+            Example {
+                inputs: HashMap::from([
+                    (
+                        "x".to_string(),
+                        Tensor::new(
+                            vec![3, 3],
+                            vec![1.0, 2.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+                        )
+                        .expect("valid tensor"),
+                    ),
+                    (
+                        "target".to_string(),
+                        Tensor::new(vec![2, 1], vec![-0.11, -0.52]).expect("valid tensor"),
+                    ),
+                ]),
+            },
+        ],
+    };
+
+    let config = TrainApiConfig {
+        epochs: 24,
+        batch_size: 1,
+        shuffle: true,
+        shuffle_seed: 0xC0DE_0017,
+        optimizer: OptimizerConfig::Sgd { lr: 0.02 },
+        gradient_checkpointing: None,
+        reproducibility: ReproducibilityMode::Deterministic,
+        checkpoint_path: None,
+    };
+
+    (model, dataset, config)
+}
+
+fn assert_loss_trace_is_finite(expected: &Value, label: &str) {
+    let Some(loss_trace) = expected["loss_trace"].as_array() else {
+        panic!("{label}.loss_trace missing from PyTorch reference");
+    };
+    assert!(
+        !loss_trace.is_empty(),
+        "{label}.loss_trace must contain training samples"
+    );
+    for (index, loss) in loss_trace.iter().enumerate() {
+        let value = loss
+            .as_f64()
+            .unwrap_or_else(|| panic!("{label}.loss_trace[{index}] must be numeric"))
+            as f32;
+        assert!(
+            value.is_finite(),
+            "{label}.loss_trace[{index}] is non-finite: {value}"
+        );
+    }
+}
+
+#[test]
+fn pytorch_parity_convnet_train_api() {
+    let Some(expected) = run_pytorch_case("convnet_train_loop_sgd") else {
+        return;
+    };
+
+    let (model, dataset, config) = build_convnet_training_fixture();
+    let result = train(&model, &dataset, &config).expect("ConvNet train_api training should pass");
+
+    assert!(result.final_loss.is_finite());
+    assert_loss_trace_is_finite(&expected, "convnet_train_loop_sgd");
+    assert!(
+        (result.final_loss - scalar_f32(&expected, "final_loss")).abs() <= 1e-5,
+        "convnet_train_loop_sgd.final_loss mismatch: actual={}, expected={}",
+        result.final_loss,
+        scalar_f32(&expected, "final_loss")
+    );
+
+    for name in ["conv.kernel", "proj.weight", "proj.bias"] {
+        let actual = result
+            .final_parameters
+            .get(name)
+            .unwrap_or_else(|| panic!("missing final parameter '{name}'"))
+            .make_contiguous()
+            .expect("contiguous final parameter")
+            .data
+            .to_vec();
+        assert!(
+            actual.iter().all(|value| value.is_finite()),
+            "convnet_train_loop_sgd.param.{name} must stay finite"
+        );
+        assert_close(
+            &format!("convnet_train_loop_sgd.param.{name}"),
+            &actual,
+            &json_f32_array(&expected["final_parameters"], name),
+            1e-5,
+        );
+    }
+}
+
+#[test]
+fn pytorch_parity_compiled_tiny_transformer() {
+    let Some(expected) = run_pytorch_case("tiny_transformer_train_loop_adam") else {
+        return;
+    };
+
+    let (model, dataset, config, _infer_input) = build_tiny_transformer_fixture_for_tests();
+    let result =
+        train(&model, &dataset, &config).expect("compiled tiny-transformer train_api should pass");
+
+    assert!(result.final_loss.is_finite());
+    assert_loss_trace_is_finite(&expected, "tiny_transformer_train_loop_adam");
+    assert!(
+        (result.final_loss - scalar_f32(&expected, "final_loss")).abs() <= 1e-5,
+        "tiny_transformer_train_loop_adam.final_loss mismatch: actual={}, expected={}",
+        result.final_loss,
+        scalar_f32(&expected, "final_loss")
+    );
+
+    for name in ["w_q", "b_q", "w_o", "ln1_w", "ffn_w1", "ln2_w"] {
+        let actual = result
+            .final_parameters
+            .get(name)
+            .unwrap_or_else(|| panic!("missing final parameter '{name}'"))
+            .make_contiguous()
+            .expect("contiguous final parameter")
+            .data
+            .to_vec();
+        assert!(
+            actual.iter().all(|value| value.is_finite()),
+            "tiny_transformer_train_loop_adam.param.{name} must stay finite"
+        );
+        assert_close(
+            &format!("tiny_transformer_train_loop_adam.param.{name}"),
+            &actual,
+            &json_f32_array(&expected["final_parameters"], name),
+            1e-5,
         );
     }
 }

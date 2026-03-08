@@ -266,6 +266,31 @@ mod tests {
         assert_eq!(trained.final_loss, loss_before);
     }
 
+    #[test]
+    fn tiny_transformer_train_api_is_deterministic_and_reduces_loss() {
+        let (model, dataset, cfg, _infer_input) = build_tiny_transformer_fixture_for_tests();
+
+        let initial_loss =
+            average_tiny_transformer_dataset_loss(&model, &model.parameters, &dataset);
+        let first =
+            train(&model, &dataset, &cfg).expect("first tiny-transformer train should pass");
+        let second =
+            train(&model, &dataset, &cfg).expect("second tiny-transformer train should pass");
+
+        assert!(first.final_loss.is_finite());
+        assert!(second.final_loss.is_finite());
+        assert_eq!(first.final_loss.to_bits(), second.final_loss.to_bits());
+        assert_eq!(first.final_parameters, second.final_parameters);
+        assert_all_tensors_are_finite(&first.final_parameters);
+
+        let final_loss =
+            average_tiny_transformer_dataset_loss(&model, &first.final_parameters, &dataset);
+        assert!(
+            final_loss < initial_loss,
+            "tiny-transformer fixture should reduce average dataset loss: before={initial_loss}, after={final_loss}"
+        );
+    }
+
     fn build_mlp_long_loop_fixture_for_tests() -> (CompiledModel, TensorDataset) {
         let mut graph = crate::ir::Graph::new();
         let block = graph.create_block();
@@ -682,6 +707,38 @@ mod tests {
                 .inputs
                 .get("target")
                 .expect("ConvNet example should contain target");
+            total += mean_squared_error(&predicted, target);
+        }
+        total / dataset.len() as f32
+    }
+
+    fn average_tiny_transformer_dataset_loss(
+        model: &CompiledModel,
+        parameters: &HashMap<String, Tensor>,
+        dataset: &crate::model::TinyTransformerFixtureDataset,
+    ) -> f32 {
+        let mut total = 0.0;
+        for index in 0..dataset.len() {
+            let example = dataset
+                .example(index)
+                .expect("tiny-transformer dataset example should exist");
+            let predicted = infer(
+                model,
+                parameters,
+                &HashMap::from([(
+                    "x".to_string(),
+                    example
+                        .inputs
+                        .get("x")
+                        .expect("tiny-transformer example should contain x")
+                        .clone(),
+                )]),
+            )
+            .expect("infer should pass on tiny-transformer fixture");
+            let target = example
+                .inputs
+                .get("target")
+                .expect("tiny-transformer example should contain target");
             total += mean_squared_error(&predicted, target);
         }
         total / dataset.len() as f32

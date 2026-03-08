@@ -1033,7 +1033,10 @@ mod tests {
             .expect("handle updates should succeed");
         }
 
-        assert!(Arc::ptr_eq(params.get(&vid(0)).expect("parameter exists"), &original_handle));
+        assert!(Arc::ptr_eq(
+            params.get(&vid(0)).expect("parameter exists"),
+            &original_handle
+        ));
         assert_eq!(state.step, 3);
 
         let updated = handle.read().expect("handle should not be poisoned");

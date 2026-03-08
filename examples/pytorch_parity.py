@@ -72,6 +72,94 @@ def conv_case():
     }
 
 
+def convnet_train_dataset():
+    return [
+        (
+            torch.tensor(
+                [[1.0, 0.0, 2.0], [0.0, 1.0, 1.0], [2.0, 1.0, 0.0]],
+                dtype=torch.float32,
+            ),
+            torch.tensor([[0.87], [0.14]], dtype=torch.float32),
+        ),
+        (
+            torch.tensor(
+                [[0.0, 1.0, 0.0], [2.0, 1.0, 1.0], [1.0, 0.0, 2.0]],
+                dtype=torch.float32,
+            ),
+            torch.tensor([[-0.18], [0.45]], dtype=torch.float32),
+        ),
+        (
+            torch.tensor(
+                [[1.0, 2.0, 1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 1.0]],
+                dtype=torch.float32,
+            ),
+            torch.tensor([[-0.11], [-0.52]], dtype=torch.float32),
+        ),
+    ]
+
+
+def deterministic_shuffle(indices, seed):
+    state = seed | 1
+    for i in range(len(indices) - 1, 0, -1):
+        state = (state * 6364136223846793005 + 1) & 0xFFFFFFFFFFFFFFFF
+        j = state % (i + 1)
+        indices[i], indices[j] = indices[j], indices[i]
+
+
+def convnet_forward(x, conv_kernel, proj_weight, proj_bias):
+    conv = F.conv2d(
+        x.view(1, 1, 3, 3),
+        conv_kernel.view(1, 1, 2, 2),
+    ).view(2, 2)
+    activated = torch.relu(conv)
+    return torch.matmul(activated, proj_weight) + proj_bias
+
+
+def convnet_train_loop_sgd_case():
+    dataset = convnet_train_dataset()
+    order = list(range(len(dataset)))
+    deterministic_shuffle(order, 0xC0DE0017)
+    dataset = [dataset[index] for index in order]
+
+    conv_kernel = torch.tensor(
+        [[0.35, -0.05], [0.1, 0.2]],
+        dtype=torch.float32,
+        requires_grad=True,
+    )
+    proj_weight = torch.tensor(
+        [[0.15], [-0.05]],
+        dtype=torch.float32,
+        requires_grad=True,
+    )
+    proj_bias = torch.tensor([0.02], dtype=torch.float32, requires_grad=True)
+    params = [conv_kernel, proj_weight, proj_bias]
+    optimizer = torch.optim.SGD(params, lr=0.02)
+
+    loss_trace = []
+    for _ in range(24):
+        for x, target in dataset:
+            optimizer.zero_grad(set_to_none=True)
+            pred = convnet_forward(x, conv_kernel, proj_weight, proj_bias)
+            loss = torch.mean((pred - target) * (pred - target))
+            loss_trace.append(float(loss.detach().item()))
+            loss.backward()
+            optimizer.step()
+
+    last_x, last_target = dataset[-1]
+    final_pred = convnet_forward(last_x, conv_kernel, proj_weight, proj_bias)
+    final_loss = torch.mean((final_pred - last_target) * (final_pred - last_target))
+
+    return {
+        "final_loss": float(final_loss.detach().item()),
+        "loss_trace": loss_trace,
+        "final_parameters": {
+            "conv.kernel": conv_kernel.detach().reshape(-1).tolist(),
+            "proj.weight": proj_weight.detach().reshape(-1).tolist(),
+            "proj.bias": proj_bias.detach().reshape(-1).tolist(),
+        },
+    }
+
+
 def layernorm_case():
     x = torch.tensor(
         [[0.2, -0.1, 0.3, 0.4, -0.2], [0.7, 0.5, -0.4, 0.1, 0.9]],
@@ -434,6 +522,7 @@ def transformer_train_loop_case(optimizer_kind, accum_steps=1, clip_grad=None):
     else:
         raise ValueError(f"unknown optimizer kind: {optimizer_kind}")
 
+    loss_trace = []
     for _ in range(epochs):
         optimizer.zero_grad(set_to_none=True)
         pending_steps = 0
@@ -444,6 +533,7 @@ def transformer_train_loop_case(optimizer_kind, accum_steps=1, clip_grad=None):
             )
             diff = out - target
             loss = torch.mean(diff * diff)
+            loss_trace.append(float(loss.detach().item()))
             loss.backward()
             pending_steps += 1
 
@@ -484,6 +574,7 @@ def transformer_train_loop_case(optimizer_kind, accum_steps=1, clip_grad=None):
 
     return {
         "final_loss": float(final_loss.detach().item()),
+        "loss_trace": loss_trace,
         "final_parameters": {
             "w_q": w_q.detach().reshape(-1).tolist(),
             "b_q": b_q.detach().reshape(-1).tolist(),
@@ -505,6 +596,10 @@ def transformer_train_loop_adam_case():
 
 def transformer_train_loop_adamw_case():
     return transformer_train_loop_case("adamw")
+
+
+def tiny_transformer_train_loop_adam_case():
+    return transformer_train_loop_adam_case()
 
 
 def transformer_train_loop_sgd_accum2_case():
@@ -954,6 +1049,8 @@ def main():
         result = mlp_case()
     elif case == "conv2d":
         result = conv_case()
+    elif case == "convnet_train_loop_sgd":
+        result = convnet_train_loop_sgd_case()
     elif case == "layernorm":
         result = layernorm_case()
     elif case == "batchnorm":
@@ -964,6 +1061,8 @@ def main():
         result = transformer_train_loop_sgd_case()
     elif case == "transformer_train_loop_adam":
         result = transformer_train_loop_adam_case()
+    elif case == "tiny_transformer_train_loop_adam":
+        result = tiny_transformer_train_loop_adam_case()
     elif case == "transformer_train_loop_adamw":
         result = transformer_train_loop_adamw_case()
     elif case == "transformer_train_loop_sgd_accum2":

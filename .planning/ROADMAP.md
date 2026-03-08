@@ -3,7 +3,7 @@
 **Проект:** Volta — компілятор і runtime для нейронних мереж
 **Ядро цінності:** CPU training швидший за PyTorch eager — виміряно, відтворювано, з числовою коректністю
 **Granularity:** coarse
-**Покриття вимог:** 22/25 mapped
+**Покриття вимог:** 21/25 mapped
 
 ---
 
@@ -13,7 +13,7 @@
 - [x] **Фаза 2: Інфраструктура і backend** — Прибрати hardcoded paths, propagate RUSTFLAGS, capabilities matrix
 - [x] **Фаза 3: Надійність і коректність** — MHA backward, паніки → Result, Tensor::PartialEq
 - [x] **Фаза 4: CPU training path hardening and long-loop stability** — Довгі train loops, stability, runtime/training overhead cleanup
-- [ ] **Фаза 5: End-to-end PyTorch parity and real model training cases** — Не тільки micro parity, а реальні ConvNet/tiny-transformer training cases
+- [x] **Фаза 5: End-to-end PyTorch parity and real model training cases** — Не тільки micro parity, а реальні ConvNet/tiny-transformer training cases
 - [ ] **Фаза 6: Product surface hardening for CLI doctor examples and docs** — CLI/help/doctor/examples/docs без розсинхрону
 - [ ] **Фаза 7: Packaging and install story for distributable releases** — Release artifacts, clean install, smoke-tested shipped binaries
 
@@ -88,15 +88,18 @@ Plans:
 ### Phase 5: End-to-end PyTorch parity and real model training cases
 **Goal:** Volta доводить коректність не тільки на op-level parity, а на реальних mini-model training cases проти PyTorch
 **Залежить від:** Phase 4
-**Requirements:** CORR-V2-01, TRAIN-V2-02, MODEL-V2-01
+**Requirements:** CORR-V2-01, TRAIN-V2-02
 **Success Criteria** (що має бути ПРАВДОЮ після фази):
   1. Щонайменше 2 реальні model cases (наприклад, ConvNet і tiny transformer) проходять multi-step training parity проти PyTorch
   2. Loss curves, key gradients і фінальні параметри узгоджуються в допустимому eps для зафіксованих deterministic test cases
   3. Ці кейси живуть як автоматичні regression tests, а не як разовий локальний запуск
-**Plans:** 0/0 plans
+**Traceability Note:** `MODEL-V2-01` свідомо винесений з Phase 5. Поточний AOT training codegen MLP-only; ця фаза закриває parity breadth і truth-pass, але не general AOT model coverage.
+**Plans:** 3/3 plans complete
 
 Plans:
-- [ ] TBD (`$gsd-plan-phase 5`)
+- [x] 05-01-PLAN.md — Add one real compiled-model ConvNet training case in `train_api` and mirror it with PyTorch parity
+- [x] 05-02-PLAN.md — Replace fake tiny-transformer confidence with one honest compiled attention/norm/FFN mini-model plus PyTorch parity
+- [x] 05-03-PLAN.md — Add early unsupported-path regression for non-MLP `compile-train` and repair roadmap/traceability if `MODEL-V2-01` is still unmet
 
 ### Phase 6: Product surface hardening for CLI doctor examples and docs
 **Goal:** CLI, doctor, examples і docs говорять одну й ту саму правду про supported path, limitations і next steps
@@ -134,11 +137,11 @@ Plans:
 | 2. Інфраструктура і backend | 3/3 | Complete | 2026-03-07 |
 | 3. Надійність і коректність | 2/2 | Complete | 2026-03-07 |
 | 4. CPU training path hardening and long-loop stability | 3/3 | Complete | 2026-03-08 |
-| 5. End-to-end PyTorch parity and real model training cases | 0/0 | Planned | - |
+| 5. End-to-end PyTorch parity and real model training cases | 3/3 | Complete | 2026-03-08 |
 | 6. Product surface hardening for CLI doctor examples and docs | 0/0 | Planned | - |
 | 7. Packaging and install story for distributable releases | 0/0 | Planned | - |
 
 ---
 
 *Roadmap created: 2026-03-07*
-*Last updated: 2026-03-08 — Phase 4 complete; 04-02 and 04-03 both shipped on branch*
+*Last updated: 2026-03-08 — Phase 5 complete: compiled ConvNet parity, honest tiny-transformer parity, and explicit MLP-only AOT truth-pass landed; `MODEL-V2-01` remains deferred*

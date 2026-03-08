@@ -2,35 +2,35 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: reliability-product-packaging
-status: executing
-last_updated: "2026-03-08T00:56:03+02:00"
+status: planning
+last_updated: "2026-03-08T03:35:00+02:00"
 progress:
   total_phases: 7
-  completed_phases: 4
-  total_plans: 12
-  completed_plans: 12
+  completed_phases: 5
+  total_plans: 15
+  completed_plans: 15
   percent: 100
 ---
 
 # State: Volta
 
-**Останнє оновлення:** 2026-03-08T00:56:03+02:00
+**Останнє оновлення:** 2026-03-08T03:35:00+02:00
 
 ---
 
 ## Project Reference
 
 **Ядро цінності:** CPU training швидший за PyTorch eager — виміряно, відтворювано, з числовою коректністю
-**Поточний фокус:** Phase 4 complete on branch; next step is Phase 5 planning
+**Поточний фокус:** Phase 6 planning — product surface hardening for CLI/doctor/examples/docs
 
 ---
 
 ## Current Position
 
-**Фаза:** 4 — CPU training path hardening (complete)
-**План:** 04-01, 04-02, 04-03 complete
-**Статус:** Phase 4 complete on current branch; 04-02 added compiled-MLP long-loop integration + PyTorch oracle and 04-03 closed compile-reuse / stable-handle debt
-**Прогрес:** [██████████] Phase 4 complete
+**Фаза:** 6 — Product surface hardening for CLI doctor examples and docs (next)
+**План:** TBD
+**Статус:** Phase 5 complete on branch; compiled ConvNet parity, honest tiny-transformer parity, and the AOT truth-pass are landed
+**Прогрес:** [██████████] 5 phases complete, next step is Phase 6 planning
 
 ```
 [x] Фаза 1 / 01-01: Remove x86-v4 from gemm features (DONE)
@@ -43,7 +43,9 @@ progress:
 [x] Фаза 3 / 03-01: Tensor::PartialEq panic-free + build_reverse_graph unwraps fixed / RELY-01, RELY-02 (DONE)
 [x] Фаза 3 / 03-02: MHA full backward pass — 7 gradients / CORR-03 (DONE)
 [x] Фаза 4: CPU training path hardening (DONE: 04-01..04-03)
-[ ] Фаза 5: End-to-end parity і real model cases (PLANNED)
+[x] Фаза 5 / 05-01: compiled-model ConvNet parity above `train_api` (DONE)
+[x] Фаза 5 / 05-02: honest tiny-transformer compiled-model parity (DONE)
+[x] Фаза 5 / 05-03: AOT model-coverage truth pass / unsupported regression gates (DONE)
 [ ] Фаза 6: Product surface hardening (PLANNED)
 [ ] Фаза 7: Packaging і install story (PLANNED)
 ```
@@ -87,10 +89,11 @@ progress:
 
 ### Відомі ризики
 
-- Narrow compiled-MLP long-loop regression уже доведений; ширша real-model parity і model-family breadth досі deferred to Phase 5
+- Phase 5 broadened compiled-model parity to ConvNet and honest tiny-transformer cases, but product surface and packaging still lag behind code reality
 - Product surface досі місцями відстає від реальної поведінки коду
 - Clean install / release story не перевірені як готовий продукт
 - CUDA v2 requirements лишаються unmapped і не входять у поточний phase train
+- `MODEL-V2-01` все ще не виконаний: AOT training codegen зараз MLP-only, а Phase 5 спеціально закрив truth-pass замість fake closure
 
 ### Quick Tasks Completed
 
@@ -109,10 +112,10 @@ progress:
 1. Читай `.planning/ROADMAP.md`
 2. Читай `.planning/REQUIREMENTS.md`
 3. Читай `.planning/codebase/CONCERNS.md`
-4. Для наступного planning кроку враховуй summaries `04-02` і `04-03`: Phase 4 completed narrow long-loop regression + training-path reuse hardening
+4. Для наступного planning кроку враховуй summaries `05-01`, `05-02`, `05-03` і verification `05-VERIFICATION.md`
 
-**Наступний крок:** планувати `Phase 5`; Phase 4 execution на поточній гілці завершений
+**Наступний крок:** планувати `Phase 6` для CLI/help/doctor/examples/docs hardening
 
 ---
 
-*State refreshed: 2026-03-08 after Phase 4 plan 04-02 completion and current-branch Phase 4 sign-off*
+*State refreshed: 2026-03-08 after Phase 5 execution and verification*

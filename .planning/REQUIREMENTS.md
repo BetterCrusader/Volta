@@ -100,11 +100,11 @@
 | RELY-02 | Phase 3 | Complete |
 | PERF-V2-02 | Phase 4 | Complete |
 | PERF-V2-03 | Phase 4 | Complete |
-| TRAIN-V2-01 | Phase 4 | Planned |
-| TRAIN-V2-03 | Phase 4 | Planned |
-| CORR-V2-01 | Phase 5 | Planned |
-| TRAIN-V2-02 | Phase 5 | Planned |
-| MODEL-V2-01 | Phase 5 | Planned |
+| TRAIN-V2-01 | Phase 4 | Complete |
+| TRAIN-V2-03 | Phase 4 | Complete |
+| CORR-V2-01 | Phase 5 | Complete |
+| TRAIN-V2-02 | Phase 5 | Complete |
+| MODEL-V2-01 | Deferred | Unmapped |
 | UX-V2-01 | Phase 6 | Planned |
 | UX-V2-02 | Phase 6 | Planned |
 | UX-V2-03 | Phase 6 | Planned |
@@ -116,9 +116,9 @@
 
 **Coverage:**
 - Total requirements: 25
-- Mapped to phases: 22
-- Unmapped: 3 (`CUDA-V2-01`, `CUDA-V2-02`, `CUDA-V2-03`)
+- Mapped to phases: 21
+- Unmapped: 4 (`CUDA-V2-01`, `CUDA-V2-02`, `CUDA-V2-03`, `MODEL-V2-01`)
 
 ---
 *Requirements defined: 2026-03-07*
-*Last updated: 2026-03-08 — 04-03 completed PERF-V2-02 and PERF-V2-03*
+*Last updated: 2026-03-08 — Phase 5 real-model parity requirements marked complete; `MODEL-V2-01` explicitly deferred until a future AOT/codegen phase*

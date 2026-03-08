@@ -1764,6 +1764,8 @@ impl Executor {
             .next()
             .ok_or_else(|| "No models found — declare a model first".to_string())?;
 
+        ensure_model_supports_aot_train_codegen(model_name, model_state)?;
+
         let weights = model_state.weights.as_ref();
 
         let layer_sizes: Vec<usize> = model_state.layers.iter().map(|&x| x as usize).collect();
@@ -1811,6 +1813,8 @@ impl Executor {
             .iter()
             .next()
             .ok_or_else(|| "No models found — declare a model first".to_string())?;
+
+        ensure_model_supports_aot_train_codegen(model_name, model_state)?;
 
         let weights = model_state.weights.as_ref();
 
@@ -3134,6 +3138,19 @@ enum CmpOp {
     LessEq,
 }
 
+fn ensure_model_supports_aot_train_codegen(
+    model_name: &str,
+    model_state: &ModelState,
+) -> Result<(), String> {
+    if let Some(template) = &model_state.use_fn {
+        return Err(format!(
+            "Model '{model_name}' uses template '{template}'. `compile-train` is MLP-only today and does not support function-backed/custom training graphs yet (for example Conv2D, generic LayerNorm, or attention/MHA models). Use runtime `train` instead."
+        ));
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3499,5 +3516,40 @@ mod tests {
         let err = Executor::decode_checkpoint_bytes(&buf, "trail.vt", Span::unknown())
             .expect_err("trailing bytes must fail");
         assert!(err.message.contains("trailing bytes"));
+    }
+
+    #[test]
+    fn compile_train_rejects_non_mlp_model_templates() {
+        let mut ex = Executor::new();
+        ex.runtime.models.insert(
+            "encoder".to_string(),
+            ModelState {
+                layers: vec![4, 8, 4],
+                activation: "relu".to_string(),
+                optimizer: Some("adam".to_string()),
+                optimizer_lr: Some(0.001),
+                precision: None,
+                memory: None,
+                seed: None,
+                clip_grad: None,
+                dropout_p: None,
+                use_layernorm: false,
+                use_fn: Some("tiny_transformer_block".to_string()),
+                weights: None,
+                trained_epochs: 0,
+            },
+        );
+
+        let err = ex
+            .compile_first_model_to_train_dll("example.vt", None)
+            .expect_err("compile-train must reject function-backed non-MLP models");
+        assert!(
+            err.contains("MLP-only today"),
+            "expected MLP-only message, got: {err}"
+        );
+        assert!(
+            err.contains("Conv2D") && err.contains("attention/MHA"),
+            "expected actionable unsupported-model examples, got: {err}"
+        );
     }
 }

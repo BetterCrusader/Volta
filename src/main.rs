@@ -23,7 +23,7 @@ const USAGE: &str = "Usage:
   volta extract <model_name>
   volta export-py <file.vt>
   volta compile <file.vt> [-o <output>]
-  volta compile-train <file.vt> [-o <output.dll>]
+  volta compile-train <file.vt> [-o <output.dll>] [--rust]   (MLP-only today)
   volta doctor [--json] [--strict]
   volta init [project_dir]
   volta version
