@@ -980,6 +980,65 @@ struct GpuEnvStatus {
     parse_warning: Option<String>,
 }
 
+/// Inner testable version of MKL detection. Accepts injected env values and lib name.
+/// Returns Some(resolved_lib_path) if MKL file exists, None otherwise.
+fn check_mkl_from(
+    mkl_lib_dir: Option<&str>,
+    mklroot: Option<&str>,
+    conda_prefix: Option<&str>,
+    mkl_lib: &str,
+) -> Option<String> {
+    let has_mkl = |p: &str| std::path::Path::new(p).join(mkl_lib).exists();
+
+    if let Some(dir) = mkl_lib_dir {
+        let dir = dir.replace('\\', "/");
+        if has_mkl(&dir) {
+            return Some(dir);
+        }
+    }
+    if let Some(root) = mklroot {
+        let p = format!("{}/lib", root.replace('\\', "/"));
+        if has_mkl(&p) {
+            return Some(p);
+        }
+    }
+    if let Some(conda) = conda_prefix {
+        let p = format!("{}/Library/lib", conda.replace('\\', "/"));
+        if has_mkl(&p) {
+            return Some(p);
+        }
+    }
+    None
+}
+
+/// Returns Some(resolved_lib_path) if MKL is reachable, None otherwise.
+/// Checks file existence (mkl_rt.lib / libmkl_rt.so) — not just env var presence.
+fn check_mkl_available() -> Option<String> {
+    let mkl_lib = if cfg!(windows) { "mkl_rt.lib" } else { "libmkl_rt.so" };
+    check_mkl_from(
+        std::env::var("MKL_LIB_DIR").ok().as_deref(),
+        std::env::var("MKLROOT").ok().as_deref(),
+        std::env::var("CONDA_PREFIX").ok().as_deref(),
+        mkl_lib,
+    )
+}
+
+/// Returns Some(description) if LLVM is reachable, None otherwise.
+fn check_llvm_available() -> Option<String> {
+    if let Ok(prefix) = std::env::var("LLVM_SYS_210_PREFIX") {
+        return Some(format!("via LLVM_SYS_210_PREFIX={prefix}"));
+    }
+    let result = std::process::Command::new("clang").arg("--version").output();
+    if let Ok(out) = result {
+        if out.status.success() {
+            let ver = String::from_utf8_lossy(&out.stdout);
+            let first_line = ver.lines().next().unwrap_or("clang").to_string();
+            return Some(format!("clang in PATH: {first_line}"));
+        }
+    }
+    None
+}
+
 fn parse_gpu_env_status() -> GpuEnvStatus {
     let raw = std::env::var("VOLTA_GPU_AVAILABLE").ok();
     let Some(value) = raw.clone() else {
@@ -1410,5 +1469,87 @@ mod tests {
     fn json_escape_escapes_quotes_and_backslashes() {
         let escaped = super::json_escape("a\"b\\c");
         assert_eq!(escaped, "a\\\"b\\\\c");
+    }
+
+    #[test]
+    fn check_mkl_from_returns_none_when_no_vars() {
+        let result = super::check_mkl_from(None, None, None, "mkl_rt.lib");
+        assert!(result.is_none(), "expected None when no env vars provided");
+    }
+
+    #[test]
+    fn check_mkl_from_returns_none_when_dir_does_not_contain_lib() {
+        // Use a temp dir that exists but has no mkl_rt.lib in it
+        let tmp = std::env::temp_dir();
+        let tmp_str = tmp.to_string_lossy();
+        let result = super::check_mkl_from(
+            Some(tmp_str.as_ref()),
+            None,
+            None,
+            "mkl_rt_nonexistent_sentinel_2847.lib",
+        );
+        assert!(result.is_none(), "expected None when file not present in dir");
+    }
+
+    #[test]
+    fn check_mkl_from_returns_some_when_mkl_lib_dir_has_file() {
+        use std::fs;
+        let tmp = std::env::temp_dir().join("volta_mkl_test_dir");
+        let _ = fs::create_dir_all(&tmp);
+        let lib_file = tmp.join("mkl_rt_test.lib");
+        let _ = fs::write(&lib_file, b"stub");
+        let tmp_str = tmp.to_string_lossy().replace('\\', "/");
+        let result = super::check_mkl_from(Some(&tmp_str), None, None, "mkl_rt_test.lib");
+        // Cleanup
+        let _ = fs::remove_file(&lib_file);
+        let _ = fs::remove_dir(&tmp);
+        assert!(result.is_some(), "expected Some path when file exists in MKL_LIB_DIR");
+    }
+
+    #[test]
+    fn check_mkl_from_returns_some_via_mklroot() {
+        use std::fs;
+        let tmp = std::env::temp_dir().join("volta_mkl_root_test");
+        let lib_dir = tmp.join("lib");
+        let _ = fs::create_dir_all(&lib_dir);
+        let lib_file = lib_dir.join("mkl_rt_root.lib");
+        let _ = fs::write(&lib_file, b"stub");
+        let tmp_str = tmp.to_string_lossy().replace('\\', "/");
+        let result = super::check_mkl_from(None, Some(&tmp_str), None, "mkl_rt_root.lib");
+        // Cleanup
+        let _ = fs::remove_file(&lib_file);
+        let _ = fs::remove_dir(&lib_dir);
+        let _ = fs::remove_dir(&tmp);
+        assert!(result.is_some(), "expected Some path when file exists via MKLROOT/lib");
+    }
+
+    #[test]
+    fn check_mkl_from_mkl_lib_dir_takes_priority_over_mklroot() {
+        use std::fs;
+        // Set up MKL_LIB_DIR with the file and MKLROOT/lib without it
+        let tmp_dir = std::env::temp_dir().join("volta_mkl_prio_dir");
+        let _ = fs::create_dir_all(&tmp_dir);
+        let lib_file = tmp_dir.join("mkl_rt_prio.lib");
+        let _ = fs::write(&lib_file, b"stub");
+        let tmp_root = std::env::temp_dir().join("volta_mkl_prio_root");
+        let _ = fs::create_dir_all(&tmp_root);
+        // MKLROOT/lib doesn't have the file
+        let dir_str = tmp_dir.to_string_lossy().replace('\\', "/");
+        let root_str = tmp_root.to_string_lossy().replace('\\', "/");
+        let result = super::check_mkl_from(
+            Some(&dir_str),
+            Some(&root_str),
+            None,
+            "mkl_rt_prio.lib",
+        );
+        // Cleanup
+        let _ = fs::remove_file(&lib_file);
+        let _ = fs::remove_dir(&tmp_dir);
+        let _ = fs::remove_dir(&tmp_root);
+        assert_eq!(
+            result.as_deref(),
+            Some(dir_str.as_str()),
+            "MKL_LIB_DIR should take priority"
+        );
     }
 }
